@@ -2,19 +2,24 @@ package discovery
 
 import (
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/luikyv/go-oidc/internal/oidc"
 	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 func RegisterHandlers(router *http.ServeMux, config *oidc.Configuration, middlewares ...goidc.MiddlewareFunc) {
-	router.Handle("GET "+config.WellKnownEndpoint, goidc.ApplyMiddlewares(oidc.Handler(config, handleWellKnown), middlewares...))
+	issuer, _ := url.Parse(config.Host)
+	router.Handle("GET /.well-known/openid-configuration"+strings.TrimSuffix(issuer.Path, "/"),
+		goidc.ApplyMiddlewares(oidc.Handler(config, handleWellKnown), middlewares...))
 
-	router.Handle("GET "+config.EndpointPrefix+config.JWKSEndpoint, goidc.ApplyMiddlewares(oidc.Handler(config, handleJWKS), middlewares...))
+	router.Handle("GET "+config.EndpointPrefix+config.JWKSEndpoint,
+		goidc.ApplyMiddlewares(oidc.Handler(config, handleJWKS), middlewares...))
 }
 
 func handleWellKnown(ctx oidc.Context) {
-	openidConfig := NewOpenIDConfiguration(ctx)
+	openidConfig := NewConfiguration(ctx)
 	if err := ctx.Write(openidConfig, http.StatusOK); err != nil {
 		ctx.WriteError(err)
 	}

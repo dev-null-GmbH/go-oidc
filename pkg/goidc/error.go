@@ -17,34 +17,38 @@ var ErrNotFound = errors.New("not found")
 type ErrorCode string
 
 const (
-	ErrorCodeAccessDenied           ErrorCode = "access_denied"
-	ErrorCodeInvalidClient          ErrorCode = "invalid_client"
-	ErrorCodeInvalidGrant           ErrorCode = "invalid_grant"
-	ErrorCodeInvalidRequest         ErrorCode = "invalid_request"
-	ErrorCodeUnauthorizedClient     ErrorCode = "unauthorized_client"
-	ErrorCodeInvalidScope           ErrorCode = "invalid_scope"
-	ErrorCodeInvalidAuthDetails     ErrorCode = "invalid_authorization_details"
-	ErrorCodeUnsupportedGrantType   ErrorCode = "unsupported_grant_type"
-	ErrorCodeInvalidRequestObject   ErrorCode = "invalid_request_object"
-	ErrorCodeInvalidToken           ErrorCode = "invalid_token"
-	ErrorCodeInternalError          ErrorCode = "internal_error"
-	ErrorCodeInvalidTarget          ErrorCode = "invalid_target"
-	ErrorCodeInvalidRedirectURI     ErrorCode = "invalid_redirect_uri"
-	ErrorCodeInvalidClientMetadata  ErrorCode = "invalid_client_metadata"
-	ErrorCodeRequestURINotSupported ErrorCode = "request_uri_not_supported"
-	ErrorCodeLoginRequired          ErrorCode = "login_required"
-	ErrorCodeAuthPending            ErrorCode = "authorization_pending"
-	ErrorCodeSlowDown               ErrorCode = "slow_down"
-	ErrorCodeExpiredToken           ErrorCode = "expired_token"
-	ErrorCodeMissingUserCode        ErrorCode = "missing_user_code"
-	ErrorCodeInvalidUserCode        ErrorCode = "invalid_user_code"
-	ErrorCodeInvalidBindingMessage  ErrorCode = "invalid_binding_message"
-	ErrorCodeUnknownUserID          ErrorCode = "unknown_user_id"
-	ErrorCodeTransactionFailed      ErrorCode = "transaction_failed"
-	ErrorCodeExpiredLoginHintToken  ErrorCode = "expired_login_hint_token"
-	ErrorCodeInvalidTrustAnchor     ErrorCode = "invalid_trust_anchor"
-	ErrorCodeInvalidTrustChain      ErrorCode = "invalid_trust_chain"
-	ErrorCodeInvalidMetadata        ErrorCode = "invalid_metadata"
+	ErrorCodeAccessDenied             ErrorCode = "access_denied"
+	ErrorCodeInvalidClient            ErrorCode = "invalid_client"
+	ErrorCodeInvalidGrant             ErrorCode = "invalid_grant"
+	ErrorCodeInvalidRequest           ErrorCode = "invalid_request"
+	ErrorCodeInvalidCredentialRequest ErrorCode = "invalid_credential_request" //nolint:gosec
+	ErrorCodeUnauthorizedClient       ErrorCode = "unauthorized_client"
+	ErrorCodeInvalidScope             ErrorCode = "invalid_scope"
+	ErrorCodeInvalidAuthDetails       ErrorCode = "invalid_authorization_details"
+	ErrorCodeUnsupportedGrantType     ErrorCode = "unsupported_grant_type"
+	ErrorCodeInvalidRequestObject     ErrorCode = "invalid_request_object"
+	ErrorCodeInvalidToken             ErrorCode = "invalid_token"
+	ErrorCodeInternalError            ErrorCode = "internal_error"
+	ErrorCodeInvalidTarget            ErrorCode = "invalid_target"
+	ErrorCodeInvalidRedirectURI       ErrorCode = "invalid_redirect_uri"
+	ErrorCodeInvalidClientMetadata    ErrorCode = "invalid_client_metadata"
+	ErrorCodeRequestURINotSupported   ErrorCode = "request_uri_not_supported"
+	ErrorCodeLoginRequired            ErrorCode = "login_required"
+	ErrorCodeAuthPending              ErrorCode = "authorization_pending"
+	ErrorCodeSlowDown                 ErrorCode = "slow_down"
+	ErrorCodeExpiredToken             ErrorCode = "expired_token"
+	ErrorCodeMissingUserCode          ErrorCode = "missing_user_code"
+	ErrorCodeInvalidUserCode          ErrorCode = "invalid_user_code"
+	ErrorCodeInvalidBindingMessage    ErrorCode = "invalid_binding_message"
+	ErrorCodeUnknownUserID            ErrorCode = "unknown_user_id"
+	ErrorCodeTransactionFailed        ErrorCode = "transaction_failed"
+	ErrorCodeExpiredLoginHintToken    ErrorCode = "expired_login_hint_token"
+	ErrorCodeInvalidTrustAnchor       ErrorCode = "invalid_trust_anchor"
+	ErrorCodeInvalidTrustChain        ErrorCode = "invalid_trust_chain"
+	ErrorCodeInvalidMetadata          ErrorCode = "invalid_metadata"
+	// ErrorCodeInvalidTransactionID signals that the transaction_id used to
+	// poll the deferred credential endpoint is invalid. See [OIDC4VCI §9.3].
+	ErrorCodeInvalidTransactionID ErrorCode = "invalid_transaction_id"
 )
 
 func (c ErrorCode) StatusCode() int {
@@ -75,10 +79,20 @@ func NewError(code ErrorCode, desc string) Error {
 	}
 }
 
+// Errorf returns an OAuth error with a formatted public description.
+// Do not use %w with Errorf, use [WrapError] to preserve an underlying error.
 func Errorf(code ErrorCode, format string, args ...any) Error {
 	return Error{
 		Code:        code,
 		Description: fmt.Sprintf(format, args...),
+	}
+}
+
+func WrapError(code ErrorCode, desc string, err error) Error {
+	return Error{
+		Code:        code,
+		Description: desc,
+		wrapped:     err,
 	}
 }
 
@@ -110,12 +124,4 @@ func (err Error) StatusCode() int {
 
 func (err Error) Unwrap() error {
 	return err.wrapped
-}
-
-func WrapError(code ErrorCode, desc string, err error) Error {
-	return Error{
-		Code:        code,
-		Description: desc,
-		wrapped:     err,
-	}
 }

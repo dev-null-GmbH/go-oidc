@@ -11,7 +11,7 @@ type Grant struct {
 	RevokedAt int    `json:"revoked_at,omitempty"`
 	Subject   string `json:"sub"`
 	ClientID  string `json:"client_id"`
-	// [RFC 7662 §2.2] Username is a human-readable identifier for the resource owner.
+	// Username is a human-readable identifier for the resource owner. See [RFC 7662 §2.2].
 	Username    string       `json:"username,omitempty"`
 	Scopes      string       `json:"scopes,omitempty"`
 	AuthDetails []AuthDetail `json:"auth_details,omitempty"`
@@ -23,8 +23,11 @@ type Grant struct {
 	// RefreshTokenExpiresAt stores the expiry deadline of the refresh token
 	// issued for this grant.
 	// A value of 0 means the refresh token does not expire.
-	RefreshTokenExpiresAt int                     `json:"refresh_token_expires_at,omitempty"`
-	AuthParams            AuthorizationParameters `json:"auth_params,omitzero"`
+	RefreshTokenExpiresAt int `json:"refresh_token_expires_at,omitempty"`
+	// AuthParams stores the authorization request parameters that must remain
+	// available after the grant is created, such as nonce, redirect URI, PKCE,
+	// prompt, and resource values used during token issuance and validation.
+	AuthParams AuthorizationParameters `json:"auth_params,omitzero"`
 	// AuthCode is populated when the grant is issued from the authorization
 	// code flow. It is the code later redeemed at the token endpoint.
 	AuthCode string `json:"auth_code,omitempty"`
@@ -37,6 +40,16 @@ type Grant struct {
 	AuthCodeConsumedAt int `json:"auth_code_consumed_at,omitempty"`
 	// PreAuthCode is populated for pre-authorized code flows.
 	PreAuthCode string `json:"pre_auth_code,omitempty"`
+	// PreAuthCodeExpiresAt stores the original pre auth code expiry deadline,
+	// so redemption remains bounded by that window independently of grant
+	// creation time.
+	PreAuthCodeExpiresAt int `json:"pre_auth_code_expires_at,omitempty"`
+	// PreAuthCodeConsumedAt is populated once the pre auth code has been
+	// successfully redeemed, so reuse can be detected.
+	PreAuthCodeConsumedAt int `json:"pre_auth_code_consumed_at,omitempty"`
+	// TransactionCode is the additional code required to redeem the
+	// pre-authorized code.
+	TransactionCode string `json:"transaction_code,omitempty"`
 	// AuthReqID is populated when a CIBA request is approved and turned into a
 	// grant.
 	AuthReqID string `json:"auth_req_id,omitempty"`
@@ -61,6 +74,8 @@ type Grant struct {
 	JWKThumbprint string `json:"jwk_thumbprint,omitempty"`
 	// CertThumbprint contains the thumbprint of the certificate used to generate the token.
 	CertThumbprint string `json:"cert_thumbprint,omitempty"`
+	// Actor represents the acting party in delegation scenarios. See [RFC 8693 §4.1].
+	Actor *Actor `json:"act,omitempty"`
 	// Store allows storing custom data within the grant.
 	Store map[string]any `json:"store,omitempty"`
 }

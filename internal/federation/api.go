@@ -5,17 +5,21 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
+	"strings"
 
 	"github.com/luikyv/go-oidc/internal/oidc"
 	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 func RegisterHandlers(router *http.ServeMux, config *oidc.Configuration, middlewares ...goidc.MiddlewareFunc) {
-	if !config.OpenIDFedIsEnabled {
+	if !config.OpenIDFedEnabled {
 		return
 	}
-	router.Handle("GET "+config.EndpointPrefix+config.OpenIDFedEndpoint,
+
+	issuer, _ := url.Parse(config.Host)
+	router.Handle("GET"+strings.TrimSuffix(issuer.Path, "/")+" /.well-known/openid-federation",
 		goidc.ApplyMiddlewares(oidc.Handler(config, handleFetchStatement), middlewares...))
 
 	if slices.Contains(config.OpenIDFedClientRegTypes, goidc.ClientRegistrationTypeExplicit) {

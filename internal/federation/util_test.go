@@ -509,7 +509,7 @@ func setUpWithChain(t *testing.T, overrideResps map[string]func() *http.Response
 	t.Helper()
 
 	ctx := setup(t, overrideResps)
-	_, chain, err := buildAndResolveTrustChain(ctx, clientID)
+	_, chain, err := resolve(ctx, clientID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -699,16 +699,15 @@ func setup(t *testing.T, overrideResps map[string]func() *http.Response) oidc.Co
 	maps.Copy(responses, overrideResps)
 
 	ctx := oidctest.NewContext(t)
-	ctx.OpenIDFedIsEnabled = true
+	ctx.OpenIDFedEnabled = true
 	ctx.OpenIDFedManager = ctx.GrantManager.(goidc.OpenIDFedManager)
-	ctx.OpenIDFedEndpoint = "/.well-known/openid-federation"
 	ctx.OpenIDFedJWKSFunc = func(ctx context.Context) (goidc.JSONWebKeySet, error) {
 		return goidc.JSONWebKeySet{Keys: []goidc.JSONWebKey{opJWK}}, nil
 	}
 	ctx.OpenIDFedAuthorityHints = []string{trustAnchorID}
 	ctx.OpenIDFedTrustedAnchors = []string{trustAnchorID}
 	ctx.OpenIDFedSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
-	ctx.OpenIDFedDefaultSigAlg = goidc.RS256
+	ctx.OpenIDFedSigAlg = goidc.RS256
 	ctx.OpenIDFedTrustChainMaxDepth = 5
 	ctx.OpenIDFedClientRegTypes = []goidc.ClientRegistrationType{goidc.ClientRegistrationTypeAutomatic, goidc.ClientRegistrationTypeExplicit}
 	ctx.HTTPClientFunc = func(ctx context.Context) *http.Client {
@@ -1690,7 +1689,7 @@ func TestFetchSubordinateStatement(t *testing.T) {
 				return setup(t, nil), entityStatement{
 					Issuer: intermediaryAuthorityID,
 					Metadata: metadata{
-						FederationAuthority: &federationAuthority{
+						FederationAuthority: &goidc.FederationAuthority{
 							FetchEndpoint: "://invalid-url",
 						},
 					},
@@ -1728,7 +1727,7 @@ func TestFetchSubordinateStatement(t *testing.T) {
 					Issuer: intermediaryAuthorityID,
 					JWKS:   goidc.JSONWebKeySet{Keys: []goidc.JSONWebKey{intermediaryAuthorityJWK.Public()}},
 					Metadata: metadata{
-						FederationAuthority: &federationAuthority{
+						FederationAuthority: &goidc.FederationAuthority{
 							FetchEndpoint:                     intermediaryAuthorityID + "/fetch",
 							FetchEndpointAuthMethods:          []goidc.AuthnMethod{goidc.AuthnMethodPrivateKeyJWT},
 							EndpointAuthSigAlgValuesSupported: []goidc.SignatureAlgorithm{goidc.RS256},
@@ -2186,7 +2185,7 @@ func TestPrivateKeyJWTRequest(t *testing.T) {
 	authority := entityStatement{
 		Issuer: trustAnchorID,
 		Metadata: metadata{
-			FederationAuthority: &federationAuthority{
+			FederationAuthority: &goidc.FederationAuthority{
 				EndpointAuthSigAlgValuesSupported: []goidc.SignatureAlgorithm{goidc.RS256},
 			},
 		},
@@ -2537,7 +2536,7 @@ func TestFetchSubordinateStatement_WithPrivateKeyJWT(t *testing.T) {
 		Issuer: intermediaryAuthorityID,
 		JWKS:   goidc.JSONWebKeySet{Keys: []goidc.JSONWebKey{intermediaryAuthorityJWK.Public()}},
 		Metadata: metadata{
-			FederationAuthority: &federationAuthority{
+			FederationAuthority: &goidc.FederationAuthority{
 				FetchEndpoint:                     intermediaryAuthorityID + "/fetch",
 				FetchEndpointAuthMethods:          []goidc.AuthnMethod{goidc.AuthnMethodPrivateKeyJWT},
 				EndpointAuthSigAlgValuesSupported: []goidc.SignatureAlgorithm{goidc.RS256},

@@ -37,7 +37,7 @@ func redirectError(ctx oidc.Context, err error, c *goidc.Client) error {
 }
 
 func redirectResponse(ctx oidc.Context, c *goidc.Client, params goidc.AuthorizationParameters, redirectParams response) error {
-	if ctx.IssuerRespParamIsEnabled {
+	if ctx.IssuerRespParamEnabled {
 		redirectParams.issuer = ctx.Issuer()
 	}
 
@@ -108,7 +108,7 @@ func createJARMResponse(ctx oidc.Context, c *goidc.Client, redirectParams respon
 		return "", fmt.Errorf("could not sign the response object: %w", err)
 	}
 
-	if !ctx.JARMEncIsEnabled || c.JARMKeyEncAlg == "" || !slices.Contains(ctx.JARMKeyEncAlgs, c.JARMKeyEncAlg) {
+	if !ctx.JARMEncEnabled || c.JARMKeyEncAlg == "" || !slices.Contains(ctx.JARMKeyEncAlgs, c.JARMKeyEncAlg) {
 		return responseJWT, nil
 	}
 
@@ -118,11 +118,11 @@ func createJARMResponse(ctx oidc.Context, c *goidc.Client, redirectParams respon
 			"could not fetch the client encryption jwk for jarm", err)
 	}
 
-	contentEncAlg := ctx.JARMContentEncAlgDefault
+	contentEncAlg := ctx.JARMContentEncAlgs[0]
 	if slices.Contains(ctx.JARMContentEncAlgs, c.JARMContentEncAlg) && c.JARMContentEncAlg != "" {
 		contentEncAlg = c.JARMContentEncAlg
 	}
-	responseJWE, err := joseutil.Encrypt(responseJWT, jwk, contentEncAlg)
+	responseJWE, err := joseutil.Encrypt(responseJWT, jwk, contentEncAlg, nil)
 	if err != nil {
 		return "", fmt.Errorf("could not encrypt the response object: %w", err)
 	}

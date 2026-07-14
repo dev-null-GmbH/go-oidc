@@ -78,7 +78,7 @@ func handleUserInfoRequest(ctx oidc.Context) (response, error) {
 	}
 
 	// If the client doesn't require the user info to be encrypted, just return the claims as a signed JWT.
-	if !ctx.UserInfoEncIsEnabled || c.UserInfoKeyEncAlg == "" {
+	if !ctx.UserInfoEncEnabled || c.UserInfoKeyEncAlg == "" {
 		return response{
 			jwtClaims: claimsJWS,
 		}, nil
@@ -89,12 +89,12 @@ func handleUserInfoRequest(ctx oidc.Context) (response, error) {
 		return response{}, fmt.Errorf("could not resolve an encryption key for the user info response: %w", err)
 	}
 
-	contentEncAlg := ctx.UserInfoDefaultContentEncAlg
+	contentEncAlg := ctx.UserInfoContentEncAlgs[0]
 	if c.UserInfoContentEncAlg != "" && slices.Contains(ctx.UserInfoContentEncAlgs, c.UserInfoContentEncAlg) {
 		contentEncAlg = c.UserInfoContentEncAlg
 	}
 
-	claimsJWE, err := joseutil.Encrypt(claimsJWS, jwk, contentEncAlg)
+	claimsJWE, err := joseutil.Encrypt(claimsJWS, jwk, contentEncAlg, nil)
 	if err != nil {
 		return response{}, fmt.Errorf("could not encrypt the user info response: %w", err)
 	}

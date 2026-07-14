@@ -182,19 +182,10 @@ func NewContext(tb testing.TB) oidc.Context {
 		CIBAHandleSessionFunc: func(context.Context, *goidc.AuthnSession, *goidc.Client) error {
 			return errors.New("ciba init back auth function is not set")
 		},
-		SSFScheduleVerificationEventFunc: func(context.Context, string, goidc.SSFStreamVerificationOptions) error {
-			return errors.New("schedule verification event function is not set")
-		},
-		SSFHandleExpiredEventStreamFunc: func(context.Context, *goidc.SSFEventStream) error {
-			return nil
-		},
-		VCHandlePreAuthCodeFunc: func(context.Context, string, goidc.VCPreAuthCodeOptions) (goidc.VCPreAuthCodeResult, error) {
+		VCIExternalPreAuthCodeHandleFunc: func(context.Context, string, goidc.VCPreAuthCodeOptions) (goidc.VCPreAuthCodeResult, error) {
 			return goidc.VCPreAuthCodeResult{}, errors.New("vc pre-authorized code handler is not set")
 		},
-		VCOfferIDFunc: func(context.Context) string {
-			return uuid.NewString()
-		},
-		VCIssuerStateFunc: func(context.Context) string {
+		VCISelfOfferIDFunc: func(context.Context) string {
 			return uuid.NewString()
 		},
 		AuthTimeoutSecs: 60,
@@ -211,7 +202,6 @@ func NewContext(tb testing.TB) oidc.Context {
 		UserInfoSigAlgs:            []goidc.SignatureAlgorithm{goidc.SignatureAlgorithm(jwk.Algorithm)},
 		IDTokenDefaultSigAlg:       goidc.SignatureAlgorithm(jwk.Algorithm),
 		IDTokenSigAlgs:             []goidc.SignatureAlgorithm{goidc.SignatureAlgorithm(jwk.Algorithm)},
-		WellKnownEndpoint:          "/.well-known/openid-configuration",
 		JWKSEndpoint:               "/jwks",
 		TokenEndpoint:              "/token",
 		AuthorizationEndpoint:      "/authorize",

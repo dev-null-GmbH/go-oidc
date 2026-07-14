@@ -34,7 +34,7 @@ func Issue(ctx oidc.Context, grant *goidc.Grant, c *goidc.Client, opts *Issuance
 		subType = c.SubIdentifierType
 	}
 
-	if !ctx.OpaqueTokenIsEnabled && tknOpts.Format == goidc.TokenFormatOpaque {
+	if !ctx.OpaqueTokenEnabled && tknOpts.Format == goidc.TokenFormatOpaque {
 		return nil, "", errors.New("opaque tokens are not enabled")
 	}
 
@@ -48,6 +48,7 @@ func Issue(ctx oidc.Context, grant *goidc.Grant, c *goidc.Client, opts *Issuance
 		Resources:      grant.Resources,
 		JWKThumbprint:  grant.JWKThumbprint,
 		CertThumbprint: grant.CertThumbprint,
+		Actor:          grant.Actor,
 		CreatedAt:      now,
 		ExpiresAt:      now + tknOpts.LifetimeSecs,
 		Format:         tknOpts.Format,
@@ -61,10 +62,10 @@ func Issue(ctx oidc.Context, grant *goidc.Grant, c *goidc.Client, opts *Issuance
 	if opts.Scopes != "" {
 		tkn.Scopes = opts.Scopes
 	}
-	if ctx.RARIsEnabled && opts.AuthDetails != nil {
+	if ctx.RAREnabled && opts.AuthDetails != nil {
 		tkn.AuthDetails = opts.AuthDetails
 	}
-	if ctx.ResourceIndicatorsIsEnabled && opts.Resources != nil {
+	if ctx.ResourceIndicatorsEnabled && opts.Resources != nil {
 		tkn.Resources = opts.Resources
 	}
 
@@ -101,6 +102,10 @@ func Issue(ctx oidc.Context, grant *goidc.Grant, c *goidc.Client, opts *Issuance
 
 		if tkn.Resources != nil {
 			claims[goidc.ClaimAudience] = tkn.Resources
+		}
+
+		if tkn.Actor != nil {
+			claims[goidc.ClaimAct] = tkn.Actor
 		}
 
 		confirmation := make(map[string]string)
@@ -199,7 +204,7 @@ func MakeIDToken(ctx oidc.Context, c *goidc.Client, opts IDTokenOptions) (string
 	}
 
 	// If encryption is disabled, just return the signed ID token.
-	if !ctx.IDTokenEncIsEnabled || c.IDTokenKeyEncAlg == "" {
+	if !ctx.IDTokenEncEnabled || c.IDTokenKeyEncAlg == "" {
 		return idToken, nil
 	}
 
@@ -208,12 +213,12 @@ func MakeIDToken(ctx oidc.Context, c *goidc.Client, opts IDTokenOptions) (string
 		return "", fmt.Errorf("could not resolve an encryption key for the id token: %w", err)
 	}
 
-	contentEncAlg := ctx.IDTokenDefaultContentEncAlg
+	contentEncAlg := ctx.IDTokenContentEncAlgs[0]
 	if c.IDTokenContentEncAlg != "" && slices.Contains(ctx.IDTokenContentEncAlgs, c.IDTokenContentEncAlg) {
 		contentEncAlg = c.IDTokenContentEncAlg
 	}
 
-	encIDToken, err := joseutil.Encrypt(idToken, jwk, contentEncAlg)
+	encIDToken, err := joseutil.Encrypt(idToken, jwk, contentEncAlg, nil)
 	if err != nil {
 		return "", fmt.Errorf("could not encrypt the id token: %w", err)
 	}

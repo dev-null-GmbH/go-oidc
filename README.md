@@ -36,9 +36,10 @@ A configurable OpenID Connect Provider for Go.
 * [OpenID Federation 1.1](https://openid.net/specs/openid-federation-1_1.html)
 * [OpenID Federation for OpenID Connect 1.1](https://openid.net/specs/openid-federation-connect-1_1.html)
 * [OpenID Connect RP-Initiated Logout 1.0](https://openid.net/specs/openid-connect-rpinitiated-1_0.html)
-* [OpenID Shared Signals Framework Specification 1.0](https://openid.net/specs/openid-sharedsignals-framework-1_0.html)
+
 * [OpenID Connect Relying Party Metadata Choices 1.0](https://openid.net/specs/openid-connect-rp-metadata-choices-1_0-final.html)
 * [OAuth 2.0 Form Post Response Mode](https://openid.net/specs/oauth-v2-form-post-response-mode-1_0.html)
+* [OpenID for Verifiable Credential Issuance 1.0](https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html)
 
 ### Drafts
 
@@ -106,15 +107,15 @@ Verify the setup at http://localhost/.well-known/openid-configuration.
 - [Scopes](#scopes)
 - [Dynamic Client Registration](#dynamic-client-registration-dcr)
 - [RP Metadata Choices](#rp-metadata-choices)
-- [DPoP](#dpop)
+- [Demonstrating Proof of Possession (DPoP)](#demonstrating-proof-of-possession-dpop)
 - [Mutual TLS](#mutual-tls-mtls)
 - [JWT-Secured Authorization Requests (JAR)](#jwt-secured-authorization-request-jar)
 - [JWT-Secured Authorization Response Mode (JARM)](#jwt-secured-authorization-response-mode-jarm)
 - [Rich Authorization Requests (RAR)](#rich-authorization-requests)
 - [Resource Indicators](#resource-indicators)
 - [OpenID Federation](#openid-federation)
-- [Shared Signals Framework](#shared-signals-framework-ssf)
 - [Form Post Response Mode](#form-post-response-mode)
+- [Developer Notes](#developer-notes)
 
 ## Running the Provider
 
@@ -332,15 +333,15 @@ reuses an existing one.
 
 By default, the same refresh token remains associated with the grant. To rotate
 refresh tokens on each use, add
-`provider.WithRefreshTokenRotation()`.
+`provider.RefreshTokenRotation()`.
 
 You can also customize the refresh token lifetime with
-`provider.WithRefreshTokenLifetime(...)`.
+`provider.RefreshTokenLifetime(...)`.
 
-If `provider.WithRefreshTokenLifetime(...)` is not configured, refresh tokens
+If `provider.RefreshTokenLifetime(...)` is not configured, refresh tokens
 do not expire.
 
-Passing `provider.WithRefreshTokenLifetime(0)` also makes refresh tokens
+Passing `provider.RefreshTokenLifetime(0)` also makes refresh tokens
 non-expiring. In that case, `goidc.Grant.RefreshTokenExpiresAt` remains `0`.
 
 When refresh token rotation is enabled, the rotated refresh token follows the
@@ -413,9 +414,11 @@ op, _ := provider.New(
   jwksFunc,
   provider.WithCIBAGrant(
     manager,
-    goidc.CIBADeliveryModePoll,
-    goidc.CIBADeliveryModePing,
-    goidc.CIBADeliveryModePush,
+    []goidc.CIBATokenDeliveryMode{
+      goidc.CIBADeliveryModePoll,
+      goidc.CIBADeliveryModePing,
+      goidc.CIBADeliveryModePush,
+    },
   ),
 )
 ```
@@ -521,7 +524,7 @@ tokens.
 ## [Pushed Authorization Requests (PAR)](https://www.rfc-editor.org/rfc/rfc9126.html)
 
 PAR is enabled with `provider.WithPAR(manager)` and can be made mandatory with
-`provider.WithPARRequired(manager)`.
+`provider.PARRequired()`.
 
 ```go
 op, _ := provider.New(
@@ -552,7 +555,7 @@ persisted:
 If JAR is also enabled, the pushed request may carry the request object and the
 stored session will reflect the validated JAR content.
 
-The PAR endpoint lifetime can be customized with `provider.WithPARLifetime(...)`.
+The PAR endpoint lifetime can be customized with `provider.PARLifetime(...)`.
 
 ## Authentication Policies
 
@@ -919,23 +922,23 @@ Important: enabling `provider.WithDCR(manager)` by itself means client creation 
 to any caller that can reach the registration endpoint.
 
 Production deployments should usually add
-`provider.WithDCRInitialTokenValidator`
+`provider.DCRInitialTokenValidator`
 (`goidc.DCRValidateInitialTokenFunc`) to require and validate an initial access
 token during registration.
 
-Use `provider.WithDCRClientHandler` to implement your registration policy
+Use `provider.DCRClientHandler` to implement your registration policy
 during create and update requests, such as metadata validation, allow/deny
 rules, or applying default values.
 
 By default, the DCR endpoint is `/register` and the management endpoint is `/register/{client_id}`.
 
-To rotate the registration access token on each successful read or update request, add `provider.WithDCRTokenRotation()`.
+To rotate the registration access token on each successful read or update request, add `provider.DCRTokenRotation()`.
 
 To rotate client secrets on each successful read or update request for
-secret-based clients, add `provider.WithDCRSecretRotation()`.
+secret-based clients, add `provider.DCRSecretRotation()`.
 
 To set a client secret lifetime in seconds for dynamically registered
-secret-based clients, add `provider.WithDCRSecretLifetime(...)`.
+secret-based clients, add `provider.DCRSecretLifetime(...)`.
 Use `0` to indicate that the issued client secret does not expire.
 
 ## [RP Metadata Choices](https://openid.net/specs/openid-connect-rp-metadata-choices-1_0-final.html)
@@ -972,15 +975,15 @@ The server selects the first value from the list it supports and returns the res
 
 If the client also provides the singular field, it must be present in the priority list.
 
-## [DPoP](https://www.rfc-editor.org/rfc/rfc9449.html)
+## [Demonstrating Proof of Possession (DPoP)](https://www.rfc-editor.org/rfc/rfc9449.html)
 
 DPoP is enabled with `provider.WithDPoP(...)` and can be made mandatory with
-`provider.WithDPoPRequired(...)`.
+`provider.DPoPRequired()`.
 
 ```go
 op, _ := provider.New(
   ...,
-  provider.WithDPoP(goidc.ES256),
+  provider.WithDPoP([]goidc.SignatureAlgorithm{goidc.ES256}),
   ...,
 )
 ```
@@ -1033,34 +1036,28 @@ JAR allows clients to send authorization requests as signed (and optionally encr
 ```go
 op, _ := provider.New(
   ...,
-  provider.WithJAR(goidc.RS256, goidc.PS256),
+  provider.WithJAR(
+    []goidc.SignatureAlgorithm{goidc.RS256, goidc.PS256},
+    provider.JAREncryption(goidc.RSA_OAEP_256),
+  ),
   ...,
 )
 ```
 
-This adds the following to the discovery response:
-```json
-{
-  "request_parameter_supported": true,
-  "request_object_signing_alg_values_supported": ["RS256", "PS256"]
-}
-```
-
-To enable encryption:
-```go
-provider.WithJAREncryption(goidc.RSA_OAEP_256)
-```
-
-To customize content encryption algorithms, use `provider.WithJARContentEncryptionAlgs`.
+Encryption and content encryption algorithms can be configured via `provider.JAREncryption` and `provider.JARContentEncryptionAlgs`.
 
 ## [JWT-Secured Authorization Response Mode (JARM)](https://openid.net/specs/oauth-v2-jarm.html)
 
 JARM returns authorization responses as signed (and optionally encrypted)
 JWTs, adding the response modes `jwt`, `query.jwt`, and `fragment.jwt`.
+The first algorithm is used as the default.
 ```go
 op, _ := provider.New(
   ...,
-  provider.WithJARM(goidc.RS256, goidc.PS256),
+  provider.WithJARM(
+    []goidc.SignatureAlgorithm{goidc.RS256, goidc.PS256},
+    provider.JARMEncryption(goidc.RSA_OAEP_256),
+  ),
   ...,
 )
 ```
@@ -1068,12 +1065,7 @@ op, _ := provider.New(
 If `provider.WithFormPostResponseMode()` is also enabled, JARM adds
 `form_post.jwt` as well.
 
-To enable encryption:
-```go
-provider.WithJARMEncryption(goidc.RSA_OAEP_256)
-```
-
-To customize content encryption algorithms, use `provider.WithJARMContentEncryptionAlgs`.
+Encryption and content encryption algorithms can be configured via `provider.JARMEncryption` and `provider.JARMContentEncryptionAlgs`.
 
 ## [Rich Authorization Requests (RAR)](https://www.rfc-editor.org/rfc/rfc9396.html)
 
@@ -1082,18 +1074,20 @@ RAR allows clients to request fine-grained access using structured `authorizatio
 ```go
 op, _ := provider.New(
   ...,
-  provider.WithRAR("payment_initiation"),
+  provider.WithRAR([]goidc.AuthDetailType{"payment_initiation"}),
   ...,
 )
 ```
 
-When using the `authorization_code` or `refresh_token` grant types, the client may request a subset of the originally granted authorization details. Provide `provider.WithRARDetailsComparator` to enforce consistency between the granted and requested sets:
+When using the `authorization_code` or `refresh_token` grant types, the client may request a subset of the originally granted authorization details. Provide `provider.RARDetailsComparator` to enforce consistency between the granted and requested sets:
 
 ```go
-provider.WithRARDetailsComparator(func(ctx context.Context, requested, granted []goidc.AuthDetail) error {
-  // Verify that every requested detail is consistent with the granted ones.
-  return nil
-})
+provider.WithRAR([]goidc.AuthDetailType{"payment_initiation"},
+  provider.RARDetailsComparator(func(ctx context.Context, requested, granted []goidc.AuthDetail) error {
+    // Verify that every requested detail is consistent with the granted ones.
+    return nil
+  }),
+)
 ```
 
 ## [Resource Indicators](https://datatracker.ietf.org/doc/html/rfc8707)
@@ -1103,10 +1097,10 @@ Resource Indicators are enabled with `provider.WithResourceIndicators(...)`.
 ```go
 op, _ := provider.New(
   ...,
-  provider.WithResourceIndicators(
+  provider.WithResourceIndicators([]string{
     "https://api.example.com",
     "https://ledger.example.com",
-  ),
+  }),
   ...,
 )
 ```
@@ -1124,7 +1118,7 @@ requests, the client may ask for a subset of the originally granted resources.
 The provider rejects resources that were not granted or that are not part of
 the configured allowed list.
 
-Use `provider.WithResourceIndicatorsRequired(...)` if every authorization
+Use `provider.ResourceIndicatorsRequired()` if every authorization
 request must include a `resource` parameter.
 
 ## [OpenID Federation](https://openid.net/specs/openid-federation-1_0.html)
@@ -1139,6 +1133,7 @@ op, _ := provider.New(
     func(_ context.Context) (goidc.JSONWebKeySet, error) {
       return fedJWKS, nil
     },
+    goidc.RS256,
     []string{"https://intermediate.example.com"},
     []string{"https://trust-anchor.example.com"},
   ),
@@ -1148,100 +1143,28 @@ op, _ := provider.New(
 
 The entity configuration is exposed at `GET /.well-known/openid-federation`.
 
-### Client Registration Types
-
-Federated clients can use automatic or explicit registration:
-```go
-provider.WithOpenIDFedClientRegistrationTypes(
-  goidc.ClientRegistrationTypeAutomatic,
-  goidc.ClientRegistrationTypeExplicit,
-)
-```
-
-With **automatic** registration, the provider resolves the trust chain by fetching entity configurations and subordinate statements. With **explicit** registration, the client provides the trust chain directly.
-
-### Trust Marks
-
-Require specific trust marks from clients:
-```go
-provider.WithOpenIDFedRequiredTrustMarks(
-  func(_ context.Context, _ *goidc.Client) []goidc.TrustMark {
-    return []goidc.TrustMark{"https://trust-anchor.example.com/marks/certified"}
-  },
-)
-```
-
-Include trust marks in the provider's entity configuration:
-```go
-provider.WithOpenIDFedTrustMark(
-  "https://trust-anchor.example.com/marks/certified",
-  "https://trust-mark-issuer.example.com",
-)
-```
-
-### Additional Options
+These can be configured via `OpenIDFedOption` values passed to `WithOpenIDFederation`:
 
 ```go
-provider.WithOpenIDFedSignatureAlgs(goidc.RS256, goidc.PS256)
-provider.WithOpenIDFedTrustChainMaxDepth(5)
-provider.WithOpenIDFedOrganizationName("Example Organization")
-provider.WithOpenIDFedHTTPClientFunc(func(_ context.Context) *http.Client {
-  return customHTTPClient
-})
-```
-
-## Shared Signals Framework (SSF)
-
-The [Shared Signals Framework](https://openid.net/specs/openid-sharedsignals-framework-1_0.html) allows the provider to act as an SSF transmitter, publishing Security Event Tokens (SETs) to receivers. go-oidc supports [CAEP](https://openid.net/specs/openid-caep-1_0.html) and [RISC](https://openid.net/specs/openid-risc-profile-specification-1_0.html) event types.
-
-```go
-op, _ := provider.New(
-  ...,
-  provider.WithSSF(
-    func(_ context.Context) (goidc.JSONWebKeySet, error) {
-      return ssfJWKS, nil
-    },
-    func(ctx context.Context) (goidc.SSFReceiver, error) {
-      return goidc.SSFReceiver{ID: "receiver"}, nil
+provider.WithOpenIDFederation(
+  nil, fedJWKSFunc, authorityHints, trustedAnchors,
+  provider.OpenIDFedClientRegistrationTypes(
+    goidc.ClientRegistrationTypeAutomatic,
+    goidc.ClientRegistrationTypeExplicit,
+  ),
+  provider.OpenIDFedSignatureAlgs(goidc.RS256, goidc.PS256),
+  provider.OpenIDFedTrustChainMaxDepth(5),
+  provider.OpenIDFedOrganizationName("Example Organization"),
+  provider.OpenIDFedHTTPClient(func(_ context.Context) *http.Client {
+    return customHTTPClient
+  }),
+  provider.OpenIDFedRequiredClientTrustMarks(
+    func(_ context.Context, _ *goidc.Client) []goidc.TrustMark {
+      return []goidc.TrustMark{"https://trust-anchor.example.com/marks/certified"}
     },
   ),
-  provider.WithSSFEventTypes(goidc.SSFEventTypeCAEPSessionRevoked, goidc.SSFEventTypeCAEPCredentialChange),
-  provider.WithSSFDeliveryMethods(goidc.SSFDeliveryMethodPoll, goidc.SSFDeliveryMethodPush),
-  ...,
 )
 ```
-
-The transmitter configuration is exposed at `GET /.well-known/ssf-configuration`.
-
-Push delivery ([RFC 8935](https://datatracker.ietf.org/doc/html/rfc8935)) sends SETs to a receiver-provided endpoint. Poll delivery ([RFC 8936](https://datatracker.ietf.org/doc/html/rfc8936)) lets receivers fetch pending events from `/ssf/poll`.
-
-To publish events:
-```go
-op.PublishSSFEvent(ctx, streamID, goidc.SSFEvent{
-  Type: goidc.SSFEventTypeCAEPSessionRevoked,
-  Subject: goidc.SSFSubject{
-    Format: goidc.SSFSubjectFormatEmail,
-    Email:  "user@example.com",
-  },
-})
-```
-
-Additional options:
-```go
-// Allow receivers to update stream status (enabled/paused/disabled).
-provider.WithSSFEventStreamStatusManagement()
-// Allow receivers to add/remove subjects from a stream.
-provider.WithSSFEventStreamSubjectManagement()
-// Allow receivers to request verification events.
-provider.WithSSFEventStreamVerification(func(ctx context.Context, streamID string, opts goidc.SSFStreamVerificationOptions) error {
-  // Schedule the verification event for async delivery.
-  return nil
-})
-```
-
-For production, replace the in-memory SSF storage with persistent implementations using `provider.WithSSFEventStreamManager` and `provider.WithSSFEventPollManager`.
-
-For a complete example, see [`examples/ssf`](examples/ssf).
 
 ## [Form Post Response Mode](https://openid.net/specs/oauth-v2-form-post-response-mode-1_0.html)
 
@@ -1266,3 +1189,15 @@ op, _ := provider.New(
 
 Clients can then request `response_mode=form_post` at the authorization
 endpoint.
+
+## Developer Notes
+
+### Updating Configuration
+
+Provider configuration is the source of truth for the provider's current behavior. When configuration changes, new requests and protocol decisions use the updated values. go-oidc does not automatically rewrite persisted state when configuration changes. Applications that store clients, grants, tokens, or other protocol state should decide how existing records are migrated, grandfathered, or rejected.
+
+For example, changing supported signing algorithms requires matching signing keys or signer support. Removing an algorithm or key can affect existing clients or still-active tokens, depending on the application's validation and key retention policy.
+
+### Transactional Operations
+
+## OpenID For Verifiable Credentials Issuance (OIDC4VCI)
