@@ -44,31 +44,31 @@ func TestTokenAuthnSigAlgs(t *testing.T) {
 			ctx: oidc.Context{
 				Configuration: &oidc.Configuration{
 					AuthnMethods:                    []goidc.AuthnMethod{goidc.AuthnMethodPrivateKeyJWT},
-					AuthnMethodPrivateKeyJWTSigAlgs: []goidc.SignatureAlgorithm{goidc.PS256},
+					AuthnMethodPrivateKeyJWTSigAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgPS256},
 				},
 			},
-			want: []goidc.SignatureAlgorithm{goidc.PS256},
+			want: []goidc.SignatureAlgorithm{goidc.SigAlgPS256},
 		},
 		{
 			name: "secret jwt",
 			ctx: oidc.Context{
 				Configuration: &oidc.Configuration{
 					AuthnMethods:                []goidc.AuthnMethod{goidc.AuthnMethodSecretJWT},
-					AuthnMethodSecretJWTSigAlgs: []goidc.SignatureAlgorithm{goidc.HS256},
+					AuthnMethodSecretJWTSigAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgHS256},
 				},
 			},
-			want: []goidc.SignatureAlgorithm{goidc.HS256},
+			want: []goidc.SignatureAlgorithm{goidc.SigAlgHS256},
 		},
 		{
 			name: "both methods",
 			ctx: oidc.Context{
 				Configuration: &oidc.Configuration{
 					AuthnMethods:                    []goidc.AuthnMethod{goidc.AuthnMethodPrivateKeyJWT, goidc.AuthnMethodSecretJWT},
-					AuthnMethodPrivateKeyJWTSigAlgs: []goidc.SignatureAlgorithm{goidc.PS256},
-					AuthnMethodSecretJWTSigAlgs:     []goidc.SignatureAlgorithm{goidc.HS256},
+					AuthnMethodPrivateKeyJWTSigAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgPS256},
+					AuthnMethodSecretJWTSigAlgs:     []goidc.SignatureAlgorithm{goidc.SigAlgHS256},
 				},
 			},
-			want: []goidc.SignatureAlgorithm{goidc.PS256, goidc.HS256},
+			want: []goidc.SignatureAlgorithm{goidc.SigAlgPS256, goidc.SigAlgHS256},
 		},
 	}
 
@@ -320,7 +320,7 @@ func TestSigAlgs(t *testing.T) {
 		t.Fatalf("SigAlgs() error = %v", err)
 	}
 
-	want := []goidc.SignatureAlgorithm{goidc.PS256}
+	want := []goidc.SignatureAlgorithm{goidc.SigAlgPS256}
 	if diff := cmp.Diff(want, algs); diff != "" {
 		t.Fatal(diff)
 	}
@@ -1424,7 +1424,7 @@ func TestOpenIDFedJWKSHelpers(t *testing.T) {
 	ctx.OpenIDFedJWKSFunc = func(context.Context) (goidc.JSONWebKeySet, error) {
 		return goidc.JSONWebKeySet{Keys: []goidc.JSONWebKey{signingKey}}, nil
 	}
-	ctx.OpenIDFedSigAlg = goidc.PS256
+	ctx.OpenIDFedSigAlg = goidc.SigAlgPS256
 
 	t.Run("jwks", func(t *testing.T) {
 		jwks, err := ctx.OpenIDFedJWKS()
@@ -1460,7 +1460,7 @@ func TestSign(t *testing.T) {
 		t.Fatalf("Sign() error = %v", err)
 	}
 
-	parsedJWS, err := jwt.ParseSigned(jws, []goidc.SignatureAlgorithm{goidc.PS256})
+	parsedJWS, err := jwt.ParseSigned(jws, []goidc.SignatureAlgorithm{goidc.SigAlgPS256})
 	if err != nil {
 		t.Fatalf("jwt.ParseSigned() error = %v", err)
 	}
@@ -1488,12 +1488,12 @@ func TestSignWithSigner(t *testing.T) {
 		},
 	}
 
-	jws, err := ctx.Sign(map[string]any{goidc.ClaimSubject: "random@email.com"}, goidc.RS256, nil)
+	jws, err := ctx.Sign(map[string]any{goidc.ClaimSubject: "random@email.com"}, goidc.SigAlgRS256, nil)
 	if err != nil {
 		t.Fatalf("Sign() error = %v", err)
 	}
 
-	parsedJWS, err := jwt.ParseSigned(jws, []goidc.SignatureAlgorithm{goidc.RS256})
+	parsedJWS, err := jwt.ParseSigned(jws, []goidc.SignatureAlgorithm{goidc.SigAlgRS256})
 	if err != nil {
 		t.Fatalf("jwt.ParseSigned() error = %v", err)
 	}
@@ -1517,15 +1517,15 @@ func TestDecryptWithDecrypter(t *testing.T) {
 		},
 	}
 
-	jwe, err := joseutil.Encrypt("random_jws", encKey.Public(), goidc.A128CBC_HS256, nil)
+	jwe, err := joseutil.Encrypt("random_jws", encKey.Public(), goidc.ContentEncAlgA128CBCHS256, nil)
 	if err != nil {
 		t.Fatalf("joseutil.Encrypt() error = %v", err)
 	}
 
 	jws, err := ctx.Decrypt(
 		jwe,
-		[]goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP_256},
-		[]goidc.ContentEncryptionAlgorithm{goidc.A128CBC_HS256},
+		[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP256},
+		[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256},
 	)
 	if err != nil {
 		t.Fatalf("Decrypt() error = %v", err)

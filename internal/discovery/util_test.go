@@ -55,8 +55,8 @@ func TestOIDCConfig(t *testing.T) {
 			goidc.AuthnMethodPrivateKeyJWT,
 			goidc.AuthnMethodSecretJWT,
 		},
-		AuthnMethodPrivateKeyJWTSigAlgs: []goidc.SignatureAlgorithm{goidc.PS256},
-		AuthnMethodSecretJWTSigAlgs:     []goidc.SignatureAlgorithm{goidc.HS256},
+		AuthnMethodPrivateKeyJWTSigAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgPS256},
+		AuthnMethodSecretJWTSigAlgs:     []goidc.SignatureAlgorithm{goidc.SigAlgHS256},
 		RAREnabled:                      true,
 		RARDetailTypes:                  []goidc.AuthDetailType{"detail_type"},
 	}
@@ -77,7 +77,7 @@ func TestOIDCConfig(t *testing.T) {
 		Scopes:                      []string{"openid", "email"},
 		TokenAuthnMethods:           ctx.AuthnMethods,
 		TokenAuthnSigAlgs: []goidc.SignatureAlgorithm{
-			goidc.PS256, goidc.HS256,
+			goidc.SigAlgPS256, goidc.SigAlgHS256,
 		},
 		GrantTypes: ctx.GrantTypes,
 		UserInfoSigAlgs: []goidc.SignatureAlgorithm{
@@ -154,19 +154,19 @@ func TestOIDCConfig_WithVariants(t *testing.T) {
 			goidc.AuthnMethodPrivateKeyJWT,
 			goidc.AuthnMethodSecretJWT,
 		},
-		AuthnMethodPrivateKeyJWTSigAlgs: []goidc.SignatureAlgorithm{goidc.PS256},
-		AuthnMethodSecretJWTSigAlgs:     []goidc.SignatureAlgorithm{goidc.HS256},
+		AuthnMethodPrivateKeyJWTSigAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgPS256},
+		AuthnMethodSecretJWTSigAlgs:     []goidc.SignatureAlgorithm{goidc.SigAlgHS256},
 		RAREnabled:                      true,
 		RARDetailTypes:                  []goidc.AuthDetailType{"detail_type"},
 		PAREnabled:                      true,
 		JAREnabled:                      true,
 		JARRequired:                     true,
-		JARSigAlgs:                      []goidc.SignatureAlgorithm{goidc.PS256},
+		JARSigAlgs:                      []goidc.SignatureAlgorithm{goidc.SigAlgPS256},
 		JARMEnabled:                     true,
 		JARMSigAlgDefault:               goidc.SignatureAlgorithm(jarmKey.Algorithm),
 		JARMSigAlgs:                     []goidc.SignatureAlgorithm{goidc.SignatureAlgorithm(jarmKey.Algorithm)},
 		DPoPEnabled:                     true,
-		DPoPSigAlgs:                     []goidc.SignatureAlgorithm{goidc.PS256},
+		DPoPSigAlgs:                     []goidc.SignatureAlgorithm{goidc.SigAlgPS256},
 		TokenIntrospectionEnabled:       true,
 		TokenRevocationEnabled:          true,
 	}
@@ -190,15 +190,15 @@ func TestOIDCConfig_WithVariants(t *testing.T) {
 		Scopes:                      []string{"openid", "email"},
 		TokenAuthnMethods:           ctx.AuthnMethods,
 		TokenAuthnSigAlgs: []goidc.SignatureAlgorithm{
-			goidc.PS256, goidc.HS256,
+			goidc.SigAlgPS256, goidc.SigAlgHS256,
 		},
 		TokenIntrospectionAuthnMethods: ctx.AuthnMethods,
 		TokenIntrospectionAuthnSigAlgs: []goidc.SignatureAlgorithm{
-			goidc.PS256, goidc.HS256,
+			goidc.SigAlgPS256, goidc.SigAlgHS256,
 		},
 		TokenRevocationAuthnMethods: ctx.AuthnMethods,
 		TokenRevocationAuthnSigAlgs: []goidc.SignatureAlgorithm{
-			goidc.PS256, goidc.HS256,
+			goidc.SigAlgPS256, goidc.SigAlgHS256,
 		},
 		GrantTypes: ctx.GrantTypes,
 		UserInfoSigAlgs: []goidc.SignatureAlgorithm{

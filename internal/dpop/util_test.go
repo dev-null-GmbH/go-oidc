@@ -29,7 +29,7 @@ func TestValidateJWT(t *testing.T) {
 				Configuration: &oidc.Configuration{
 					Host:            "https://server.example.com",
 					DPoPEnabled:     true,
-					DPoPSigAlgs:     []goidc.SignatureAlgorithm{goidc.RS256, goidc.PS256, goidc.ES256},
+					DPoPSigAlgs:     []goidc.SignatureAlgorithm{goidc.SigAlgRS256, goidc.SigAlgPS256, goidc.SigAlgES256},
 					ConsumeJTIFunc:  func(_ context.Context, _ string) error { return nil },
 					JWTLifetimeSecs: 99999999999,
 				},
@@ -47,7 +47,7 @@ func TestValidateJWT(t *testing.T) {
 				Configuration: &oidc.Configuration{
 					Host:            "https://resource.example.org",
 					DPoPEnabled:     true,
-					DPoPSigAlgs:     []goidc.SignatureAlgorithm{goidc.RS256, goidc.PS256, goidc.ES256},
+					DPoPSigAlgs:     []goidc.SignatureAlgorithm{goidc.SigAlgRS256, goidc.SigAlgPS256, goidc.SigAlgES256},
 					ConsumeJTIFunc:  func(_ context.Context, _ string) error { return nil },
 					JWTLifetimeSecs: 99999999999,
 				},
@@ -76,7 +76,7 @@ func TestValidateJWT(t *testing.T) {
 
 func TestJWKThumbprint(t *testing.T) {
 	// Given.
-	dpopSigningAlgorithms := []goidc.SignatureAlgorithm{goidc.ES256}
+	dpopSigningAlgorithms := []goidc.SignatureAlgorithm{goidc.SigAlgES256}
 	testCases := []struct {
 		dpopJWT  string
 		expected string

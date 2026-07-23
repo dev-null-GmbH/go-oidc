@@ -206,7 +206,7 @@ func TestInitBackAuth(t *testing.T) {
 			setup: func(t *testing.T) (oidc.Context, request, *goidc.Client) {
 				ctx, client := setup(t)
 				ctx.CIBAJAREnabled = true
-				ctx.CIBAJARSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+				ctx.CIBAJARSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 
 				privateJWK := oidctest.PrivateRS256JWK(t, "rsa256_key", goidc.KeyUsageSignature)
 				client.JWKS = &goidc.JSONWebKeySet{

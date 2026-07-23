@@ -84,13 +84,13 @@ func TestInitAuth(t *testing.T) {
 		ctx.OpenIDFedManager = oidctest.Manager(t, ctx)
 		ctx.OpenIDFedTrustedAnchors = []string{federationTrustAnchorID}
 		ctx.OpenIDFedClientRegTypes = []goidc.ClientRegistrationType{goidc.ClientRegistrationTypeAutomatic}
-		ctx.OpenIDFedSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
-		ctx.OpenIDFedSigAlg = goidc.RS256
+		ctx.OpenIDFedSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
+		ctx.OpenIDFedSigAlg = goidc.SigAlgRS256
 		ctx.OpenIDFedJWKSFunc = func(context.Context) (goidc.JSONWebKeySet, error) {
 			return goidc.JSONWebKeySet{Keys: []goidc.JSONWebKey{federationOPJWK}}, nil
 		}
 		ctx.JAREnabled = true
-		ctx.JARSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+		ctx.JARSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 		ctx.AuthSessionIDFunc = func(_ context.Context) string {
 			return "random_authn_session_id"
 		}
@@ -298,7 +298,7 @@ func TestInitAuth(t *testing.T) {
 			setup: func(t *testing.T) (oidc.Context, *goidc.Client, request) {
 				ctx, client := setup(t)
 				ctx.JAREnabled = true
-				ctx.JARSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+				ctx.JARSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 
 				privateJWK := oidctest.PrivateRS256JWK(t, "rsa256_key", goidc.KeyUsageSignature)
 				client.JWKS = &goidc.JSONWebKeySet{Keys: []goidc.JSONWebKey{privateJWK.Public()}}

@@ -34,9 +34,9 @@ const (
 )
 
 var allAsymmetricAlgs = []goidc.SignatureAlgorithm{
-	goidc.RS256, goidc.RS384, goidc.RS512,
-	goidc.ES256, goidc.ES384, goidc.ES512,
-	goidc.PS256, goidc.PS384, goidc.PS512,
+	goidc.SigAlgRS256, goidc.SigAlgRS384, goidc.SigAlgRS512,
+	goidc.SigAlgES256, goidc.SigAlgES384, goidc.SigAlgES512,
+	goidc.SigAlgPS256, goidc.SigAlgPS384, goidc.SigAlgPS512,
 }
 
 type AuthnContext string

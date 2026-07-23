@@ -218,7 +218,7 @@ func TestJWKByAlg(t *testing.T) {
 						},
 					},
 				}
-				return ctx, c, string(goidc.RS256)
+				return ctx, c, string(goidc.SigAlgRS256)
 			},
 			wantKeyID: "rs256_key",
 		},
@@ -227,7 +227,7 @@ func TestJWKByAlg(t *testing.T) {
 			setup: func(t *testing.T) (oidc.Context, *goidc.Client, string) {
 				ctx := oidctest.NewContext(t)
 				c := &goidc.Client{}
-				return ctx, c, string(goidc.RS256)
+				return ctx, c, string(goidc.SigAlgRS256)
 			},
 			wantErrText: "could not find the jwk by algorithm: the client jwks was informed neither by value nor by reference",
 		},
@@ -243,7 +243,7 @@ func TestJWKByAlg(t *testing.T) {
 						},
 					},
 				}
-				return ctx, c, string(goidc.RS256)
+				return ctx, c, string(goidc.SigAlgRS256)
 			},
 			wantErrText: "invalid key algorithm: RS256",
 		},

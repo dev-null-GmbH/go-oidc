@@ -339,17 +339,17 @@ func PrivateRSAOAEPJWK(t *testing.T, keyID string) goidc.JSONWebKey {
 
 func PrivateRSAOAEP256JWK(t *testing.T, keyID string) goidc.JSONWebKey {
 	t.Helper()
-	return privateRSAJWK(t, keyID, string(goidc.RSA_OAEP_256), goidc.KeyUsageEncryption)
+	return privateRSAJWK(t, keyID, string(goidc.KeyEncRSAOAEP256), goidc.KeyUsageEncryption)
 }
 
 func PrivateRS256JWK(t *testing.T, keyID string, usage goidc.KeyUsage) goidc.JSONWebKey {
 	t.Helper()
-	return privateRSAJWK(t, keyID, string(goidc.RS256), usage)
+	return privateRSAJWK(t, keyID, string(goidc.SigAlgRS256), usage)
 }
 
 func PrivatePS256JWK(tb testing.TB, keyID string, usage goidc.KeyUsage) goidc.JSONWebKey {
 	tb.Helper()
-	return privateRSAJWK(tb, keyID, string(goidc.PS256), usage)
+	return privateRSAJWK(tb, keyID, string(goidc.SigAlgPS256), usage)
 }
 
 func privateRSAJWK(tb testing.TB, keyID string, alg string, usage goidc.KeyUsage) goidc.JSONWebKey {

@@ -706,8 +706,8 @@ func setup(t *testing.T, overrideResps map[string]func() *http.Response) oidc.Co
 	}
 	ctx.OpenIDFedAuthorityHints = []string{trustAnchorID}
 	ctx.OpenIDFedTrustedAnchors = []string{trustAnchorID}
-	ctx.OpenIDFedSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
-	ctx.OpenIDFedSigAlg = goidc.RS256
+	ctx.OpenIDFedSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
+	ctx.OpenIDFedSigAlg = goidc.SigAlgRS256
 	ctx.OpenIDFedTrustChainMaxDepth = 5
 	ctx.OpenIDFedClientRegTypes = []goidc.ClientRegistrationType{goidc.ClientRegistrationTypeAutomatic, goidc.ClientRegistrationTypeExplicit}
 	ctx.HTTPClientFunc = func(ctx context.Context) *http.Client {
@@ -1730,7 +1730,7 @@ func TestFetchSubordinateStatement(t *testing.T) {
 						FederationAuthority: &goidc.FederationAuthority{
 							FetchEndpoint:                     intermediaryAuthorityID + "/fetch",
 							FetchEndpointAuthMethods:          []goidc.AuthnMethod{goidc.AuthnMethodPrivateKeyJWT},
-							EndpointAuthSigAlgValuesSupported: []goidc.SignatureAlgorithm{goidc.RS256},
+							EndpointAuthSigAlgValuesSupported: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
 						},
 					},
 				}
@@ -2186,7 +2186,7 @@ func TestPrivateKeyJWTRequest(t *testing.T) {
 		Issuer: trustAnchorID,
 		Metadata: metadata{
 			FederationAuthority: &goidc.FederationAuthority{
-				EndpointAuthSigAlgValuesSupported: []goidc.SignatureAlgorithm{goidc.RS256},
+				EndpointAuthSigAlgValuesSupported: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
 			},
 		},
 	}
@@ -2539,7 +2539,7 @@ func TestFetchSubordinateStatement_WithPrivateKeyJWT(t *testing.T) {
 			FederationAuthority: &goidc.FederationAuthority{
 				FetchEndpoint:                     intermediaryAuthorityID + "/fetch",
 				FetchEndpointAuthMethods:          []goidc.AuthnMethod{goidc.AuthnMethodPrivateKeyJWT},
-				EndpointAuthSigAlgValuesSupported: []goidc.SignatureAlgorithm{goidc.RS256},
+				EndpointAuthSigAlgValuesSupported: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
 			},
 		},
 	}

@@ -13,45 +13,45 @@ import (
 type SignatureAlgorithm = jose.SignatureAlgorithm
 
 const (
-	None  SignatureAlgorithm = "none"
-	HS256 SignatureAlgorithm = jose.HS256
-	HS384 SignatureAlgorithm = jose.HS384
-	HS512 SignatureAlgorithm = jose.HS512
-	RS256 SignatureAlgorithm = jose.RS256
-	RS384 SignatureAlgorithm = jose.RS384
-	RS512 SignatureAlgorithm = jose.RS512
-	ES256 SignatureAlgorithm = jose.ES256
-	ES384 SignatureAlgorithm = jose.ES384
-	ES512 SignatureAlgorithm = jose.ES512
-	PS256 SignatureAlgorithm = jose.PS256
-	PS384 SignatureAlgorithm = jose.PS384
-	PS512 SignatureAlgorithm = jose.PS512
+	SigAlgNone  SignatureAlgorithm = "none"
+	SigAlgHS256 SignatureAlgorithm = jose.HS256
+	SigAlgHS384 SignatureAlgorithm = jose.HS384
+	SigAlgHS512 SignatureAlgorithm = jose.HS512
+	SigAlgRS256 SignatureAlgorithm = jose.RS256
+	SigAlgRS384 SignatureAlgorithm = jose.RS384
+	SigAlgRS512 SignatureAlgorithm = jose.RS512
+	SigAlgES256 SignatureAlgorithm = jose.ES256
+	SigAlgES384 SignatureAlgorithm = jose.ES384
+	SigAlgES512 SignatureAlgorithm = jose.ES512
+	SigAlgPS256 SignatureAlgorithm = jose.PS256
+	SigAlgPS384 SignatureAlgorithm = jose.PS384
+	SigAlgPS512 SignatureAlgorithm = jose.PS512
 )
 
 type KeyEncryptionAlgorithm = jose.KeyAlgorithm
 
 const (
-	RSA1_5       KeyEncryptionAlgorithm = jose.RSA1_5
-	RSA_OAEP     KeyEncryptionAlgorithm = jose.RSA_OAEP
-	RSA_OAEP_256 KeyEncryptionAlgorithm = jose.RSA_OAEP_256
+	KeyEncAlgRSA15   KeyEncryptionAlgorithm = jose.RSA1_5
+	KeyEncRSAOAEP    KeyEncryptionAlgorithm = jose.RSA_OAEP
+	KeyEncRSAOAEP256 KeyEncryptionAlgorithm = jose.RSA_OAEP_256
 )
 
 type ContentEncryptionAlgorithm = jose.ContentEncryption
 
 const (
-	A128CBC_HS256 ContentEncryptionAlgorithm = jose.A128CBC_HS256 // TODO: use go-oidc pattern.
-	A192CBC_HS384 ContentEncryptionAlgorithm = jose.A192CBC_HS384
-	A256CBC_HS512 ContentEncryptionAlgorithm = jose.A256CBC_HS512
-	A128GCM       ContentEncryptionAlgorithm = jose.A128GCM
-	A192GCM       ContentEncryptionAlgorithm = jose.A192GCM
-	A256GCM       ContentEncryptionAlgorithm = jose.A256GCM
+	ContentEncAlgA128CBCHS256 ContentEncryptionAlgorithm = jose.A128CBC_HS256
+	ContentEncAlgA192CBCHS384 ContentEncryptionAlgorithm = jose.A192CBC_HS384
+	ContentEncAlgA256CBCHS512 ContentEncryptionAlgorithm = jose.A256CBC_HS512
+	ContentEncAlgA128GCM      ContentEncryptionAlgorithm = jose.A128GCM
+	ContentEncAlgA192GCM      ContentEncryptionAlgorithm = jose.A192GCM
+	ContentEncAlgA256GCM      ContentEncryptionAlgorithm = jose.A256GCM
 )
 
 type CompressionAlgorithm = jose.CompressionAlgorithm
 
 const (
-	CompressionAlgorithmNone    CompressionAlgorithm = jose.NONE
-	CompressionAlgorithmDeflate CompressionAlgorithm = jose.DEFLATE
+	CompressionAlgNone    CompressionAlgorithm = jose.NONE
+	CompressionAlgDeflate CompressionAlgorithm = jose.DEFLATE
 )
 
 type JSONWebKey = jose.JSONWebKey

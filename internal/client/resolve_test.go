@@ -246,7 +246,7 @@ func TestResolve(t *testing.T) {
 				// ctx.TokenIntrospectionEnabled is false by default.
 				c, _ := oidctest.NewClient(t)
 				c.TokenIntrospectionAuthnMethod = goidc.AuthnMethodSecretPost
-				c.TokenIntrospectionAuthnSigAlg = goidc.PS256
+				c.TokenIntrospectionAuthnSigAlg = goidc.SigAlgPS256
 				return ctx, &client.Meta{ClientMeta: c.ClientMeta}
 			},
 			validate: func(t *testing.T, c *client.Meta) {
@@ -440,9 +440,9 @@ func TestResolve(t *testing.T) {
 			setup: func() (oidc.Context, *client.Meta) {
 				ctx := oidctest.NewContext(t)
 				ctx.JAREnabled = true
-				ctx.JARSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+				ctx.JARSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 				c, _ := oidctest.NewClient(t)
-				c.JARSigAlg = goidc.PS256 // not in [RS256]
+				c.JARSigAlg = goidc.SigAlgPS256 // not in [RS256]
 				return ctx, &client.Meta{ClientMeta: c.ClientMeta}
 			},
 			wantErr: true,
@@ -453,7 +453,7 @@ func TestResolve(t *testing.T) {
 				ctx := oidctest.NewContext(t)
 				// ctx.JAREnabled is false by default.
 				c, _ := oidctest.NewClient(t)
-				c.JARSigAlg = goidc.RS256
+				c.JARSigAlg = goidc.SigAlgRS256
 				c.JARRequired = true
 				return ctx, &client.Meta{ClientMeta: c.ClientMeta}
 			},
@@ -471,11 +471,11 @@ func TestResolve(t *testing.T) {
 			setup: func() (oidc.Context, *client.Meta) {
 				ctx := oidctest.NewContext(t)
 				ctx.JAREnabled = true
-				ctx.JARSigAlgs = []goidc.SignatureAlgorithm{goidc.PS256}
+				ctx.JARSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgPS256}
 				// ctx.JAREncEnabled is false by default.
 				c, _ := oidctest.NewClient(t)
-				c.JARKeyEncAlg = goidc.RSA_OAEP
-				c.JARContentEncAlg = goidc.A256GCM
+				c.JARKeyEncAlg = goidc.KeyEncRSAOAEP
+				c.JARContentEncAlg = goidc.ContentEncAlgA256GCM
 				return ctx, &client.Meta{ClientMeta: c.ClientMeta}
 			},
 			validate: func(t *testing.T, c *client.Meta) {
@@ -493,9 +493,9 @@ func TestResolve(t *testing.T) {
 				ctx := oidctest.NewContext(t)
 				// ctx.JARMEnabled is false by default.
 				c, _ := oidctest.NewClient(t)
-				c.JARMSigAlg = goidc.RS256
-				c.JARMKeyEncAlg = goidc.RSA_OAEP
-				c.JARMContentEncAlg = goidc.A256GCM
+				c.JARMSigAlg = goidc.SigAlgRS256
+				c.JARMKeyEncAlg = goidc.KeyEncRSAOAEP
+				c.JARMContentEncAlg = goidc.ContentEncAlgA256GCM
 				return ctx, &client.Meta{ClientMeta: c.ClientMeta}
 			},
 			validate: func(t *testing.T, c *client.Meta) {
@@ -515,9 +515,9 @@ func TestResolve(t *testing.T) {
 			setup: func() (oidc.Context, *client.Meta) {
 				ctx := oidctest.NewContext(t)
 				ctx.JARMEnabled = true
-				ctx.JARMSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+				ctx.JARMSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 				c, _ := oidctest.NewClient(t)
-				c.JARMSigAlg = goidc.PS256 // not in [RS256]
+				c.JARMSigAlg = goidc.SigAlgPS256 // not in [RS256]
 				return ctx, &client.Meta{ClientMeta: c.ClientMeta}
 			},
 			wantErr: true,
@@ -531,7 +531,7 @@ func TestResolve(t *testing.T) {
 				ctx.IDTokenEncEnabled = true
 				c, _ := oidctest.NewClient(t)
 				// Set content enc alg without key enc alg.
-				c.IDTokenContentEncAlg = goidc.A256GCM
+				c.IDTokenContentEncAlg = goidc.ContentEncAlgA256GCM
 				return ctx, &client.Meta{ClientMeta: c.ClientMeta}
 			},
 			wantErr: true,
@@ -542,8 +542,8 @@ func TestResolve(t *testing.T) {
 				ctx := oidctest.NewContext(t)
 				// ctx.IDTokenEncEnabled is false by default.
 				c, _ := oidctest.NewClient(t)
-				c.IDTokenKeyEncAlg = goidc.RSA_OAEP
-				c.IDTokenContentEncAlg = goidc.A256GCM
+				c.IDTokenKeyEncAlg = goidc.KeyEncRSAOAEP
+				c.IDTokenContentEncAlg = goidc.ContentEncAlgA256GCM
 				return ctx, &client.Meta{ClientMeta: c.ClientMeta}
 			},
 			validate: func(t *testing.T, c *client.Meta) {
@@ -864,11 +864,11 @@ func TestResolve(t *testing.T) {
 					goidc.CIBADeliveryModePush,
 				}
 				ctx.CIBAJAREnabled = true
-				ctx.CIBAJARSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+				ctx.CIBAJARSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 				c, _ := oidctest.NewClient(t)
 				c.GrantTypes = append(c.GrantTypes, goidc.GrantCIBA)
 				c.CIBATokenDeliveryMode = goidc.CIBADeliveryModePoll
-				c.CIBAJARSigAlg = goidc.PS256 // not in [RS256]
+				c.CIBAJARSigAlg = goidc.SigAlgPS256 // not in [RS256]
 				return ctx, &client.Meta{ClientMeta: c.ClientMeta}
 			},
 			wantErr: true,
@@ -882,7 +882,7 @@ func TestResolve(t *testing.T) {
 				// Client does not request CIBA either but has stale CIBA metadata.
 				c.CIBATokenDeliveryMode = goidc.CIBADeliveryModePoll
 				c.CIBANotificationEndpoint = "https://example.com/notify"
-				c.CIBAJARSigAlg = goidc.RS256
+				c.CIBAJARSigAlg = goidc.SigAlgRS256
 				c.CIBAUserCodeEnabled = true
 				return ctx, &client.Meta{ClientMeta: c.ClientMeta}
 			},
@@ -1040,11 +1040,11 @@ func TestResolve(t *testing.T) {
 				c, _ := oidctest.NewClient(t)
 				cc := &client.Meta{ClientMeta: c.ClientMeta}
 				// Offer PS256 as the choices list; server supports PS256.
-				cc.IDTokenSigAlgs = []goidc.SignatureAlgorithm{goidc.PS256}
+				cc.IDTokenSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgPS256}
 				return ctx, cc
 			},
 			validate: func(t *testing.T, c *client.Meta) {
-				if c.IDTokenSigAlg != goidc.PS256 {
+				if c.IDTokenSigAlg != goidc.SigAlgPS256 {
 					t.Errorf("got %s, want PS256", c.IDTokenSigAlg)
 				}
 			},
@@ -1057,8 +1057,8 @@ func TestResolve(t *testing.T) {
 				c, _ := oidctest.NewClient(t)
 				cc := &client.Meta{ClientMeta: c.ClientMeta}
 				// Current is PS256 but choices list only contains RS256.
-				cc.IDTokenSigAlg = goidc.PS256
-				cc.IDTokenSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+				cc.IDTokenSigAlg = goidc.SigAlgPS256
+				cc.IDTokenSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 				return ctx, cc
 			},
 			wantErr: true,
@@ -1071,7 +1071,7 @@ func TestResolve(t *testing.T) {
 				// ctx.IDTokenSigAlgs = [PS256]; client offers only RS256.
 				c, _ := oidctest.NewClient(t)
 				cc := &client.Meta{ClientMeta: c.ClientMeta}
-				cc.IDTokenSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+				cc.IDTokenSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 				return ctx, cc
 			},
 			wantErr: true,

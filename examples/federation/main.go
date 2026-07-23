@@ -113,14 +113,14 @@ func main() {
 		provider.Config{
 			Issuer:      OPFedID,
 			JWKS:        authutil.PrivateJWKSFunc(),
-			IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.RS256},
+			IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
 		},
 		provider.WithOpenIDFederation(
 			provider.OpenIDFedConfig{
 				JWKSFunc: func(ctx context.Context) (goidc.JSONWebKeySet, error) {
 					return opFedJWKS, nil
 				},
-				SigAlg:         goidc.RS256,
+				SigAlg:         goidc.SigAlgRS256,
 				AuthorityHints: []string{TrustAnchorFedID},
 				TrustedAnchors: []string{
 					TrustAnchorFedID,
@@ -129,7 +129,7 @@ func main() {
 					"https://localhost.emobix.co.uk:8443/test/a/goidc3/trust-anchor",
 				},
 			},
-			provider.WithOpenIDFedSignatureAlgs(goidc.RS256, goidc.ES256),
+			provider.WithOpenIDFedSignatureAlgs(goidc.SigAlgRS256, goidc.SigAlgES256),
 			provider.WithOpenIDFedClientRegistrationTypes(goidc.ClientRegistrationTypeAutomatic, goidc.ClientRegistrationTypeExplicit),
 			provider.WithOpenIDFedClientHandler(func(ctx context.Context, c *goidc.Client) error {
 				var scopes []string
@@ -142,16 +142,16 @@ func main() {
 			}),
 		),
 		provider.WithScopes(authutil.Scopes...),
-		provider.WithPrivateKeyJWTAuthn(goidc.RS256),
+		provider.WithPrivateKeyJWTAuthn(goidc.SigAlgRS256),
 		provider.WithDefaultAuthn(goidc.AuthnMethodPrivateKeyJWT),
 		provider.WithAuthCodeGrant(provider.AuthCodeGrantConfig{
 			ResponseTypes: []goidc.ResponseType{goidc.ResponseTypeCode, goidc.ResponseTypeCodeAndIDToken},
 		},
 			provider.WithJAR(
-				[]goidc.SignatureAlgorithm{goidc.RS256, goidc.PS256},
+				[]goidc.SignatureAlgorithm{goidc.SigAlgRS256, goidc.SigAlgPS256},
 				provider.WithJAREncryption(
-					[]goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
-					[]goidc.ContentEncryptionAlgorithm{goidc.A256GCM},
+					[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
+					[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA256GCM},
 				),
 			),
 			provider.WithPAR(nil),
@@ -160,7 +160,7 @@ func main() {
 		provider.WithRefreshTokenGrant(nil),
 		provider.WithClientCredentialsGrant(),
 		provider.WithClaims(authutil.Claims...),
-		provider.WithTokenOptions(authutil.TokenOptionsFunc(goidc.RS256)),
+		provider.WithTokenOptions(authutil.TokenOptionsFunc(goidc.SigAlgRS256)),
 		provider.WithIDTokenClaims(authutil.IDTokenClaimsFunc()),
 		provider.WithUserInfoClaims(authutil.UserInfoClaimsFunc()),
 		provider.WithHTTPClientFunc(httpClientFunc()),

@@ -19,13 +19,13 @@ func main() {
 		provider.Config{
 			Issuer:      authutil.Issuer,
 			JWKS:        authutil.PrivateJWKSFunc(),
-			IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.RS256, goidc.None},
+			IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256, goidc.SigAlgNone},
 		},
 		provider.WithScopes(authutil.Scopes...),
-		provider.WithUserInfoSignatureAlgs(goidc.RS256, goidc.None),
+		provider.WithUserInfoSignatureAlgs(goidc.SigAlgRS256, goidc.SigAlgNone),
 		provider.WithSecretBasicAuthn(),
 		provider.WithSecretPostAuthn(),
-		provider.WithPrivateKeyJWTAuthn(goidc.RS256),
+		provider.WithPrivateKeyJWTAuthn(goidc.SigAlgRS256),
 		provider.WithAuthCodeGrant(
 			provider.AuthCodeGrantConfig{
 				ResponseTypes: []goidc.ResponseType{
@@ -40,11 +40,11 @@ func main() {
 			},
 			provider.WithPAR(nil),
 			provider.WithJAR(
-				[]goidc.SignatureAlgorithm{goidc.RS256, goidc.None},
+				[]goidc.SignatureAlgorithm{goidc.SigAlgRS256, goidc.SigAlgNone},
 				provider.WithJARByReference(nil),
 				provider.WithJARByReferenceUnregisteredURIs(),
 			),
-			provider.WithJARM([]goidc.SignatureAlgorithm{goidc.RS256}),
+			provider.WithJARM([]goidc.SignatureAlgorithm{goidc.SigAlgRS256}),
 			provider.WithIssuerResponseParameter(),
 			provider.WithClaimsParameter(),
 			provider.WithPKCE([]goidc.CodeChallengeMethod{goidc.CodeChallengeMethodSHA256}),
@@ -57,7 +57,7 @@ func main() {
 		provider.WithDCR(nil,
 			provider.WithDCRClientHandler(authutil.DCRFunc),
 		),
-		provider.WithTokenOptions(authutil.TokenOptionsFunc(goidc.RS256)),
+		provider.WithTokenOptions(authutil.TokenOptionsFunc(goidc.SigAlgRS256)),
 		provider.WithIDTokenClaims(authutil.IDTokenClaimsFunc()),
 		provider.WithUserInfoClaims(authutil.UserInfoClaimsFunc()),
 		provider.WithHTTPClientFunc(authutil.HTTPClient),
