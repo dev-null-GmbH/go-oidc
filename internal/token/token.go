@@ -170,7 +170,7 @@ func MakeIDToken(ctx oidc.Context, c *goidc.Client, opts IDTokenOptions) (string
 		claims[goidc.ClaimAudience] = c.ID
 	}
 
-	if alg != goidc.None {
+	if alg != goidc.SigAlgNone {
 		if opts.AccessToken != "" {
 			claims[goidc.ClaimAccessTokenHash] = hashutil.HalfHash(opts.AccessToken, alg)
 		}

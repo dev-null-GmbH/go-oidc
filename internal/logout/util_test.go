@@ -196,7 +196,7 @@ func TestInitLogout(t *testing.T) {
 					goidc.ClaimIssuedAt: timeutil.TimestampNow(),
 					goidc.ClaimExpiry:   timeutil.TimestampNow() + 60,
 				})
-				ctx.IDTokenSigAlgs = []goidc.SignatureAlgorithm{goidc.ES256}
+				ctx.IDTokenSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
 				return ctx, request{
 					ClientID: client.ID,
 					LogoutParameters: goidc.LogoutParameters{

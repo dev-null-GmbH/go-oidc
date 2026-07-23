@@ -144,7 +144,7 @@ func TestMetadata_Merge_PreservesAllEntityConfigFields(t *testing.T) {
 			RedirectURIs:      []string{"https://client.example.com/callback"},
 			TokenAuthnMethod:  goidc.AuthnMethodSecretBasic,
 			ScopeIDs:          "openid profile",
-			IDTokenSigAlg:     goidc.RS256,
+			IDTokenSigAlg:     goidc.SigAlgRS256,
 			ApplicationType:   goidc.ApplicationTypeWeb,
 			Contacts:          []string{"admin@example.com"},
 			PolicyURI:         "https://client.example.com/policy",
@@ -183,8 +183,8 @@ func TestMetadata_Merge_PreservesAllEntityConfigFields(t *testing.T) {
 	if c.ScopeIDs != "openid profile" {
 		t.Errorf("ScopeIDs = %v, want 'openid profile'", c.ScopeIDs)
 	}
-	if c.IDTokenSigAlg != goidc.RS256 {
-		t.Errorf("IDTokenSigAlg = %v, want %v", c.IDTokenSigAlg, goidc.RS256)
+	if c.IDTokenSigAlg != goidc.SigAlgRS256 {
+		t.Errorf("IDTokenSigAlg = %v, want %v", c.IDTokenSigAlg, goidc.SigAlgRS256)
 	}
 	if c.ApplicationType != goidc.ApplicationTypeWeb {
 		t.Errorf("ApplicationType = %v, want %v", c.ApplicationType, goidc.ApplicationTypeWeb)

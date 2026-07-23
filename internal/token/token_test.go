@@ -61,16 +61,16 @@ func TestMakeIDToken(t *testing.T) {
 			name: "unsigned",
 			setup: func(t *testing.T) (oidc.Context, *goidc.Client, IDTokenOptions) {
 				ctx := oidctest.NewContext(t)
-				ctx.IDTokenSigAlgs = append(ctx.IDTokenSigAlgs, goidc.None)
+				ctx.IDTokenSigAlgs = append(ctx.IDTokenSigAlgs, goidc.SigAlgNone)
 				client, _ := oidctest.NewClient(t)
-				client.IDTokenSigAlg = goidc.None
+				client.IDTokenSigAlg = goidc.SigAlgNone
 				return ctx, client, IDTokenOptions{
 					Subject: "random_subject",
 					Claims:  map[string]any{"random_claim": "random_value"},
 				}
 			},
 			validate: func(t *testing.T, ctx oidc.Context, client *goidc.Client, opts IDTokenOptions, idToken string) {
-				claims, err := oidctest.UnsafeClaims(idToken, goidc.None)
+				claims, err := oidctest.UnsafeClaims(idToken, goidc.SigAlgNone)
 				if err != nil {
 					t.Fatalf("error parsing claims: %v", err)
 				}
@@ -212,13 +212,13 @@ func TestMakeIDToken(t *testing.T) {
 			setup: func(t *testing.T) (oidc.Context, *goidc.Client, IDTokenOptions) {
 				ctx := oidctest.NewContext(t)
 				ctx.IDTokenEncEnabled = true
-				ctx.IDTokenKeyEncAlgs = []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP_256}
-				ctx.IDTokenContentEncAlgs = []goidc.ContentEncryptionAlgorithm{goidc.A128CBC_HS256}
+				ctx.IDTokenKeyEncAlgs = []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP256}
+				ctx.IDTokenContentEncAlgs = []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256}
 
 				encJWK := oidctest.PrivateRSAOAEP256JWK(t, "enc_key")
 				encryptedIDTokenJWK = encJWK
 				client, _ := oidctest.NewClient(t)
-				client.IDTokenKeyEncAlg = goidc.RSA_OAEP_256
+				client.IDTokenKeyEncAlg = goidc.KeyEncRSAOAEP256
 				client.JWKS = &goidc.JSONWebKeySet{
 					Keys: []goidc.JSONWebKey{encJWK.Public()},
 				}
@@ -233,8 +233,8 @@ func TestMakeIDToken(t *testing.T) {
 
 				jwe, err := jose.ParseEncrypted(
 					idToken,
-					[]goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP_256},
-					[]goidc.ContentEncryptionAlgorithm{goidc.A128CBC_HS256},
+					[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP256},
+					[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256},
 				)
 				if err != nil {
 					t.Fatalf("error parsing JWE: %v", err)
@@ -434,7 +434,7 @@ func TestIssue(t *testing.T) {
 			setup: func(t *testing.T) (oidc.Context, *goidc.Grant, *goidc.Client) {
 				ctx := oidctest.NewContext(t)
 				ctx.TokenOptionsFunc = func(_ context.Context, _ *goidc.Grant, _ *goidc.Client) goidc.TokenOptions {
-					return goidc.NewJWTTokenOptions(goidc.None, 60)
+					return goidc.NewJWTTokenOptions(goidc.SigAlgNone, 60)
 				}
 				ctx.TokenClaimsFunc = func(_ context.Context, _ *goidc.Token, _ *goidc.Grant) map[string]any {
 					return map[string]any{"random_claim": "random_value"}
@@ -538,7 +538,7 @@ func TestGenerateToken(t *testing.T) {
 				ctx.Host = "https://example.com"
 				ctx.DPoPEnabled = true
 				ctx.JWTLifetimeSecs = 9999999999999
-				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.ES256}
+				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
 				ctx.Request.Header.Set(goidc.HeaderDPoP, "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiYVRtMk95eXFmaHFfZk5GOVVuZXlrZG0yX0dCZnpZVldDNEI1Wlo1SzNGUSIsInkiOiI4eFRhUERFTVRtNXM1d1MzYmFvVVNNcU01R0VJWDFINzMwX1hqV2lRaGxRIn19.eyJqdGkiOiItQndDM0VTYzZhY2MybFRjIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vZXhhbXBsZS5jb20vdG9rZW4iLCJpYXQiOjE1NjIyNjUyOTZ9.AzzSCVYIimNZyJQefZq7cF252PukDvRrxMqrrcH6FFlHLvpXyk9j8ybtS36GHlnyH_uuy2djQphfyHGeDfxidQ")
 				ctx.Request.Method = http.MethodPost
 				ctx.Request.RequestURI = "/token"

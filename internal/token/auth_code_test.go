@@ -436,7 +436,7 @@ func TestGenerateAuthCodeToken(t *testing.T) {
 			setup: func() (oidc.Context, request, *goidc.Client, *goidc.Grant) {
 				ctx, req, c, grant := setup(t)
 				ctx.DPoPEnabled = true
-				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.ES256}
+				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
 				ctx.Request.Method = http.MethodPost
 				ctx.Request.RequestURI = "/token"
 
@@ -476,7 +476,7 @@ func TestGenerateAuthCodeToken(t *testing.T) {
 			setup: func() (oidc.Context, request, *goidc.Client, *goidc.Grant) {
 				ctx, req, c, grant := setup(t)
 				ctx.DPoPEnabled = true
-				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.ES256}
+				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
 				ctx.Request.Method = http.MethodPost
 				ctx.Request.RequestURI = "/token"
 
@@ -497,7 +497,7 @@ func TestGenerateAuthCodeToken(t *testing.T) {
 			setup: func() (oidc.Context, request, *goidc.Client, *goidc.Grant) {
 				ctx, req, c, grant := setup(t)
 				ctx.DPoPEnabled = true
-				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.ES256}
+				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
 
 				_, thumbprint := oidctest.DPoPProof(t, oidctest.DPoPProofOptions{Method: http.MethodPost, URI: ctx.Host + "/token"})
 				grant.JWKThumbprint = thumbprint
@@ -583,7 +583,7 @@ func TestGenerateAuthCodeToken(t *testing.T) {
 			setup: func() (oidc.Context, request, *goidc.Client, *goidc.Grant) {
 				ctx, req, c, grant := setup(t)
 				ctx.DPoPEnabled = true
-				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.ES256}
+				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
 				ctx.Request.Method = http.MethodPost
 				ctx.Request.RequestURI = "/token"
 
@@ -638,7 +638,7 @@ func TestGenerateAuthCodeToken(t *testing.T) {
 				ctx, req, c, grant := setup(t)
 				ctx.DPoPEnabled = true
 				ctx.DPoPRequired = true
-				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.ES256}
+				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
 				return ctx, req, c, grant
 			},
 			wantErr: goidc.ErrorCodeInvalidRequest,
@@ -648,7 +648,7 @@ func TestGenerateAuthCodeToken(t *testing.T) {
 			setup: func() (oidc.Context, request, *goidc.Client, *goidc.Grant) {
 				ctx, req, c, grant := setup(t)
 				ctx.DPoPEnabled = true
-				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.ES256}
+				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
 				c.DPoPTokenBindingRequired = true
 				return ctx, req, c, grant
 			},

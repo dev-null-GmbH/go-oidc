@@ -69,13 +69,13 @@ func TestPushAuth(t *testing.T) {
 		ctx.OpenIDFedManager = manager
 		ctx.OpenIDFedTrustedAnchors = []string{federationTrustAnchorID}
 		ctx.OpenIDFedClientRegTypes = []goidc.ClientRegistrationType{goidc.ClientRegistrationTypeAutomatic}
-		ctx.OpenIDFedSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
-		ctx.OpenIDFedSigAlg = goidc.RS256
+		ctx.OpenIDFedSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
+		ctx.OpenIDFedSigAlg = goidc.SigAlgRS256
 		ctx.OpenIDFedJWKSFunc = func(context.Context) (goidc.JSONWebKeySet, error) {
 			return goidc.JSONWebKeySet{Keys: []goidc.JSONWebKey{federationOPJWK}}, nil
 		}
 		ctx.JAREnabled = true
-		ctx.JARSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+		ctx.JARSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 		ctx.AuthSessionIDFunc = func(_ context.Context) string {
 			return "random_authn_session_id"
 		}
@@ -244,7 +244,7 @@ func TestPushAuth(t *testing.T) {
 			setup: func(t *testing.T) (oidc.Context, request, *goidc.Client) {
 				ctx, client := setup(t)
 				ctx.JAREnabled = true
-				ctx.JARSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+				ctx.JARSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 
 				privateJWK := oidctest.PrivateRS256JWK(t, "rsa256_key", goidc.KeyUsageSignature)
 				client.JWKS = &goidc.JSONWebKeySet{
@@ -333,7 +333,7 @@ func TestPushAuth(t *testing.T) {
 			setup: func(t *testing.T) (oidc.Context, request, *goidc.Client) {
 				ctx, client := setup(t)
 				ctx.JAREnabled = true
-				ctx.JARSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+				ctx.JARSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 				privateJWK := oidctest.PrivateRS256JWK(t, "rsa256_key", goidc.KeyUsageSignature)
 				client.JWKS = &goidc.JSONWebKeySet{
 					Keys: []goidc.JSONWebKey{privateJWK.Public()},
@@ -358,7 +358,7 @@ func TestPushAuth(t *testing.T) {
 			setup: func(t *testing.T) (oidc.Context, request, *goidc.Client) {
 				ctx, client := setup(t)
 				ctx.JAREnabled = true
-				ctx.JARSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+				ctx.JARSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 
 				privateJWK := oidctest.PrivateRS256JWK(t, "rsa256_key", goidc.KeyUsageSignature)
 				client.JWKS = &goidc.JSONWebKeySet{
@@ -415,7 +415,7 @@ func TestPushAuth(t *testing.T) {
 			name: "federation automatic registration",
 			setup: func(t *testing.T) (oidc.Context, request, *goidc.Client) {
 				ctx, requestObject, expiresAt := setupFederation(t, federationOptions{})
-				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 				ctx.Request.PostForm = map[string][]string{
 					"client_id":             {federationClientID},
 					"client_assertion_type": {string(goidc.AssertionTypeJWTBearer)},
@@ -496,7 +496,7 @@ func TestPushAuth(t *testing.T) {
 				ctx, requestObject, expiresAt := setupFederation(t, federationOptions{
 					redirectURI: redirectURI,
 				})
-				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 				ctx.Request.PostForm = map[string][]string{
 					"client_id":             {federationClientID},
 					"client_assertion_type": {string(goidc.AssertionTypeJWTBearer)},
@@ -567,7 +567,7 @@ func TestPushAuth(t *testing.T) {
 			name: "federation valid cached client reuse",
 			setup: func(t *testing.T) (oidc.Context, request, *goidc.Client) {
 				ctx, requestObject, _ := setupFederation(t, federationOptions{})
-				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 				ctx.OpenIDFedHTTPClientFunc = func(context.Context) *http.Client {
 					return &http.Client{Transport: federationRoundTripper{responses: map[string]func() *http.Response{}}}
 				}
@@ -656,7 +656,7 @@ func TestPushAuth(t *testing.T) {
 				ctx.OpenIDFedEnabled = true
 				ctx.OpenIDFedManager = manager
 				ctx.OpenIDFedClientRegTypes = []goidc.ClientRegistrationType{goidc.ClientRegistrationTypeExplicit}
-				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 				ctx.Request.PostForm = map[string][]string{
 					"client_id":             {federationClientID},
 					"client_assertion_type": {string(goidc.AssertionTypeJWTBearer)},
@@ -697,7 +697,7 @@ func TestPushAuth(t *testing.T) {
 				ctx.OpenIDFedEnabled = true
 				ctx.OpenIDFedManager = manager
 				ctx.OpenIDFedClientRegTypes = []goidc.ClientRegistrationType{goidc.ClientRegistrationTypeAutomatic}
-				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 				ctx.Request.PostForm = map[string][]string{
 					"client_id":             {"unknown-client"},
 					"client_assertion_type": {string(goidc.AssertionTypeJWTBearer)},
@@ -731,7 +731,7 @@ func TestPushAuth(t *testing.T) {
 				ctx, requestObject, _ := setupFederation(t, federationOptions{
 					registrationTypes: []goidc.ClientRegistrationType{goidc.ClientRegistrationTypeExplicit},
 				})
-				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 				ctx.Request.PostForm = map[string][]string{
 					"client_id":             {federationClientID},
 					"client_assertion_type": {string(goidc.AssertionTypeJWTBearer)},
@@ -763,7 +763,7 @@ func TestPushAuth(t *testing.T) {
 			name: "federation automatic registration rejects invalid private key jwt",
 			setup: func(t *testing.T) (oidc.Context, request, *goidc.Client) {
 				ctx, requestObject, _ := setupFederation(t, federationOptions{})
-				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 				ctx.Request.PostForm = map[string][]string{
 					"client_id":             {federationClientID},
 					"client_assertion_type": {string(goidc.AssertionTypeJWTBearer)},
@@ -798,7 +798,7 @@ func TestPushAuth(t *testing.T) {
 			name: "federation automatic registration rejects invalid jar request object",
 			setup: func(t *testing.T) (oidc.Context, request, *goidc.Client) {
 				ctx, _, _ := setupFederation(t, federationOptions{})
-				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 				ctx.Request.PostForm = map[string][]string{
 					"client_id":             {federationClientID},
 					"client_assertion_type": {string(goidc.AssertionTypeJWTBearer)},

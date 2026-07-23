@@ -278,14 +278,14 @@ func TestNewDynamicScope(t *testing.T) {
 
 func TestNewJWTTokenOptions(t *testing.T) {
 	// When.
-	opts := goidc.NewJWTTokenOptions(goidc.RS256, 3600)
+	opts := goidc.NewJWTTokenOptions(goidc.SigAlgRS256, 3600)
 
 	// Then.
 	if opts.Format != goidc.TokenFormatJWT {
 		t.Errorf("Format = %s, want %s", opts.Format, goidc.TokenFormatJWT)
 	}
-	if opts.JWTSigAlg != goidc.RS256 {
-		t.Errorf("JWTSigAlg = %s, want %s", opts.JWTSigAlg, goidc.RS256)
+	if opts.JWTSigAlg != goidc.SigAlgRS256 {
+		t.Errorf("JWTSigAlg = %s, want %s", opts.JWTSigAlg, goidc.SigAlgRS256)
 	}
 	if opts.LifetimeSecs != 3600 {
 		t.Errorf("LifetimeSecs = %d, want 3600", opts.LifetimeSecs)

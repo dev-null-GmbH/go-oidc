@@ -670,7 +670,7 @@ func parseEntityStatement(ctx oidc.Context, signedStatement string, opts parseOp
 			errors.New("entity statements must contain a kid header"))
 	}
 
-	if parsedStatement.Headers[0].Algorithm == "" || parsedStatement.Headers[0].Algorithm == string(goidc.None) {
+	if parsedStatement.Headers[0].Algorithm == "" || parsedStatement.Headers[0].Algorithm == string(goidc.SigAlgNone) {
 		return entityStatement{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid entity statement",
 			errors.New("entity statements must contain a valid alg header"))
 	}
@@ -804,7 +804,7 @@ func parseTrustMark(ctx oidc.Context, signedMark string, opts parseTrustMarkOpti
 			errors.New("the typ header is invalid"))
 	}
 
-	if parsedMark.Headers[0].Algorithm == "" || parsedMark.Headers[0].Algorithm == string(goidc.None) {
+	if parsedMark.Headers[0].Algorithm == "" || parsedMark.Headers[0].Algorithm == string(goidc.SigAlgNone) {
 		return trustMark{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid trust mark",
 			errors.New("the alg header is invalid"))
 	}
@@ -869,7 +869,7 @@ func parseTrustMark(ctx oidc.Context, signedMark string, opts parseTrustMarkOpti
 				errors.New("the trust mark delegation typ header is invalid"))
 		}
 
-		if parsedTrustMarkDelegation.Headers[0].Algorithm == "" || parsedTrustMarkDelegation.Headers[0].Algorithm == string(goidc.None) {
+		if parsedTrustMarkDelegation.Headers[0].Algorithm == "" || parsedTrustMarkDelegation.Headers[0].Algorithm == string(goidc.SigAlgNone) {
 			return trustMark{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid trust mark",
 				errors.New("the trust mark delegation alg header is invalid"))
 		}

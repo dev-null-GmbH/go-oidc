@@ -127,8 +127,8 @@ func TestHandleUserInfoRequest(t *testing.T) {
 			name: "unsigned response",
 			setup: func(t *testing.T) (oidc.Context, *goidc.Client) {
 				ctx, client := setup(t)
-				ctx.UserInfoSigAlgs = append(ctx.UserInfoSigAlgs, goidc.None)
-				client.UserInfoSigAlg = goidc.None
+				ctx.UserInfoSigAlgs = append(ctx.UserInfoSigAlgs, goidc.SigAlgNone)
+				client.UserInfoSigAlg = goidc.SigAlgNone
 				return ctx, client
 			},
 			validateResp: func(t *testing.T, ctx oidc.Context, client *goidc.Client, resp response) {
@@ -140,7 +140,7 @@ func TestHandleUserInfoRequest(t *testing.T) {
 					t.Fatal("the user info response must be a jwt")
 				}
 
-				claims, err := oidctest.UnsafeClaims(resp.jwtClaims, goidc.None)
+				claims, err := oidctest.UnsafeClaims(resp.jwtClaims, goidc.SigAlgNone)
 				if err != nil {
 					t.Fatalf("error parsing claims: %v", err)
 				}
@@ -233,13 +233,13 @@ func TestHandleUserInfoRequest(t *testing.T) {
 
 				encJWK := oidctest.PrivateRSAOAEPJWK(t, "enc-key")
 				client.UserInfoSigAlg = goidc.SignatureAlgorithm(oidctest.PrivateJWKS(t, ctx).Keys[0].Algorithm)
-				client.UserInfoKeyEncAlg = goidc.RSA_OAEP
-				client.UserInfoContentEncAlg = goidc.A128CBC_HS256
+				client.UserInfoKeyEncAlg = goidc.KeyEncRSAOAEP
+				client.UserInfoContentEncAlg = goidc.ContentEncAlgA128CBCHS256
 				client.JWKS = &goidc.JSONWebKeySet{Keys: []goidc.JSONWebKey{encJWK.Public()}}
 
 				ctx.UserInfoEncEnabled = true
-				ctx.UserInfoKeyEncAlgs = []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP}
-				ctx.UserInfoContentEncAlgs = []goidc.ContentEncryptionAlgorithm{goidc.A128CBC_HS256}
+				ctx.UserInfoKeyEncAlgs = []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP}
+				ctx.UserInfoContentEncAlgs = []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256}
 				return ctx, client
 			},
 			validateResp: func(t *testing.T, _ oidc.Context, _ *goidc.Client, resp response) {

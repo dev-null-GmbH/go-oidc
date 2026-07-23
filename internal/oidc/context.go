@@ -724,7 +724,7 @@ func (ctx Context) JWKByAlg(alg goidc.SignatureAlgorithm) (goidc.JSONWebKey, err
 }
 
 func (ctx Context) Sign(claims any, alg goidc.SignatureAlgorithm, opts *jose.SignerOptions) (string, error) {
-	if alg == goidc.None {
+	if alg == goidc.SigAlgNone {
 		return joseutil.Unsigned(claims, opts), nil
 	}
 

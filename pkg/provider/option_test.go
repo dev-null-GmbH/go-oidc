@@ -414,7 +414,7 @@ func TestWithUserInfoSignatureAlgs(t *testing.T) {
 	}
 
 	// When.
-	err := WithUserInfoSignatureAlgs(goidc.RS256)(p)
+	err := WithUserInfoSignatureAlgs(goidc.SigAlgRS256)(p)
 
 	// Then.
 	if err != nil {
@@ -423,8 +423,8 @@ func TestWithUserInfoSignatureAlgs(t *testing.T) {
 
 	want := &Provider{
 		config: oidc.Configuration{
-			UserInfoDefaultSigAlg: goidc.RS256,
-			UserInfoSigAlgs:       []goidc.SignatureAlgorithm{goidc.RS256},
+			UserInfoDefaultSigAlg: goidc.SigAlgRS256,
+			UserInfoSigAlgs:       []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
 		},
 	}
 	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
@@ -464,8 +464,8 @@ func TestWithUserInfoEncryption(t *testing.T) {
 
 	// When.
 	err := WithUserInfoEncryption(
-		[]goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
-		[]goidc.ContentEncryptionAlgorithm{goidc.A128GCM},
+		[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
+		[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM},
 	)(p)
 
 	// Then.
@@ -476,8 +476,8 @@ func TestWithUserInfoEncryption(t *testing.T) {
 	want := &Provider{
 		config: oidc.Configuration{
 			UserInfoEncEnabled:     true,
-			UserInfoKeyEncAlgs:     []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
-			UserInfoContentEncAlgs: []goidc.ContentEncryptionAlgorithm{goidc.A128GCM},
+			UserInfoKeyEncAlgs:     []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
+			UserInfoContentEncAlgs: []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM},
 		},
 	}
 	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
@@ -494,12 +494,12 @@ func TestWithUserInfoEncryptionValidation(t *testing.T) {
 	}{
 		{
 			name:        "requires key encryption algorithm",
-			contentAlgs: []goidc.ContentEncryptionAlgorithm{goidc.A128GCM},
+			contentAlgs: []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM},
 			wantErr:     "at least one key encryption algorithm is required for user info encryption",
 		},
 		{
 			name:    "requires content encryption algorithm",
-			keyAlgs: []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
+			keyAlgs: []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
 			wantErr: "at least one content encryption algorithm is required for user info encryption",
 		},
 	}
@@ -525,8 +525,8 @@ func TestWithIDTokenEncryption(t *testing.T) {
 
 	// When.
 	err := WithIDTokenEncryption(
-		[]goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
-		[]goidc.ContentEncryptionAlgorithm{goidc.A128GCM},
+		[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
+		[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM},
 	)(p)
 
 	// Then.
@@ -537,8 +537,8 @@ func TestWithIDTokenEncryption(t *testing.T) {
 	want := &Provider{
 		config: oidc.Configuration{
 			IDTokenEncEnabled:     true,
-			IDTokenKeyEncAlgs:     []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
-			IDTokenContentEncAlgs: []goidc.ContentEncryptionAlgorithm{goidc.A128GCM},
+			IDTokenKeyEncAlgs:     []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
+			IDTokenContentEncAlgs: []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM},
 		},
 	}
 	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
@@ -555,12 +555,12 @@ func TestWithIDTokenEncryptionValidation(t *testing.T) {
 	}{
 		{
 			name:        "requires key encryption algorithm",
-			contentAlgs: []goidc.ContentEncryptionAlgorithm{goidc.A128GCM},
+			contentAlgs: []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM},
 			wantErr:     "at least one key encryption algorithm is required for ID token encryption",
 		},
 		{
 			name:    "requires content encryption algorithm",
-			keyAlgs: []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
+			keyAlgs: []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
 			wantErr: "at least one content encryption algorithm is required for ID token encryption",
 		},
 	}
@@ -1085,7 +1085,7 @@ func TestWithJAR(t *testing.T) {
 	}
 
 	// When.
-	err := WithJAR([]goidc.SignatureAlgorithm{goidc.PS256})(p)
+	err := WithJAR([]goidc.SignatureAlgorithm{goidc.SigAlgPS256})(p)
 
 	// Then.
 	if err != nil {
@@ -1095,7 +1095,7 @@ func TestWithJAR(t *testing.T) {
 	want := &Provider{
 		config: oidc.Configuration{
 			JAREnabled: true,
-			JARSigAlgs: []goidc.SignatureAlgorithm{goidc.PS256},
+			JARSigAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgPS256},
 		},
 	}
 	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
@@ -1110,7 +1110,7 @@ func TestJARRequired(t *testing.T) {
 	}
 
 	// When.
-	err := WithJAR([]goidc.SignatureAlgorithm{goidc.PS256}, WithJARRequired())(p)
+	err := WithJAR([]goidc.SignatureAlgorithm{goidc.SigAlgPS256}, WithJARRequired())(p)
 
 	// Then.
 	if err != nil {
@@ -1121,7 +1121,7 @@ func TestJARRequired(t *testing.T) {
 		config: oidc.Configuration{
 			JAREnabled:  true,
 			JARRequired: true,
-			JARSigAlgs:  []goidc.SignatureAlgorithm{goidc.PS256},
+			JARSigAlgs:  []goidc.SignatureAlgorithm{goidc.SigAlgPS256},
 		},
 	}
 	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
@@ -1137,8 +1137,8 @@ func TestJAREncryption(t *testing.T) {
 
 	// When.
 	err := WithJAREncryption(
-		[]goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP_256},
-		[]goidc.ContentEncryptionAlgorithm{goidc.A128GCM},
+		[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP256},
+		[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM},
 	)(p)
 
 	// Then.
@@ -1149,8 +1149,8 @@ func TestJAREncryption(t *testing.T) {
 	want := &Provider{
 		config: oidc.Configuration{
 			JAREncEnabled:     true,
-			JARKeyEncAlgs:     []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP_256},
-			JARContentEncAlgs: []goidc.ContentEncryptionAlgorithm{goidc.A128GCM},
+			JARKeyEncAlgs:     []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP256},
+			JARContentEncAlgs: []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM},
 		},
 	}
 	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
@@ -1167,12 +1167,12 @@ func TestJAREncryptionValidation(t *testing.T) {
 	}{
 		{
 			name:        "requires key encryption algorithm",
-			contentAlgs: []goidc.ContentEncryptionAlgorithm{goidc.A128GCM},
+			contentAlgs: []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM},
 			wantErr:     "at least one key encryption algorithm is required for JAR encryption",
 		},
 		{
 			name:    "requires content encryption algorithm",
-			keyAlgs: []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
+			keyAlgs: []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
 			wantErr: "at least one content encryption algorithm is required for JAR encryption",
 		},
 	}
@@ -1197,7 +1197,7 @@ func TestWithJARM(t *testing.T) {
 	}
 
 	// When.
-	err := WithJARM([]goidc.SignatureAlgorithm{goidc.RS256})(p)
+	err := WithJARM([]goidc.SignatureAlgorithm{goidc.SigAlgRS256})(p)
 
 	// Then.
 	if err != nil {
@@ -1207,8 +1207,8 @@ func TestWithJARM(t *testing.T) {
 	want := &Provider{
 		config: oidc.Configuration{
 			JARMEnabled:       true,
-			JARMSigAlgDefault: goidc.RS256,
-			JARMSigAlgs:       []goidc.SignatureAlgorithm{goidc.RS256},
+			JARMSigAlgDefault: goidc.SigAlgRS256,
+			JARMSigAlgs:       []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
 		},
 	}
 	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
@@ -1224,8 +1224,8 @@ func TestJARMEncryption(t *testing.T) {
 
 	// When.
 	err := WithJARMEncryption(
-		[]goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
-		[]goidc.ContentEncryptionAlgorithm{goidc.A128GCM},
+		[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
+		[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM},
 	)(p)
 
 	// Then.
@@ -1236,8 +1236,8 @@ func TestJARMEncryption(t *testing.T) {
 	want := &Provider{
 		config: oidc.Configuration{
 			JARMEncEnabled:     true,
-			JARMKeyEncAlgs:     []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
-			JARMContentEncAlgs: []goidc.ContentEncryptionAlgorithm{goidc.A128GCM},
+			JARMKeyEncAlgs:     []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
+			JARMContentEncAlgs: []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM},
 		},
 	}
 	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
@@ -1254,12 +1254,12 @@ func TestJARMEncryptionValidation(t *testing.T) {
 	}{
 		{
 			name:        "requires key encryption algorithm",
-			contentAlgs: []goidc.ContentEncryptionAlgorithm{goidc.A128GCM},
+			contentAlgs: []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM},
 			wantErr:     "at least one key encryption algorithm is required for JARM encryption",
 		},
 		{
 			name:    "requires content encryption algorithm",
-			keyAlgs: []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
+			keyAlgs: []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
 			wantErr: "at least one content encryption algorithm is required for JARM encryption",
 		},
 	}
@@ -1489,7 +1489,7 @@ func TestWithDPoP(t *testing.T) {
 	}
 
 	// When.
-	err := WithDPoP([]goidc.SignatureAlgorithm{goidc.PS256})(p)
+	err := WithDPoP([]goidc.SignatureAlgorithm{goidc.SigAlgPS256})(p)
 
 	// Then.
 	if err != nil {
@@ -1499,7 +1499,7 @@ func TestWithDPoP(t *testing.T) {
 	want := &Provider{
 		config: oidc.Configuration{
 			DPoPEnabled: true,
-			DPoPSigAlgs: []goidc.SignatureAlgorithm{goidc.PS256},
+			DPoPSigAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgPS256},
 		},
 	}
 	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
@@ -1514,7 +1514,7 @@ func TestWithDPoPRequired(t *testing.T) {
 	}
 
 	// When.
-	err := WithDPoP([]goidc.SignatureAlgorithm{goidc.PS256}, WithDPoPRequired())(p)
+	err := WithDPoP([]goidc.SignatureAlgorithm{goidc.SigAlgPS256}, WithDPoPRequired())(p)
 
 	// Then.
 	if err != nil {
@@ -1525,7 +1525,7 @@ func TestWithDPoPRequired(t *testing.T) {
 		config: oidc.Configuration{
 			DPoPEnabled:  true,
 			DPoPRequired: true,
-			DPoPSigAlgs:  []goidc.SignatureAlgorithm{goidc.PS256},
+			DPoPSigAlgs:  []goidc.SignatureAlgorithm{goidc.SigAlgPS256},
 		},
 	}
 	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
@@ -2187,7 +2187,7 @@ func TestWithCIBAJAR(t *testing.T) {
 	}
 
 	// When.
-	err := WithCIBAJAR([]goidc.SignatureAlgorithm{goidc.PS256})(p)
+	err := WithCIBAJAR([]goidc.SignatureAlgorithm{goidc.SigAlgPS256})(p)
 
 	// Then.
 	if err != nil {
@@ -2197,7 +2197,7 @@ func TestWithCIBAJAR(t *testing.T) {
 	want := &Provider{
 		config: oidc.Configuration{
 			CIBAJAREnabled: true,
-			CIBAJARSigAlgs: []goidc.SignatureAlgorithm{goidc.PS256},
+			CIBAJARSigAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgPS256},
 		},
 	}
 	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
@@ -2212,7 +2212,7 @@ func TestWithCIBAJARRequired(t *testing.T) {
 	}
 
 	// When.
-	err := WithCIBAJAR([]goidc.SignatureAlgorithm{goidc.PS256}, WithCIBAJARRequired())(p)
+	err := WithCIBAJAR([]goidc.SignatureAlgorithm{goidc.SigAlgPS256}, WithCIBAJARRequired())(p)
 
 	// Then.
 	if err != nil {
@@ -2223,7 +2223,7 @@ func TestWithCIBAJARRequired(t *testing.T) {
 		config: oidc.Configuration{
 			CIBAJAREnabled:  true,
 			CIBAJARRequired: true,
-			CIBAJARSigAlgs:  []goidc.SignatureAlgorithm{goidc.PS256},
+			CIBAJARSigAlgs:  []goidc.SignatureAlgorithm{goidc.SigAlgPS256},
 		},
 	}
 	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
@@ -2752,14 +2752,14 @@ func TestWithSecretBasicAuthn(t *testing.T) {
 
 func TestWithPrivateKeyJWTAuthn(t *testing.T) {
 	p := &Provider{}
-	if err := WithPrivateKeyJWTAuthn(goidc.RS256, goidc.PS256)(p); err != nil {
+	if err := WithPrivateKeyJWTAuthn(goidc.SigAlgRS256, goidc.SigAlgPS256)(p); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	wantMethods := []goidc.AuthnMethod{goidc.AuthnMethodPrivateKeyJWT}
 	if diff := cmp.Diff(p.config.AuthnMethods, wantMethods); diff != "" {
 		t.Error(diff)
 	}
-	wantAlgs := []goidc.SignatureAlgorithm{goidc.RS256, goidc.PS256}
+	wantAlgs := []goidc.SignatureAlgorithm{goidc.SigAlgRS256, goidc.SigAlgPS256}
 	if diff := cmp.Diff(p.config.AuthnMethodPrivateKeyJWTSigAlgs, wantAlgs); diff != "" {
 		t.Error(diff)
 	}
@@ -2767,14 +2767,14 @@ func TestWithPrivateKeyJWTAuthn(t *testing.T) {
 
 func TestWithSecretJWTAuthn(t *testing.T) {
 	p := &Provider{}
-	if err := WithSecretJWTAuthn(goidc.HS256)(p); err != nil {
+	if err := WithSecretJWTAuthn(goidc.SigAlgHS256)(p); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	wantMethods := []goidc.AuthnMethod{goidc.AuthnMethodSecretJWT}
 	if diff := cmp.Diff(p.config.AuthnMethods, wantMethods); diff != "" {
 		t.Error(diff)
 	}
-	wantAlgs := []goidc.SignatureAlgorithm{goidc.HS256}
+	wantAlgs := []goidc.SignatureAlgorithm{goidc.SigAlgHS256}
 	if diff := cmp.Diff(p.config.AuthnMethodSecretJWTSigAlgs, wantAlgs); diff != "" {
 		t.Error(diff)
 	}
@@ -2915,24 +2915,24 @@ func TestWithVCISelfResponseEncryption(t *testing.T) {
 	}{
 		{
 			name:        "success",
-			keyAlgs:     []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
-			contentAlgs: []goidc.ContentEncryptionAlgorithm{goidc.A128GCM},
+			keyAlgs:     []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
+			contentAlgs: []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM},
 			opts:        []VCISelfResponseEncryptionOption{WithVCISelfResponseEncryptionRequired()},
 			want: oidc.Configuration{
 				VCISelfResponseEncEnabled:     true,
-				VCISelfResponseEncKeyAlgs:     []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
-				VCISelfResponseEncContentAlgs: []goidc.ContentEncryptionAlgorithm{goidc.A128GCM},
+				VCISelfResponseEncKeyAlgs:     []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
+				VCISelfResponseEncContentAlgs: []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM},
 				VCISelfResponseEncRequired:    true,
 			},
 		},
 		{
 			name:        "requires key encryption algorithm",
-			contentAlgs: []goidc.ContentEncryptionAlgorithm{goidc.A128GCM},
+			contentAlgs: []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM},
 			wantErr:     "at least one key encryption algorithm is required for VCI self response encryption",
 		},
 		{
 			name:    "requires content encryption algorithm",
-			keyAlgs: []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
+			keyAlgs: []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
 			wantErr: "at least one content encryption algorithm is required for VCI self response encryption",
 		},
 	}
@@ -2995,7 +2995,7 @@ func TestWithOpenIDFed(t *testing.T) {
 	err := WithOpenIDFederation(OpenIDFedConfig{
 		Manager:        storage.NewManager(1),
 		JWKSFunc:       jwksFunc,
-		SigAlg:         goidc.RS256,
+		SigAlg:         goidc.SigAlgRS256,
 		AuthorityHints: []string{"https://authority.hint"},
 		TrustedAnchors: []string{"https://trust.anchor"},
 	})(p)
@@ -3021,8 +3021,8 @@ func TestWithOpenIDFed(t *testing.T) {
 		t.Error("OpenIDFedTrustedAuthorities not set correctly")
 	}
 
-	if p.config.OpenIDFedSigAlg != goidc.RS256 {
-		t.Errorf("OpenIDFedSigAlg = %s, want %s", p.config.OpenIDFedSigAlg, goidc.RS256)
+	if p.config.OpenIDFedSigAlg != goidc.SigAlgRS256 {
+		t.Errorf("OpenIDFedSigAlg = %s, want %s", p.config.OpenIDFedSigAlg, goidc.SigAlgRS256)
 	}
 }
 
@@ -3033,7 +3033,7 @@ func TestOpenIDFedSignatureAlgs(t *testing.T) {
 	}
 
 	// When.
-	err := WithOpenIDFedSignatureAlgs(goidc.RS256, goidc.ES256)(p)
+	err := WithOpenIDFedSignatureAlgs(goidc.SigAlgRS256, goidc.SigAlgES256)(p)
 
 	// Then.
 	if err != nil {
@@ -3042,7 +3042,7 @@ func TestOpenIDFedSignatureAlgs(t *testing.T) {
 
 	want := &Provider{
 		config: oidc.Configuration{
-			OpenIDFedSigAlgs: []goidc.SignatureAlgorithm{goidc.RS256, goidc.ES256},
+			OpenIDFedSigAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256, goidc.SigAlgES256},
 		},
 	}
 	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
@@ -3221,7 +3221,7 @@ func TestWithJARM_NoneAlgorithm(t *testing.T) {
 	}
 
 	// When.
-	err := WithJARM([]goidc.SignatureAlgorithm{goidc.None})(p)
+	err := WithJARM([]goidc.SignatureAlgorithm{goidc.SigAlgNone})(p)
 
 	// Then.
 	if err == nil {
@@ -3236,7 +3236,7 @@ func TestWithDPoP_NoneAlgorithm(t *testing.T) {
 	}
 
 	// When.
-	err := WithDPoP([]goidc.SignatureAlgorithm{goidc.None})(p)
+	err := WithDPoP([]goidc.SignatureAlgorithm{goidc.SigAlgNone})(p)
 
 	// Then.
 	if err == nil {

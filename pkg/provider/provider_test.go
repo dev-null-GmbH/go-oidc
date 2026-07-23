@@ -33,7 +33,7 @@ func TestNew(t *testing.T) {
 				return Config{
 					Issuer:      issuer,
 					JWKS:        jwksFunc,
-					IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.RS256},
+					IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
 				}, nil
 			},
 			want: oidc.Configuration{
@@ -48,8 +48,8 @@ func TestNew(t *testing.T) {
 				AuthorizationEndpoint:    defaultEndpointAuthorize,
 				UserInfoEndpoint:         defaultEndpointUserInfo,
 				AuthnMethods:             []goidc.AuthnMethod{goidc.AuthnMethodSecretPost},
-				IDTokenDefaultSigAlg:     goidc.RS256,
-				IDTokenSigAlgs:           []goidc.SignatureAlgorithm{goidc.RS256},
+				IDTokenDefaultSigAlg:     goidc.SigAlgRS256,
+				IDTokenSigAlgs:           []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
 				IDTokenLifetimeSecs:      defaultIDTokenLifetimeSecs,
 				JWTLifetimeSecs:          defaultJWTLifetimeSecs,
 			},
@@ -89,7 +89,7 @@ func TestNew(t *testing.T) {
 				return Config{
 						Issuer:      issuer,
 						JWKS:        jwksFunc,
-						IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.RS256},
+						IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
 					}, []Option{
 						WithAuthCodeGrant(AuthCodeGrantConfig{
 							Manager: manager,
@@ -98,11 +98,11 @@ func TestNew(t *testing.T) {
 								goidc.ResponseTypeCodeAndToken, goidc.ResponseTypeCodeAndIDTokenAndToken},
 						},
 							WithPAR(manager),
-							WithJAR([]goidc.SignatureAlgorithm{goidc.RS256}, WithJAREncryption(
-								[]goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
-								[]goidc.ContentEncryptionAlgorithm{goidc.A128CBC_HS256},
+							WithJAR([]goidc.SignatureAlgorithm{goidc.SigAlgRS256}, WithJAREncryption(
+								[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
+								[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256},
 							)),
-							WithJARM([]goidc.SignatureAlgorithm{goidc.RS256}),
+							WithJARM([]goidc.SignatureAlgorithm{goidc.SigAlgRS256}),
 							WithFormPostResponseMode(),
 						),
 						WithCIBAGrant(CIBAGrantConfig{
@@ -111,15 +111,15 @@ func TestNew(t *testing.T) {
 						},
 							WithCIBASessionHandler(nil),
 						),
-						WithPrivateKeyJWTAuthn(goidc.RS256),
-						WithSecretJWTAuthn(goidc.HS256),
+						WithPrivateKeyJWTAuthn(goidc.SigAlgRS256),
+						WithSecretJWTAuthn(goidc.SigAlgHS256),
 						WithDCR(manager),
 						WithTokenIntrospection(nil),
 						WithTokenRevocation(nil),
-						WithUserInfoSignatureAlgs(goidc.PS256),
+						WithUserInfoSignatureAlgs(goidc.SigAlgPS256),
 						WithUserInfoEncryption(
-							[]goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
-							[]goidc.ContentEncryptionAlgorithm{goidc.A128CBC_HS256},
+							[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
+							[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256},
 						),
 					}
 			},
@@ -135,10 +135,10 @@ func TestNew(t *testing.T) {
 				TokenEndpoint:            defaultEndpointToken,
 				AuthorizationEndpoint:    defaultEndpointAuthorize,
 				UserInfoEndpoint:         defaultEndpointUserInfo,
-				UserInfoDefaultSigAlg:    goidc.PS256,
-				UserInfoSigAlgs:          []goidc.SignatureAlgorithm{goidc.PS256},
-				IDTokenDefaultSigAlg:     goidc.RS256,
-				IDTokenSigAlgs:           []goidc.SignatureAlgorithm{goidc.RS256},
+				UserInfoDefaultSigAlg:    goidc.SigAlgPS256,
+				UserInfoSigAlgs:          []goidc.SignatureAlgorithm{goidc.SigAlgPS256},
+				IDTokenDefaultSigAlg:     goidc.SigAlgRS256,
+				IDTokenSigAlgs:           []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
 				IDTokenLifetimeSecs:      defaultIDTokenLifetimeSecs,
 				JWTLifetimeSecs:          defaultJWTLifetimeSecs,
 				GrantTypes: []goidc.GrantType{
@@ -156,21 +156,21 @@ func TestNew(t *testing.T) {
 					goidc.ResponseTypeCodeAndIDTokenAndToken,
 				},
 				AuthnMethods:                    []goidc.AuthnMethod{goidc.AuthnMethodPrivateKeyJWT, goidc.AuthnMethodSecretJWT},
-				AuthnMethodPrivateKeyJWTSigAlgs: []goidc.SignatureAlgorithm{goidc.RS256},
-				AuthnMethodSecretJWTSigAlgs:     []goidc.SignatureAlgorithm{goidc.HS256},
+				AuthnMethodPrivateKeyJWTSigAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
+				AuthnMethodSecretJWTSigAlgs:     []goidc.SignatureAlgorithm{goidc.SigAlgHS256},
 				DCREnabled:                      true,
 				DCREndpoint:                     defaultEndpointDynamicClient,
 				PAREnabled:                      true,
 				PAREndpoint:                     defaultEndpointPushedAuthorizationRequest,
 				PARLifetimeSecs:                 defaultPARLifetimeSecs,
 				JAREnabled:                      true,
-				JARSigAlgs:                      []goidc.SignatureAlgorithm{goidc.RS256},
+				JARSigAlgs:                      []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
 				JAREncEnabled:                   true,
-				JARKeyEncAlgs:                   []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
-				JARContentEncAlgs:               []goidc.ContentEncryptionAlgorithm{goidc.A128CBC_HS256},
+				JARKeyEncAlgs:                   []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
+				JARContentEncAlgs:               []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256},
 				JARMEnabled:                     true,
-				JARMSigAlgDefault:               goidc.RS256,
-				JARMSigAlgs:                     []goidc.SignatureAlgorithm{goidc.RS256},
+				JARMSigAlgDefault:               goidc.SigAlgRS256,
+				JARMSigAlgs:                     []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
 				ResponseModes: []goidc.ResponseMode{
 					goidc.ResponseModeQuery,
 					goidc.ResponseModeFragment,
@@ -191,8 +191,8 @@ func TestNew(t *testing.T) {
 				CIBADefaultSessionLifetimeSecs: 60,
 				CIBAPollingIntervalSecs:        5,
 				UserInfoEncEnabled:             true,
-				UserInfoKeyEncAlgs:             []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
-				UserInfoContentEncAlgs:         []goidc.ContentEncryptionAlgorithm{goidc.A128CBC_HS256},
+				UserInfoKeyEncAlgs:             []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
+				UserInfoContentEncAlgs:         []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256},
 				AuthCodeLifetimeSecs:           60,
 			},
 			ignores: []string{
@@ -264,7 +264,7 @@ func TestNew_DefaultsVCISelfBatchSize(t *testing.T) {
 	p, err := New(Config{
 		Issuer:      "https://example.com",
 		JWKS:        func(context.Context) (goidc.JSONWebKeySet, error) { return goidc.JSONWebKeySet{}, nil },
-		IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.RS256},
+		IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
 	}, WithVCI(WithVCISelf(nil)))
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -281,7 +281,7 @@ func TestNew_DefaultsVCISelfNotification(t *testing.T) {
 	p, err := New(Config{
 		Issuer:      "https://example.com",
 		JWKS:        func(context.Context) (goidc.JSONWebKeySet, error) { return goidc.JSONWebKeySet{}, nil },
-		IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.RS256},
+		IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
 	}, WithVCI(WithVCISelf(nil, WithVCISelfNotification(nil, func(context.Context, *goidc.VCNotification, goidc.VCNotificationEvent) error {
 		return nil
 	}))))
@@ -345,7 +345,7 @@ func TestNew_ValidationErrors(t *testing.T) {
 		{
 			name: "dcr secret lifetime requires secret client auth",
 			opts: []Option{
-				WithPrivateKeyJWTAuthn(goidc.PS256),
+				WithPrivateKeyJWTAuthn(goidc.SigAlgPS256),
 				WithDCR(nil, WithDCRSecretLifetime(300)),
 			},
 			wantErr: "dcr secret lifetime requires a secret-based token authentication method",
@@ -353,7 +353,7 @@ func TestNew_ValidationErrors(t *testing.T) {
 		{
 			name: "dcr secret rotation requires secret client auth",
 			opts: []Option{
-				WithPrivateKeyJWTAuthn(goidc.PS256),
+				WithPrivateKeyJWTAuthn(goidc.SigAlgPS256),
 				WithDCR(nil, WithDCRSecretRotation()),
 			},
 			wantErr: "dcr secret rotation requires a secret-based token authentication method",
@@ -410,7 +410,7 @@ func TestNew_ValidationErrors(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := New(Config{Issuer: issuer, JWKS: jwksFunc, IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.RS256}}, test.opts...)
+			_, err := New(Config{Issuer: issuer, JWKS: jwksFunc, IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256}}, test.opts...)
 			if err == nil {
 				t.Fatal("New() error = nil, want non-nil")
 			}
@@ -431,10 +431,10 @@ func TestMakeToken(t *testing.T) {
 			JWKS: func(ctx context.Context) (goidc.JSONWebKeySet, error) {
 				return goidc.JSONWebKeySet{Keys: []goidc.JSONWebKey{jwk}}, nil
 			},
-			IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.RS256},
+			IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
 		},
 		WithTokenOptions(func(_ context.Context, _ *goidc.Grant, _ *goidc.Client) goidc.TokenOptions {
-			return goidc.NewJWTTokenOptions(goidc.RS256, 60)
+			return goidc.NewJWTTokenOptions(goidc.SigAlgRS256, 60)
 		}),
 	)
 

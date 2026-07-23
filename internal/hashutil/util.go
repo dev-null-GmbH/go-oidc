@@ -17,7 +17,7 @@ func Thumbprint(s string) string {
 }
 
 // HalfHash generates a half-hash of a given claim using the given algorithm.
-// [goidc.None] is not supported.
+// [goidc.SigAlgNone] is not supported.
 func HalfHash(claim string, alg goidc.SignatureAlgorithm) string {
 	h := HashAlg(alg).New()
 	h.Write([]byte(claim))
@@ -27,9 +27,9 @@ func HalfHash(claim string, alg goidc.SignatureAlgorithm) string {
 
 func HashAlg(alg goidc.SignatureAlgorithm) crypto.Hash {
 	switch alg {
-	case goidc.RS512, goidc.ES512, goidc.PS512, goidc.HS512:
+	case goidc.SigAlgRS512, goidc.SigAlgES512, goidc.SigAlgPS512, goidc.SigAlgHS512:
 		return crypto.SHA512
-	case goidc.RS384, goidc.ES384, goidc.PS384, goidc.HS384:
+	case goidc.SigAlgRS384, goidc.SigAlgES384, goidc.SigAlgPS384, goidc.SigAlgHS384:
 		return crypto.SHA384
 	default:
 		return crypto.SHA256

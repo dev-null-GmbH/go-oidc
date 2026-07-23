@@ -81,7 +81,7 @@ func jarFromRequestObject(ctx oidc.Context, reqObject string, c *goidc.Client, o
 		jarAlgorithms = []goidc.SignatureAlgorithm{c.JARSigAlg}
 	}
 
-	if slices.Contains(ctx.JARSigAlgs, goidc.None) && joseutil.IsUnsignedJWT(reqObject) {
+	if slices.Contains(ctx.JARSigAlgs, goidc.SigAlgNone) && joseutil.IsUnsignedJWT(reqObject) {
 		parsedJWT, err := jwt.ParseSigned(reqObject, jarAlgorithms)
 		if err != nil {
 			return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequestObject, "invalid request object",

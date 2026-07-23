@@ -46,17 +46,17 @@ func TestHalfHash(t *testing.T) {
 	}{
 		{
 			input: "rs256",
-			alg:   goidc.RS256,
+			alg:   goidc.SigAlgRS256,
 			want:  "mRCcNV8hQeoi1kP5GmbbJg",
 		},
 		{
 			input: "rs384",
-			alg:   goidc.RS384,
+			alg:   goidc.SigAlgRS384,
 			want:  "hgd3-_rJs8dp_6Ac-oZS9U5NSuZSCExp",
 		},
 		{
 			input: "rs512",
-			alg:   goidc.RS512,
+			alg:   goidc.SigAlgRS512,
 			want:  "DUcIk-W2a9h9Gs2qWY9Awn7XvdLoHSVKXxWj4XwyRbc",
 		},
 	}

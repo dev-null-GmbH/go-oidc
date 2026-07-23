@@ -379,7 +379,7 @@ func WithPrivateKeyJWTAuthn(algs ...goidc.SignatureAlgorithm) Option {
 		if len(algs) == 0 {
 			return errors.New("at least one signature algorithm is required for private_key_jwt")
 		}
-		if slices.Contains(algs, goidc.None) {
+		if slices.Contains(algs, goidc.SigAlgNone) {
 			return errors.New("'none' algorithm is not allowed for private_key_jwt")
 		}
 		for _, a := range algs {
@@ -400,7 +400,7 @@ func WithSecretJWTAuthn(algs ...goidc.SignatureAlgorithm) Option {
 		if len(algs) == 0 {
 			return errors.New("at least one signature algorithm is required for client_secret_jwt")
 		}
-		if slices.Contains(algs, goidc.None) {
+		if slices.Contains(algs, goidc.SigAlgNone) {
 			return errors.New("'none' algorithm is not allowed for client_secret_jwt")
 		}
 		for _, a := range algs {
@@ -928,7 +928,7 @@ func WithJARM(sigAlgs []goidc.SignatureAlgorithm, opts ...JARMOption) AuthCodeGr
 		if len(sigAlgs) == 0 {
 			return errors.New("at least one signature algorithm is required for JARM")
 		}
-		if slices.Contains(sigAlgs, goidc.None) {
+		if slices.Contains(sigAlgs, goidc.SigAlgNone) {
 			return errors.New("'none' algorithm is not allowed for JARM")
 		}
 		p.config.JARMEnabled = true
@@ -1547,7 +1547,7 @@ func WithDPoP(sigAlgs []goidc.SignatureAlgorithm, opts ...DPoPOption) Option {
 		if len(sigAlgs) == 0 {
 			return errors.New("at least one signature algorithm is required for DPoP")
 		}
-		if slices.Contains(sigAlgs, goidc.None) {
+		if slices.Contains(sigAlgs, goidc.SigAlgNone) {
 			return errors.New("'none' algorithm is not allowed for DPoP")
 		}
 		p.config.DPoPEnabled = true

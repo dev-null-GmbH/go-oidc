@@ -196,7 +196,7 @@ func TestAuthenticated(t *testing.T) {
 					goidc.ClaimTokenID:  "random_jti",
 				}
 				signer, err := jose.NewSigner(
-					jose.SigningKey{Algorithm: goidc.HS256, Key: []byte(secret)},
+					jose.SigningKey{Algorithm: goidc.SigAlgHS256, Key: []byte(secret)},
 					(&jose.SignerOptions{}).WithType("jwt"),
 				)
 				if err != nil {
@@ -305,7 +305,7 @@ func TestAuthenticated(t *testing.T) {
 			name: "private key jwt client informed signing algorithm invalid signature",
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, jwk := setUpPrivateKeyJWTAuthn(t)
-				c.TokenAuthnSigAlg = goidc.PS256
+				c.TokenAuthnSigAlg = goidc.SigAlgPS256
 				now := timeutil.TimestampNow()
 				claims := map[string]any{
 					goidc.ClaimIssuer:   c.ID,
@@ -446,7 +446,7 @@ func TestAuthenticated(t *testing.T) {
 				}
 				ctx := oidctest.NewContext(t)
 				ctx.StaticClients = append(ctx.StaticClients, c)
-				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.PS256}
+				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgPS256}
 				ctx.Request.PostForm = map[string][]string{
 					"client_id":             {c.ID},
 					"client_assertion":      {"eyJhbGciOiJQUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJpbnZhbGlkX2NsaWVudF9pZCIsInN1YiI6ImludmFsaWRfY2xpZW50X2lkIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.Nog3Y_jeWO0dugsTKCxLx_vGcCbE6kRHzo7wAvfnKe7_uCW9UB1f-WhX4fMKXvJ8v-bScuyx2pTgy4C6ie0ZAcOn_XESblpr_0epoUF2ibdR5DGPKcrPs-S8jp8yvBOxbUmq0jyU9V5H33052h5gBsEAcYXnM150S-ch_1ISL1EgDiZrOm9lYhisp7Jp_mqUZx3OXjfWruz4d6oLe5FeCg7NsB5PpT_N26VZ6Qxt9x6OKUvphRHN1niETkf3_1uTr8CltHesfFl4NnaXSP5f7QStg9JKIpjgJnl-LeQe2C4tM8yHCTENxgHX4oTzrfiEfdN3TwoHDFNszcXnnAUQCg"},
@@ -695,8 +695,8 @@ func TestAuthenticated(t *testing.T) {
 			name: "attestation jwt success",
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
-				clientJWK := goidc.JSONWebKey{Key: clientKey, Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
+				clientJWK := goidc.JSONWebKey{Key: clientKey, Algorithm: string(goidc.SigAlgES256)}
 
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
@@ -719,11 +719,11 @@ func TestAuthenticated(t *testing.T) {
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
 				ctx.DPoPEnabled = true
-				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.ES256}
+				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
 				ctx.Request.Method = http.MethodPost
 				ctx.Request.RequestURI = "/token"
 
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
 					goidc.ClaimExpiry: timeutil.TimestampNow() + 300, "cnf": map[string]any{"jwk": cnfJWK},
@@ -742,7 +742,7 @@ func TestAuthenticated(t *testing.T) {
 			name: "attestation jwt unknown issuer",
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, _, clientKey := setUpAttestationAuthn(t)
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
 				unknownKey := oidctest.PrivateRS256JWK(t, "unknown_key", goidc.KeyUsageSignature)
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://unknown-issuer.com", goidc.ClaimSubject: c.ID,
@@ -757,7 +757,7 @@ func TestAuthenticated(t *testing.T) {
 			name: "attestation jwt invalid signature",
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, _, clientKey := setUpAttestationAuthn(t)
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
 				wrongKey := oidctest.PrivateRS256JWK(t, "issuer_key", goidc.KeyUsageSignature)
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
@@ -772,7 +772,7 @@ func TestAuthenticated(t *testing.T) {
 			name: "attestation jwt missing exp",
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
 					"cnf": map[string]any{"jwk": cnfJWK},
@@ -786,7 +786,7 @@ func TestAuthenticated(t *testing.T) {
 			name: "attestation jwt expired",
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
 					goidc.ClaimExpiry: timeutil.TimestampNow() - 10, "cnf": map[string]any{"jwk": cnfJWK},
@@ -800,7 +800,7 @@ func TestAuthenticated(t *testing.T) {
 			name: "attestation jwt sub mismatch",
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, _, issuerKey, clientKey := setUpAttestationAuthn(t)
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: "wrong_client_id",
 					goidc.ClaimExpiry: timeutil.TimestampNow() + 300, "cnf": map[string]any{"jwk": cnfJWK},
@@ -814,7 +814,7 @@ func TestAuthenticated(t *testing.T) {
 			name: "attestation pop invalid signature",
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
 					goidc.ClaimExpiry: timeutil.TimestampNow() + 300, "cnf": map[string]any{"jwk": cnfJWK},
@@ -823,7 +823,7 @@ func TestAuthenticated(t *testing.T) {
 
 				// Sign PoP with a different key than cnf.jwk.
 				wrongKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-				wrongJWK := goidc.JSONWebKey{Key: wrongKey, Algorithm: string(goidc.ES256)}
+				wrongJWK := goidc.JSONWebKey{Key: wrongKey, Algorithm: string(goidc.SigAlgES256)}
 				pop := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: c.ID, goidc.ClaimAudience: ctx.Issuer(),
 					goidc.ClaimExpiry: timeutil.TimestampNow() + 60, goidc.ClaimIssuedAt: timeutil.TimestampNow(),
@@ -838,8 +838,8 @@ func TestAuthenticated(t *testing.T) {
 			name: "attestation pop missing exp",
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
-				clientJWK := goidc.JSONWebKey{Key: clientKey, Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
+				clientJWK := goidc.JSONWebKey{Key: clientKey, Algorithm: string(goidc.SigAlgES256)}
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
 					goidc.ClaimExpiry: timeutil.TimestampNow() + 300, "cnf": map[string]any{"jwk": cnfJWK},
@@ -859,8 +859,8 @@ func TestAuthenticated(t *testing.T) {
 			name: "attestation pop missing jti",
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
-				clientJWK := goidc.JSONWebKey{Key: clientKey, Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
+				clientJWK := goidc.JSONWebKey{Key: clientKey, Algorithm: string(goidc.SigAlgES256)}
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
 					goidc.ClaimExpiry: timeutil.TimestampNow() + 300, "cnf": map[string]any{"jwk": cnfJWK},
@@ -880,8 +880,8 @@ func TestAuthenticated(t *testing.T) {
 			name: "attestation pop invalid issuer",
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
-				clientJWK := goidc.JSONWebKey{Key: clientKey, Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
+				clientJWK := goidc.JSONWebKey{Key: clientKey, Algorithm: string(goidc.SigAlgES256)}
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
 					goidc.ClaimExpiry: timeutil.TimestampNow() + 300, "cnf": map[string]any{"jwk": cnfJWK},
@@ -904,9 +904,9 @@ func TestAuthenticated(t *testing.T) {
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
 				ctx.DPoPEnabled = true
-				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.ES256}
+				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
 
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
 					goidc.ClaimExpiry: timeutil.TimestampNow() + 300, "cnf": map[string]any{"jwk": cnfJWK},
@@ -926,11 +926,11 @@ func TestAuthenticated(t *testing.T) {
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
 				ctx.DPoPEnabled = true
-				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.ES256}
+				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
 				ctx.Request.Method = http.MethodPost
 				ctx.Request.RequestURI = "/token"
 
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
 					goidc.ClaimExpiry: timeutil.TimestampNow() + 300, "cnf": map[string]any{"jwk": cnfJWK},
@@ -951,9 +951,9 @@ func TestAuthenticated(t *testing.T) {
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
 				ctx.DPoPEnabled = true
-				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.ES256}
+				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
 
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
 					goidc.ClaimExpiry: timeutil.TimestampNow() + 300, "cnf": map[string]any{"jwk": cnfJWK},
@@ -967,7 +967,7 @@ func TestAuthenticated(t *testing.T) {
 			name: "attestation dpop disabled no pop header",
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
 					goidc.ClaimExpiry: timeutil.TimestampNow() + 300, "cnf": map[string]any{"jwk": cnfJWK},
@@ -981,7 +981,7 @@ func TestAuthenticated(t *testing.T) {
 			name: "attestation multiple attestation headers",
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
 					goidc.ClaimExpiry: timeutil.TimestampNow() + 300, "cnf": map[string]any{"jwk": cnfJWK},
@@ -1015,7 +1015,7 @@ func TestAuthenticated(t *testing.T) {
 			name: "attestation jwt invalid typ header",
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
 					goidc.ClaimExpiry: timeutil.TimestampNow() + 300, "cnf": map[string]any{"jwk": cnfJWK},
@@ -1029,8 +1029,8 @@ func TestAuthenticated(t *testing.T) {
 			name: "attestation pop invalid typ header",
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
-				clientJWK := goidc.JSONWebKey{Key: clientKey, Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
+				clientJWK := goidc.JSONWebKey{Key: clientKey, Algorithm: string(goidc.SigAlgES256)}
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
 					goidc.ClaimExpiry: timeutil.TimestampNow() + 300, "cnf": map[string]any{"jwk": cnfJWK},
@@ -1051,8 +1051,8 @@ func TestAuthenticated(t *testing.T) {
 			name: "attestation pop stale iat",
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
-				clientJWK := goidc.JSONWebKey{Key: clientKey, Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
+				clientJWK := goidc.JSONWebKey{Key: clientKey, Algorithm: string(goidc.SigAlgES256)}
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
 					goidc.ClaimExpiry: timeutil.TimestampNow() + 300, "cnf": map[string]any{"jwk": cnfJWK},
@@ -1076,11 +1076,11 @@ func TestAuthenticated(t *testing.T) {
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
 				ctx.DPoPEnabled = true
-				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.ES256}
+				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
 				ctx.Request.Method = http.MethodPost
 				ctx.Request.RequestURI = "/par"
 
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
 					goidc.ClaimExpiry: timeutil.TimestampNow() + 300, "cnf": map[string]any{"jwk": cnfJWK},
@@ -1101,9 +1101,9 @@ func TestAuthenticated(t *testing.T) {
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
 				ctx.DPoPEnabled = true
-				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.ES256}
+				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
 
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
 					goidc.ClaimExpiry: timeutil.TimestampNow() + 300, "cnf": map[string]any{"jwk": cnfJWK},
@@ -1123,7 +1123,7 @@ func TestAuthenticated(t *testing.T) {
 			authnCtx: client.AuthnContextPAR,
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, jwk := setUpPrivateKeyJWTAuthn(t)
-				c.TokenAuthnSigAlg = goidc.RS256
+				c.TokenAuthnSigAlg = goidc.SigAlgRS256
 				now := timeutil.TimestampNow()
 				claims := map[string]any{
 					goidc.ClaimIssuer:   c.ID,
@@ -1146,7 +1146,7 @@ func TestAuthenticated(t *testing.T) {
 			authnCtx: client.AuthnContextTokenIntrospection,
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, secret := setUpClientSecretJWTAuthn(t)
-				c.TokenIntrospectionAuthnSigAlg = goidc.HS256
+				c.TokenIntrospectionAuthnSigAlg = goidc.SigAlgHS256
 				ctx.Request.PostForm = secretJWTPostForm(t, ctx, c.ID, secret, "introspection_jti")
 				return ctx, nil
 			},
@@ -1156,8 +1156,8 @@ func TestAuthenticated(t *testing.T) {
 			name: "attestation multiple pop headers",
 			setup: func(t *testing.T) (oidc.Context, func(*testing.T)) {
 				ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
-				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.ES256)}
-				clientJWK := goidc.JSONWebKey{Key: clientKey, Algorithm: string(goidc.ES256)}
+				cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
+				clientJWK := goidc.JSONWebKey{Key: clientKey, Algorithm: string(goidc.SigAlgES256)}
 				attestation := oidctest.SignWithOptions(t, map[string]any{
 					goidc.ClaimIssuer: "https://attester.example.com", goidc.ClaimSubject: c.ID,
 					goidc.ClaimExpiry: timeutil.TimestampNow() + 300, "cnf": map[string]any{"jwk": cnfJWK},
@@ -1248,7 +1248,7 @@ func TestExtractID(t *testing.T) {
 			name: "from assertion",
 			setup: func(t *testing.T) oidc.Context {
 				ctx := oidctest.NewContext(t)
-				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256}
+				ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 				jwk := oidctest.PrivateRS256JWK(t, "key1", goidc.KeyUsageSignature)
 				assertion := oidctest.Sign(t, map[string]any{
 					goidc.ClaimIssuer:  "my_client",
@@ -1385,7 +1385,7 @@ func setUpPrivateKeyJWTAuthn(t *testing.T) (ctx oidc.Context, c *goidc.Client, j
 	t.Helper()
 
 	ctx = oidctest.NewContext(t)
-	ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.RS256, goidc.PS256}
+	ctx.AuthnMethodPrivateKeyJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256, goidc.SigAlgPS256}
 	ctx.JWTLifetimeSecs = 60
 
 	jwk = oidctest.PrivateRS256JWK(t, "rsa256_key", goidc.KeyUsageSignature)
@@ -1411,7 +1411,7 @@ func setUpClientSecretJWTAuthn(t *testing.T) (
 	t.Helper()
 
 	ctx = oidctest.NewContext(t)
-	ctx.AuthnMethodSecretJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.HS256}
+	ctx.AuthnMethodSecretJWTSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgHS256}
 	ctx.JWTLifetimeSecs = 60
 
 	secret = "random_password12345678910111213"
@@ -1440,7 +1440,7 @@ func secretJWTPostForm(t *testing.T, ctx oidc.Context, clientID, secret, jti str
 		goidc.ClaimTokenID:  jti,
 	}
 	signer, err := jose.NewSigner(
-		jose.SigningKey{Algorithm: goidc.HS256, Key: []byte(secret)},
+		jose.SigningKey{Algorithm: goidc.SigAlgHS256, Key: []byte(secret)},
 		(&jose.SignerOptions{}).WithType("jwt"),
 	)
 	if err != nil {

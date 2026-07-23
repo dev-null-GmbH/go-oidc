@@ -63,8 +63,8 @@ func TestNewMetadata(t *testing.T) {
 			name: "response encryption omitted when disabled",
 			config: func() *oidc.Configuration {
 				config := baseConfig()
-				config.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP}
-				config.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.A128GCM}
+				config.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP}
+				config.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM}
 				return config
 			},
 			check: func(t *testing.T, m metadata) {
@@ -78,18 +78,18 @@ func TestNewMetadata(t *testing.T) {
 			config: func() *oidc.Configuration {
 				config := baseConfig()
 				config.VCISelfResponseEncEnabled = true
-				config.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP}
-				config.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.A128GCM}
+				config.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP}
+				config.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM}
 				return config
 			},
 			check: func(t *testing.T, m metadata) {
 				if m.CredentialResponseEncryption == nil {
 					t.Fatal("credential_response_encryption must be advertised")
 				}
-				if diff := cmp.Diff(m.CredentialResponseEncryption.AlgValuesSupported, []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP}); diff != "" {
+				if diff := cmp.Diff(m.CredentialResponseEncryption.AlgValuesSupported, []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP}); diff != "" {
 					t.Error(diff)
 				}
-				if diff := cmp.Diff(m.CredentialResponseEncryption.EncValuesSupported, []goidc.ContentEncryptionAlgorithm{goidc.A128GCM}); diff != "" {
+				if diff := cmp.Diff(m.CredentialResponseEncryption.EncValuesSupported, []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM}); diff != "" {
 					t.Error(diff)
 				}
 				if m.CredentialResponseEncryption.EncryptionRequired {
@@ -103,8 +103,8 @@ func TestNewMetadata(t *testing.T) {
 				config := baseConfig()
 				config.VCISelfResponseEncEnabled = true
 				config.VCISelfResponseEncRequired = true
-				config.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP}
-				config.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.A128GCM}
+				config.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP}
+				config.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM}
 				return config
 			},
 			check: func(t *testing.T, m metadata) {
@@ -248,15 +248,15 @@ func TestIssue(t *testing.T) {
 				ctx := newCredentialIssueContext(t, scope)
 				ctx.VCISelfResponseEncEnabled = true
 				ctx.VCISelfResponseEncRequired = true
-				ctx.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP}
-				ctx.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.A128GCM}
+				ctx.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP}
+				ctx.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM}
 				return ctx
 			},
 			req: request{
 				CredentialConfigurationID: "identity",
 				CredentialResponseEncryption: &credentialResponseEncryption{
 					JWK:           encJWK.Public(),
-					ContentEncAlg: goidc.A128GCM,
+					ContentEncAlg: goidc.ContentEncAlgA128GCM,
 				},
 			},
 			check: func(t *testing.T, ctx oidc.Context, resp response) {
@@ -266,8 +266,8 @@ func TestIssue(t *testing.T) {
 
 				jwe, err := jose.ParseEncrypted(
 					resp.JWT,
-					[]goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
-					[]goidc.ContentEncryptionAlgorithm{goidc.A128GCM},
+					[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
+					[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM},
 				)
 				if err != nil {
 					t.Fatalf("ParseEncrypted() error = %v", err)
@@ -308,7 +308,7 @@ func TestIssue(t *testing.T) {
 				CredentialConfigurationID: "identity",
 				CredentialResponseEncryption: &credentialResponseEncryption{
 					JWK:           encJWK.Public(),
-					ContentEncAlg: goidc.A128GCM,
+					ContentEncAlg: goidc.ContentEncAlgA128GCM,
 				},
 			},
 			wantCode: goidc.ErrorCodeInvalidRequest,
@@ -318,15 +318,15 @@ func TestIssue(t *testing.T) {
 			ctx: func(t *testing.T) oidc.Context {
 				ctx := newCredentialIssueContext(t, scope)
 				ctx.VCISelfResponseEncEnabled = true
-				ctx.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP}
-				ctx.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.A128GCM}
+				ctx.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP}
+				ctx.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM}
 				return ctx
 			},
 			req: request{
 				CredentialConfigurationID: "identity",
 				CredentialResponseEncryption: &credentialResponseEncryption{
 					JWK:           encJWK,
-					ContentEncAlg: goidc.A128GCM,
+					ContentEncAlg: goidc.ContentEncAlgA128GCM,
 				},
 			},
 			wantCode: goidc.ErrorCodeInvalidRequest,
@@ -336,15 +336,15 @@ func TestIssue(t *testing.T) {
 			ctx: func(t *testing.T) oidc.Context {
 				ctx := newCredentialIssueContext(t, scope)
 				ctx.VCISelfResponseEncEnabled = true
-				ctx.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP_256}
-				ctx.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.A128GCM}
+				ctx.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP256}
+				ctx.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM}
 				return ctx
 			},
 			req: request{
 				CredentialConfigurationID: "identity",
 				CredentialResponseEncryption: &credentialResponseEncryption{
 					JWK:           encJWK.Public(),
-					ContentEncAlg: goidc.A128GCM,
+					ContentEncAlg: goidc.ContentEncAlgA128GCM,
 				},
 			},
 			wantCode: goidc.ErrorCodeInvalidRequest,
@@ -354,15 +354,15 @@ func TestIssue(t *testing.T) {
 			ctx: func(t *testing.T) oidc.Context {
 				ctx := newCredentialIssueContext(t, scope)
 				ctx.VCISelfResponseEncEnabled = true
-				ctx.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP}
-				ctx.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.A256GCM}
+				ctx.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP}
+				ctx.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA256GCM}
 				return ctx
 			},
 			req: request{
 				CredentialConfigurationID: "identity",
 				CredentialResponseEncryption: &credentialResponseEncryption{
 					JWK:           encJWK.Public(),
-					ContentEncAlg: goidc.A128GCM,
+					ContentEncAlg: goidc.ContentEncAlgA128GCM,
 				},
 			},
 			wantCode: goidc.ErrorCodeInvalidRequest,
@@ -372,8 +372,8 @@ func TestIssue(t *testing.T) {
 			ctx: func(t *testing.T) oidc.Context {
 				ctx := newCredentialIssueContext(t, scope)
 				ctx.VCISelfResponseEncEnabled = true
-				ctx.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP}
-				ctx.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.A128GCM}
+				ctx.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP}
+				ctx.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM}
 				ctx.VCISelfResponseEncCompressionEnabled = true
 				return ctx
 			},
@@ -381,7 +381,7 @@ func TestIssue(t *testing.T) {
 				CredentialConfigurationID: "identity",
 				CredentialResponseEncryption: &credentialResponseEncryption{
 					JWK:           encJWK.Public(),
-					ContentEncAlg: goidc.A128GCM,
+					ContentEncAlg: goidc.ContentEncAlgA128GCM,
 					ZipAlg:        "DEF",
 				},
 			},
@@ -738,15 +738,15 @@ func TestDeferredCredential_ResponseEncryptionValidation(t *testing.T) {
 			name: "private jwk",
 			setup: func(ctx oidc.Context) oidc.Context {
 				ctx.VCISelfResponseEncEnabled = true
-				ctx.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP}
-				ctx.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.A128GCM}
+				ctx.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP}
+				ctx.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM}
 				return ctx
 			},
 			req: deferredRequest{
 				TransactionID: "txn_id",
 				CredentialResponseEncryption: &credentialResponseEncryption{
 					JWK:           encJWK,
-					ContentEncAlg: goidc.A128GCM,
+					ContentEncAlg: goidc.ContentEncAlgA128GCM,
 				},
 			},
 		},
@@ -754,15 +754,15 @@ func TestDeferredCredential_ResponseEncryptionValidation(t *testing.T) {
 			name: "unsupported key algorithm",
 			setup: func(ctx oidc.Context) oidc.Context {
 				ctx.VCISelfResponseEncEnabled = true
-				ctx.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP_256}
-				ctx.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.A128GCM}
+				ctx.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP256}
+				ctx.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM}
 				return ctx
 			},
 			req: deferredRequest{
 				TransactionID: "txn_id",
 				CredentialResponseEncryption: &credentialResponseEncryption{
 					JWK:           encJWK.Public(),
-					ContentEncAlg: goidc.A128GCM,
+					ContentEncAlg: goidc.ContentEncAlgA128GCM,
 				},
 			},
 		},
@@ -770,15 +770,15 @@ func TestDeferredCredential_ResponseEncryptionValidation(t *testing.T) {
 			name: "unsupported content algorithm",
 			setup: func(ctx oidc.Context) oidc.Context {
 				ctx.VCISelfResponseEncEnabled = true
-				ctx.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP}
-				ctx.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.A256GCM}
+				ctx.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP}
+				ctx.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA256GCM}
 				return ctx
 			},
 			req: deferredRequest{
 				TransactionID: "txn_id",
 				CredentialResponseEncryption: &credentialResponseEncryption{
 					JWK:           encJWK.Public(),
-					ContentEncAlg: goidc.A128GCM,
+					ContentEncAlg: goidc.ContentEncAlgA128GCM,
 				},
 			},
 		},
@@ -836,8 +836,8 @@ func TestDeferredCredential_ResponseEncryption(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := newDeferredContext(t, test.isDeferred)
 			ctx.VCISelfResponseEncEnabled = true
-			ctx.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP}
-			ctx.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.A128GCM}
+			ctx.VCISelfResponseEncKeyAlgs = []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP}
+			ctx.VCISelfResponseEncContentAlgs = []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM}
 			if err := ctx.VCSaveDeferral(&goidc.VCDeferral{
 				ID:                        "txn_id",
 				GrantID:                   "grant",
@@ -850,7 +850,7 @@ func TestDeferredCredential_ResponseEncryption(t *testing.T) {
 				TransactionID: "txn_id",
 				CredentialResponseEncryption: &credentialResponseEncryption{
 					JWK:           encJWK.Public(),
-					ContentEncAlg: goidc.A128GCM,
+					ContentEncAlg: goidc.ContentEncAlgA128GCM,
 				},
 			})
 			if err != nil {
@@ -865,8 +865,8 @@ func TestDeferredCredential_ResponseEncryption(t *testing.T) {
 
 			jwe, err := jose.ParseEncrypted(
 				resp.JWT,
-				[]goidc.KeyEncryptionAlgorithm{goidc.RSA_OAEP},
-				[]goidc.ContentEncryptionAlgorithm{goidc.A128GCM},
+				[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
+				[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM},
 			)
 			if err != nil {
 				t.Fatalf("ParseEncrypted() error = %v", err)

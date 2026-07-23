@@ -79,11 +79,11 @@ type OpaqueDecrypter struct {
 func (o OpaqueDecrypter) DecryptKey(encryptedKey []byte, _ jose.Header) ([]byte, error) {
 	var opts crypto.DecrypterOpts
 	switch o.Algorithm {
-	case goidc.RSA_OAEP:
+	case goidc.KeyEncRSAOAEP:
 		opts = &rsa.OAEPOptions{
 			Hash: crypto.SHA1,
 		}
-	case goidc.RSA_OAEP_256:
+	case goidc.KeyEncRSAOAEP256:
 		opts = &rsa.OAEPOptions{
 			Hash: crypto.SHA256,
 		}
@@ -138,7 +138,7 @@ func Unsigned(claims any, opts *jose.SignerOptions) string {
 	}
 
 	header := map[string]any{
-		"alg": goidc.None,
+		"alg": goidc.SigAlgNone,
 		"typ": opts.ExtraHeaders[jose.HeaderType],
 	}
 	headerJSON, err := json.Marshal(header)
@@ -192,12 +192,12 @@ func KeyUsage(key goidc.JSONWebKey) goidc.KeyUsage {
 	}
 
 	switch key.Algorithm {
-	case string(goidc.RS256), string(goidc.RS384), string(goidc.RS512),
-		string(goidc.ES256), string(goidc.ES384), string(goidc.ES512),
-		string(goidc.PS256), string(goidc.PS384), string(goidc.PS512),
-		string(goidc.HS256), string(goidc.HS384), string(goidc.HS512):
+	case string(goidc.SigAlgRS256), string(goidc.SigAlgRS384), string(goidc.SigAlgRS512),
+		string(goidc.SigAlgES256), string(goidc.SigAlgES384), string(goidc.SigAlgES512),
+		string(goidc.SigAlgPS256), string(goidc.SigAlgPS384), string(goidc.SigAlgPS512),
+		string(goidc.SigAlgHS256), string(goidc.SigAlgHS384), string(goidc.SigAlgHS512):
 		return goidc.KeyUsageSignature
-	case string(goidc.RSA1_5), string(goidc.RSA_OAEP), string(goidc.RSA_OAEP_256):
+	case string(goidc.KeyEncAlgRSA15), string(goidc.KeyEncRSAOAEP), string(goidc.KeyEncRSAOAEP256):
 		return goidc.KeyUsageEncryption
 	default:
 		return ""

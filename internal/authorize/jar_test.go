@@ -92,7 +92,7 @@ func TestJARFromRequestObject(t *testing.T) {
 					Configuration: &oidc.Configuration{
 						Host:       "https://server.example.com",
 						JAREnabled: true,
-						JARSigAlgs: []goidc.SignatureAlgorithm{goidc.None},
+						JARSigAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgNone},
 					},
 					Request: &http.Request{Method: http.MethodPost},
 				}
@@ -100,7 +100,7 @@ func TestJARFromRequestObject(t *testing.T) {
 				client := &goidc.Client{
 					ID: "test_client",
 					ClientMeta: goidc.ClientMeta{
-						JARSigAlg: goidc.None,
+						JARSigAlg: goidc.SigAlgNone,
 					},
 				}
 
