@@ -1533,6 +1533,32 @@ func TestWithDPoPRequired(t *testing.T) {
 	}
 }
 
+func TestWithDPoPStrictHTU(t *testing.T) {
+	// Given.
+	p := &Provider{
+		config: oidc.Configuration{},
+	}
+
+	// When.
+	err := WithDPoP([]goidc.SignatureAlgorithm{goidc.SigAlgPS256}, WithDPoPStrictHTU())(p)
+
+	// Then.
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := &Provider{
+		config: oidc.Configuration{
+			DPoPEnabled:   true,
+			DPoPStrictHTU: true,
+			DPoPSigAlgs:   []goidc.SignatureAlgorithm{goidc.SigAlgPS256},
+		},
+	}
+	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
+		t.Error(diff)
+	}
+}
+
 func TestWithDPoPNonce(t *testing.T) {
 	manager := &dpopNonceManagerStub{}
 	p := &Provider{config: oidc.Configuration{}}

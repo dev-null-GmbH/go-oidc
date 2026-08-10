@@ -158,7 +158,83 @@ func TestValidateJWTConsumesTypedJTIOnlyAfterProofValidation(t *testing.T) {
 	}
 }
 
-func TestValidateJWTComparesCanonicalHTUWithoutCollapsingPathSlashes(t *testing.T) {
+func TestValidateJWTComparesCanonicalHTUUsingRFC9449RulesByDefault(t *testing.T) {
+	tests := []struct {
+		name        string
+		proofURI    string
+		requestPath string
+		wantValid   bool
+	}{
+		{
+			name:      "scheme host and default port use RFC normalization",
+			proofURI:  "HTTPS://SERVER.EXAMPLE.COM:443/oauth2/token",
+			wantValid: true,
+		},
+		{
+			name:        "request query is excluded from the comparison",
+			proofURI:    "https://server.example.com/oauth2/token",
+			requestPath: "/oauth2/token?request=value",
+			wantValid:   true,
+		},
+		{
+			name:     "nonempty trailing path slash remains significant",
+			proofURI: "https://server.example.com/oauth2/token/",
+		},
+		{
+			name:      "proof htu query is excluded from the comparison",
+			proofURI:  "https://server.example.com/oauth2/token?proof=value",
+			wantValid: true,
+		},
+		{
+			name:      "proof htu empty query is excluded from the comparison",
+			proofURI:  "https://server.example.com/oauth2/token?",
+			wantValid: true,
+		},
+		{
+			name:      "proof htu fragment is excluded from the comparison",
+			proofURI:  "https://server.example.com/oauth2/token#proof",
+			wantValid: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			proof, _ := oidctest.DPoPProof(t, oidctest.DPoPProofOptions{
+				Method: http.MethodPost,
+				URI:    test.proofURI,
+			})
+			requestPath := test.requestPath
+			if requestPath == "" {
+				requestPath = "/oauth2/token"
+			}
+			ctx := oidc.Context{
+				Configuration: &oidc.Configuration{
+					Host:            "https://server.example.com",
+					DPoPEnabled:     true,
+					DPoPSigAlgs:     []goidc.SignatureAlgorithm{goidc.SigAlgES256},
+					JWTLifetimeSecs: 60,
+					ConsumeJTIUseFunc: func(context.Context, goidc.JTIUse) error {
+						return nil
+					},
+				},
+				Request: httptest.NewRequest(http.MethodPost, requestPath, nil),
+			}
+
+			err := dpop.ValidateJWT(ctx, proof, dpop.ValidationOptions{
+				NonceScope:    goidc.DPoPNonceScopeAuthorizationServer,
+				TokenEndpoint: true,
+			})
+			if test.wantValid && err != nil {
+				t.Fatalf("ValidateJWT() error = %v", err)
+			}
+			if !test.wantValid && err == nil {
+				t.Fatal("ValidateJWT() error = nil, want invalid_dpop_proof")
+			}
+		})
+	}
+}
+
+func TestValidateJWTComparesCanonicalHTUUsingStrictRulesWhenConfigured(t *testing.T) {
 	tests := []struct {
 		name        string
 		proofURI    string
@@ -208,6 +284,7 @@ func TestValidateJWTComparesCanonicalHTUWithoutCollapsingPathSlashes(t *testing.
 				Configuration: &oidc.Configuration{
 					Host:            "https://server.example.com",
 					DPoPEnabled:     true,
+					DPoPStrictHTU:   true,
 					DPoPSigAlgs:     []goidc.SignatureAlgorithm{goidc.SigAlgES256},
 					JWTLifetimeSecs: 60,
 					ConsumeJTIUseFunc: func(context.Context, goidc.JTIUse) error {

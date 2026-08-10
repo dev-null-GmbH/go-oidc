@@ -201,9 +201,10 @@ type Configuration struct {
 	MTLSTokenBindingRequired bool
 	ClientCertFunc           goidc.ClientCertFunc
 
-	DPoPEnabled  bool
-	DPoPRequired bool
-	DPoPSigAlgs  []goidc.SignatureAlgorithm
+	DPoPEnabled   bool
+	DPoPRequired  bool
+	DPoPStrictHTU bool
+	DPoPSigAlgs   []goidc.SignatureAlgorithm
 	// DPoPNonceManager enables server-provided DPoP nonces.
 	DPoPNonceManager goidc.DPoPNonceManager
 

@@ -131,7 +131,7 @@ func ValidateJWT(ctx oidc.Context, dpopJWT string, opts ValidationOptions) error
 			errors.New("the htm claim does not match the request method"))
 	}
 
-	httpURI, err := normalizeProofHTU(dpopClaims.HTTPURI)
+	httpURI, err := normalizeProofHTU(dpopClaims.HTTPURI, ctx.DPoPStrictHTU)
 	if err != nil {
 		return invalidProofError(opts.TokenEndpoint, goidc.ErrorCodeInvalidRequest, "invalid DPoP proof", err)
 	}
@@ -302,15 +302,15 @@ func reservationExpiry(ctx oidc.Context, issuedAt int64) (time.Time, error) {
 	return time.Unix(issuedAt+validity, 0).UTC(), nil
 }
 
-// normalizeProofHTU applies the syntax- and scheme-based URI normalization
-// advised by RFC 9449 without accepting a query or fragment in the signed htu
-// claim. In particular, /oauth2/token and /oauth2/token/ remain different DPoP
-// targets.
-func normalizeProofHTU(raw string) (string, error) {
-	if strings.Contains(raw, "?") || strings.Contains(raw, "#") {
+// normalizeProofHTU excludes query and fragment components from the signed htu
+// claim before comparison as required by RFC 9449. Strict mode additionally
+// rejects their delimiters, including an empty query. Path distinctions such
+// as /oauth2/token and /oauth2/token/ are preserved in both modes.
+func normalizeProofHTU(raw string, strict bool) (string, error) {
+	if strict && (strings.Contains(raw, "?") || strings.Contains(raw, "#")) {
 		return "", errors.New("the DPoP htu claim must not contain a query or fragment")
 	}
-	return normalizeHTU(raw)
+	return normalizeRequestHTU(raw)
 }
 
 // normalizeRequestHTU excludes a request-target query from the URI comparison,

@@ -1646,6 +1646,16 @@ func WithDPoPRequired() DPoPOption {
 	}
 }
 
+// WithDPoPStrictHTU rejects a signed htu claim containing any query or
+// fragment delimiter. By default, queries and fragments are excluded before
+// comparing the proof target URI as required by RFC 9449 Section 4.3.
+func WithDPoPStrictHTU() DPoPOption {
+	return func(p *Provider) error {
+		p.config.DPoPStrictHTU = true
+		return nil
+	}
+}
+
 // WithDPoPNonce enables server-provided DPoP nonces.
 // The manager must use shared state when the provider has multiple
 // instances. See [goidc.DPoPNonceManager] for its atomicity requirements.
