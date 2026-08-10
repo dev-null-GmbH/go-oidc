@@ -1,11 +1,10 @@
-version: '3'
 services:
   # This is a copy of the docker compose from the conformance suite repository
   # with some changes that allow the suite to call an authorization server running
   # on localhost.
   # The auth server is expected to be running under the domain "auth.localhost".
   mongodb:
-    image: mongo:6.0.13
+    image: mongo:6.0.13@sha256:b415b12f638e2685d06c58ab7fb5943577c50fadec6d9340ef67d21aeac72070
   nginx:
     build:
       context: ./conformance-suite/nginx
@@ -34,8 +33,6 @@ services:
       --fintechlabs.base_mtls_url=https://localhost.emobix.co.uk:8444
       --fintechlabs.devmode=true
       --fintechlabs.startredir=true
-    links:
-     - mongodb:mongodb
     depends_on:
      - mongodb
     logging:

@@ -1,45 +1,118 @@
 name: Continuous Integration
+
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   ci:
-    runs-on: ubuntu-latest
+    name: Go quality gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-go@v6
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          go-version-file: "go.mod"
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify immutable build inputs
+        run: |
+          ./scripts/verify-action-pins.sh
+          ./scripts/verify-conformance-pin.sh
+
+      - name: Download modules
+        run: go mod download
 
       - name: Lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.12.2
 
       - name: Vet
-        run: |
-          go vet ./...
+        run: go vet ./...
 
-      - name: Test
-        run: |
-          go test -race -coverprofile coverage.out ./pkg/... ./internal/...
-          go tool cover -func coverage.out
+      - name: Test full module
+        run: go test -shuffle=on -count=1 ./...
 
-      - name: Quality Gate
+      - name: Test with race detector
+        run: >-
+          go test -race -shuffle=on -count=1 -covermode=atomic
+          -coverprofile=coverage.out ./pkg/... ./internal/...
+
+      - name: Check coverage quality gate
         env:
-          TEST_COVERAGE_THRESHOLD: 60
+          TEST_COVERAGE_THRESHOLD: "60"
+        shell: bash
         run: |
-          echo "Quality Gate: checking test coverage is above threshold ..."
-          echo "Threshold             : $TEST_COVERAGE_THRESHOLD %"
-          totalCoverage=`go tool cover -func=coverage.out | grep total | grep -Eo '[0-9]+\.[0-9]+'`
-          echo "Current test coverage : $totalCoverage %"
-          if (( $(echo "$totalCoverage $TEST_COVERAGE_THRESHOLD" | awk '{print ($1 >= $2)}') )); then
-              echo "OK"
-          else
-              echo "Current test coverage is below threshold. Please add more unit tests or adjust threshold to a lower value."
-              echo "Failed"
-              exit 1
+          set -euo pipefail
+
+          total_coverage="$(
+            go tool cover -func=coverage.out |
+              awk '$1 == "total:" {gsub(/%/, "", $3); print $3}'
+          )"
+          if [[ -z "$total_coverage" ]]; then
+            echo "Unable to determine total test coverage" >&2
+            exit 1
           fi
+
+          printf 'Coverage: %s%% (required: %s%%)\n' \
+            "$total_coverage" "$TEST_COVERAGE_THRESHOLD"
+          if ! awk \
+            -v current="$total_coverage" \
+            -v threshold="$TEST_COVERAGE_THRESHOLD" \
+            'BEGIN { exit !(current + 0 >= threshold + 0) }'; then
+            echo "Test coverage is below the required threshold" >&2
+            exit 1
+          fi
+
+  vci-module:
+    name: Nested VCI module
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: examples/vci
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: examples/vci/go.mod
+          cache-dependency-path: examples/vci/go.sum
+          cache: true
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Verify module files
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test with race detector
+        run: go test -race -shuffle=on -count=1 ./...

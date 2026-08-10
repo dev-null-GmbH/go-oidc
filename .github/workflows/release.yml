@@ -1,0 +1,721 @@
+name: Governed Release
+
+on:
+  repository_dispatch:
+    types:
+      - governed-release-prepare
+      - governed-release-publish
+
+permissions:
+  contents: read
+
+concurrency:
+  group: governed-release-${{ github.event.client_payload.tag }}
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    name: Read-only release qualification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      pull-requests: read
+    outputs:
+      commit: ${{ steps.identity.outputs.commit }}
+      operation: ${{ steps.identity.outputs.operation }}
+      tag: ${{ steps.identity.outputs.tag }}
+      trusted_commit: ${{ steps.identity.outputs.trusted_commit }}
+      version: ${{ steps.identity.outputs.version }}
+
+    steps:
+      - name: Require a trusted default-branch dispatch
+        env:
+          CONFIRM: ${{ github.event.client_payload.confirm }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          DISPATCH_ACTOR: ${{ github.actor }}
+          EVENT_TYPE: ${{ github.event.action }}
+          RELEASE_COMMIT: ${{ github.event.client_payload.commit }}
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+          SENDER_ID: ${{ github.event.sender.id }}
+          SENDER_LOGIN: ${{ github.event.sender.login }}
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$EVENT_TYPE" in
+            governed-release-prepare) operation=prepare ;;
+            governed-release-publish) operation=publish ;;
+            *) echo "Unexpected repository dispatch type" >&2; exit 1 ;;
+          esac
+          if [[ "$WORKFLOW_REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
+            echo "Repository dispatch did not load from the default branch" >&2
+            exit 1
+          fi
+          if [[ "$DISPATCH_ACTOR" != "$SENDER_LOGIN" ]]; then
+            echo "Repository dispatch actor does not match the webhook sender" >&2
+            exit 1
+          fi
+          case "$SENDER_LOGIN:$SENDER_ID" in
+            greg6775:33130539|Schlauer-Hax:32987311) ;;
+            *)
+              echo "Repository dispatch sender is not an authorized release maintainer" >&2
+              exit 1
+              ;;
+          esac
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-d0\.[1-9][0-9]*$ ||
+                ! "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid release tag or exact commit" >&2
+            exit 1
+          fi
+          if [[ "$CONFIRM" != "$operation $RELEASE_TAG@$RELEASE_COMMIT" ]]; then
+            printf 'Confirmation must be exactly: %s %s@%s\n' \
+              "$operation" "$RELEASE_TAG" "$RELEASE_COMMIT" >&2
+            exit 1
+          fi
+          if [[ "$operation" == "prepare" &&
+                "$WORKFLOW_SHA" != "$RELEASE_COMMIT" ]]; then
+            echo "Prepare must run while the release commit is default-branch HEAD" >&2
+            exit 1
+          fi
+
+      - name: Check out trusted release tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          path: trusted
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Verify trusted workflow source
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          trusted_head="$(git -C trusted rev-parse HEAD)"
+          if [[ "$trusted_head" != "$WORKFLOW_SHA" ]]; then
+            echo "Trusted tooling checkout does not match the workflow SHA" >&2
+            exit 1
+          fi
+          git -C trusted fetch --no-tags origin \
+            "+refs/heads/$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+          if ! git -C trusted merge-base --is-ancestor \
+            "$WORKFLOW_SHA" "refs/remotes/origin/$DEFAULT_BRANCH"; then
+            echo "Workflow SHA is not reachable from the default branch" >&2
+            exit 1
+          fi
+          ./trusted/scripts/verify-action-pins.sh
+          ./trusted/scripts/verify-conformance-pin.sh
+
+      - name: Check out exact release data
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          path: release-tree
+          persist-credentials: false
+          ref: ${{ github.event.client_payload.commit }}
+
+      - name: Qualify tag, commit, review, checks, and conformance evidence
+        id: identity
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+          EVENT_TYPE: ${{ github.event.action }}
+          RELEASE_COMMIT: ${{ github.event.client_payload.commit }}
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+          TRUSTED_COMMIT: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$EVENT_TYPE" in
+            governed-release-prepare) operation=prepare ;;
+            governed-release-publish) operation=publish ;;
+            *) echo "Unexpected repository dispatch type" >&2; exit 1 ;;
+          esac
+          git -C release-tree fetch --force --no-tags origin \
+            "+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG" \
+            "+refs/heads/$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+          if [[ "$(git -C release-tree rev-parse HEAD)" != "$RELEASE_COMMIT" ]]; then
+            echo "Release checkout does not match the exact requested commit" >&2
+            exit 1
+          fi
+          if ! git -C release-tree merge-base --is-ancestor \
+            "$RELEASE_COMMIT" "refs/remotes/origin/$DEFAULT_BRANCH"; then
+            echo "Release commit is not reachable from the default branch" >&2
+            exit 1
+          fi
+          RELEASE_SOURCE_ROOT="$GITHUB_WORKSPACE/release-tree" \
+            ./trusted/scripts/verify-action-pins.sh
+          RELEASE_SOURCE_ROOT="$GITHUB_WORKSPACE/release-tree" \
+            ./trusted/scripts/verify-conformance-pin.sh
+          RELEASE_SOURCE_ROOT="$GITHUB_WORKSPACE/release-tree" \
+            ./trusted/scripts/verify-release-tag.sh \
+            "$RELEASE_TAG" "$RELEASE_COMMIT"
+          ./trusted/scripts/verify-release-checks.sh "$RELEASE_COMMIT"
+          printf 'commit=%s\n' "$RELEASE_COMMIT" >> "$GITHUB_OUTPUT"
+          printf 'operation=%s\n' "$operation" >> "$GITHUB_OUTPUT"
+          printf 'tag=%s\n' "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          printf 'trusted_commit=%s\n' "$TRUSTED_COMMIT" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+
+  prepare:
+    name: Prepare draft release
+    needs: qualify
+    if: needs.qualify.outputs.operation == 'prepare'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      attestations: write
+      checks: read
+      contents: write
+      id-token: write
+      pull-requests: read
+
+    steps:
+      - name: Check out qualified trusted tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          path: trusted
+          persist-credentials: false
+          ref: ${{ needs.qualify.outputs.trusted_commit }}
+
+      - name: Check out qualified release data
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          path: release-tree
+          persist-credentials: false
+          ref: ${{ needs.qualify.outputs.commit }}
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: release-tree/go.mod
+          cache-dependency-path: |
+            release-tree/go.sum
+            release-tree/examples/vci/go.sum
+          cache: true
+
+      - name: Revalidate trusted tooling and release evidence
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ needs.qualify.outputs.commit }}
+          RELEASE_TAG: ${{ needs.qualify.outputs.tag }}
+          TRUSTED_COMMIT: ${{ needs.qualify.outputs.trusted_commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$(git -C trusted rev-parse HEAD)" != "$TRUSTED_COMMIT" ||
+                "$(git -C release-tree rev-parse HEAD)" != "$RELEASE_COMMIT" ]]; then
+            echo "Qualified checkout identity changed between jobs" >&2
+            exit 1
+          fi
+          git -C release-tree fetch --force --no-tags origin \
+            "+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG" \
+            "+refs/heads/$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+          if ! git -C release-tree merge-base --is-ancestor \
+            "$RELEASE_COMMIT" "refs/remotes/origin/$DEFAULT_BRANCH"; then
+            echo "Release commit is no longer reachable from the default branch" >&2
+            exit 1
+          fi
+          RELEASE_SOURCE_ROOT="$GITHUB_WORKSPACE/release-tree" \
+            ./trusted/scripts/verify-action-pins.sh
+          RELEASE_SOURCE_ROOT="$GITHUB_WORKSPACE/release-tree" \
+            ./trusted/scripts/verify-conformance-pin.sh
+          RELEASE_SOURCE_ROOT="$GITHUB_WORKSPACE/release-tree" \
+            ./trusted/scripts/verify-release-tag.sh \
+            "$RELEASE_TAG" "$RELEASE_COMMIT"
+          ./trusted/scripts/verify-release-checks.sh \
+            "$RELEASE_COMMIT" "$RUNNER_TEMP/RELEASE-EVIDENCE.json"
+
+      - name: Audit repository governance settings
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_GOVERNANCE_TOKEN }}
+        shell: bash
+        run: ./trusted/scripts/audit-repository-settings.sh
+
+      - name: Ensure release does not already exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.qualify.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "A GitHub release already exists for $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+      - name: Build deterministic release payload
+        env:
+          RELEASE_TAG: ${{ needs.qualify.outputs.tag }}
+        shell: bash
+        run: |
+          RELEASE_SOURCE_ROOT="$GITHUB_WORKSPACE/release-tree" \
+            ./trusted/scripts/build-release-assets.sh \
+            "$RELEASE_TAG" "$RUNNER_TEMP/release-assets" \
+            "$RUNNER_TEMP/RELEASE-EVIDENCE.json"
+
+      - name: Attest release payload provenance
+        id: provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/release-assets/go-oidc-${{ needs.qualify.outputs.version }}.src.tar
+            ${{ runner.temp }}/release-assets/go-oidc-${{ needs.qualify.outputs.version }}.spdx.json
+            ${{ runner.temp }}/release-assets/PATCHES.txt
+            ${{ runner.temp }}/release-assets/RELEASE-EVIDENCE.json
+            ${{ runner.temp }}/release-assets/RELEASE-MANIFEST.json
+            ${{ runner.temp }}/release-assets/RELEASE-NOTES.md
+
+      - name: Attest source archive SBOM
+        id: sbom-attestation
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/release-assets/go-oidc-${{ needs.qualify.outputs.version }}.src.tar
+          sbom-path: ${{ runner.temp }}/release-assets/go-oidc-${{ needs.qualify.outputs.version }}.spdx.json
+
+      - name: Finalize and verify staged assets
+        env:
+          RELEASE_COMMIT: ${{ needs.qualify.outputs.commit }}
+          RELEASE_TAG: ${{ needs.qualify.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "${{ steps.provenance.outputs.bundle-path }}" \
+            "$RUNNER_TEMP/release-assets/provenance.sigstore.json"
+          cp "${{ steps.sbom-attestation.outputs.bundle-path }}" \
+            "$RUNNER_TEMP/release-assets/sbom-attestation.sigstore.json"
+          ./trusted/scripts/write-release-checksums.sh \
+            "$RUNNER_TEMP/release-assets"
+          ./trusted/scripts/verify-release-assets.sh \
+            "$RELEASE_TAG" "$RUNNER_TEMP/release-assets" "$RELEASE_COMMIT"
+
+      - name: Create unpublished draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.qualify.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" \
+            --draft \
+            --latest=false \
+            --notes-file "$RUNNER_TEMP/release-assets/RELEASE-NOTES.md" \
+            --prerelease \
+            --title "$RELEASE_TAG" \
+            --verify-tag \
+            "$RUNNER_TEMP/release-assets"/*
+          draft_state="$(
+            gh release view "$RELEASE_TAG" \
+              --json isDraft,isPrerelease \
+              --jq '[.isDraft, .isPrerelease] | @tsv'
+          )"
+          if [[ "$draft_state" != $'true\ttrue' ]]; then
+            echo "Release was not created as an unpublished draft prerelease" >&2
+            exit 1
+          fi
+
+  publish:
+    name: Verify and publish draft release
+    needs: qualify
+    if: needs.qualify.outputs.operation == 'publish'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: governed-release
+    permissions:
+      actions: read
+      attestations: read
+      checks: read
+      contents: write
+      pull-requests: read
+
+    steps:
+      - name: Check out qualified trusted tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          path: trusted
+          persist-credentials: false
+          ref: ${{ needs.qualify.outputs.trusted_commit }}
+
+      - name: Check out qualified release data
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          path: release-tree
+          persist-credentials: false
+          ref: ${{ needs.qualify.outputs.commit }}
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: release-tree/go.mod
+          cache-dependency-path: |
+            release-tree/go.sum
+            release-tree/examples/vci/go.sum
+          cache: true
+
+      - name: Revalidate trusted tooling and release evidence
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ needs.qualify.outputs.commit }}
+          RELEASE_TAG: ${{ needs.qualify.outputs.tag }}
+          TRUSTED_COMMIT: ${{ needs.qualify.outputs.trusted_commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$(git -C trusted rev-parse HEAD)" != "$TRUSTED_COMMIT" ||
+                "$(git -C release-tree rev-parse HEAD)" != "$RELEASE_COMMIT" ]]; then
+            echo "Qualified checkout identity changed between jobs" >&2
+            exit 1
+          fi
+          git -C release-tree fetch --force --no-tags origin \
+            "+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG" \
+            "+refs/heads/$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+          if ! git -C release-tree merge-base --is-ancestor \
+            "$RELEASE_COMMIT" "refs/remotes/origin/$DEFAULT_BRANCH"; then
+            echo "Release commit is no longer reachable from the default branch" >&2
+            exit 1
+          fi
+          RELEASE_SOURCE_ROOT="$GITHUB_WORKSPACE/release-tree" \
+            ./trusted/scripts/verify-action-pins.sh
+          RELEASE_SOURCE_ROOT="$GITHUB_WORKSPACE/release-tree" \
+            ./trusted/scripts/verify-conformance-pin.sh
+          RELEASE_SOURCE_ROOT="$GITHUB_WORKSPACE/release-tree" \
+            ./trusted/scripts/verify-release-tag.sh \
+            "$RELEASE_TAG" "$RELEASE_COMMIT"
+          ./trusted/scripts/verify-release-checks.sh \
+            "$RELEASE_COMMIT" "$RUNNER_TEMP/current-evidence.json"
+
+      - name: Audit repository governance settings
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_GOVERNANCE_TOKEN }}
+        shell: bash
+        run: ./trusted/scripts/audit-repository-settings.sh
+
+      - name: Snapshot and download draft assets by immutable ID
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.qualify.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_version=2026-03-10
+          release_id="$(
+            gh release view "$RELEASE_TAG" \
+              --json databaseId --jq .databaseId
+          )"
+          if [[ ! "$release_id" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Draft release has no stable database ID" >&2
+            exit 1
+          fi
+
+          gh api -H "X-GitHub-Api-Version: $api_version" \
+            "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            > "$RUNNER_TEMP/draft-release.json"
+          gh api -H "X-GitHub-Api-Version: $api_version" \
+            --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" \
+            > "$RUNNER_TEMP/draft-asset-pages.json"
+          jq --sort-keys -n \
+            --slurpfile release "$RUNNER_TEMP/draft-release.json" \
+            --slurpfile pages "$RUNNER_TEMP/draft-asset-pages.json" '
+              ($release[0]) as $r |
+              (($pages[0] | add) // []) as $assets |
+              {
+                release: {
+                  id: $r.id,
+                  tagName: $r.tag_name,
+                  targetCommitish: $r.target_commitish,
+                  name: $r.name,
+                  body: $r.body,
+                  draft: $r.draft,
+                  prerelease: $r.prerelease,
+                  immutable: $r.immutable,
+                  publishedAt: $r.published_at
+                },
+                assets: ($assets | map({
+                  id,
+                  name,
+                  size,
+                  digest,
+                  state
+                }) | sort_by(.name))
+              }
+            ' > "$RUNNER_TEMP/verified-draft-snapshot.json"
+          if ! jq -e --arg tag "$RELEASE_TAG" '
+            (.release.id | type) == "number" and .release.id > 0 and
+            .release.tagName == $tag and .release.name == $tag and
+            (.release.body | type) == "string" and
+            .release.draft == true and .release.prerelease == true and
+            .release.immutable == false and .release.publishedAt == null and
+            (.assets | length) == 9 and
+            ([.assets[].id] | length) == ([.assets[].id] | unique | length) and
+            ([.assets[].name] | length) ==
+              ([.assets[].name] | unique | length) and
+            (all(.assets[];
+              (.id | type) == "number" and .id > 0 and
+              (.name | type) == "string" and
+              (.name | test("^[A-Za-z0-9][A-Za-z0-9._-]*$")) and
+              (.size | type) == "number" and .size > 0 and
+              .state == "uploaded" and
+              (.digest | type) == "string" and
+              (.digest | test("^sha256:[0-9a-f]{64}$"))))
+          ' "$RUNNER_TEMP/verified-draft-snapshot.json" >/dev/null; then
+            echo "Release identity, draft state, or asset inventory is invalid" >&2
+            exit 1
+          fi
+
+          mkdir -p "$RUNNER_TEMP/release-assets"
+          while IFS=$'\t' read -r asset_id asset_name asset_size asset_digest; do
+            asset_path="$RUNNER_TEMP/release-assets/$asset_name"
+            gh api -H "X-GitHub-Api-Version: $api_version" \
+              -H "Accept: application/octet-stream" \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
+              > "$asset_path"
+            actual_size="$(wc -c < "$asset_path")"
+            actual_size="${actual_size//[[:space:]]/}"
+            actual_hash="$(sha256sum "$asset_path")"
+            actual_hash="${actual_hash%% *}"
+            if [[ "$actual_size" != "$asset_size" ||
+                  "sha256:$actual_hash" != "$asset_digest" ]]; then
+              printf 'Draft asset changed while downloading: %s\n' \
+                "$asset_name" >&2
+              exit 1
+            fi
+          done < <(
+            jq -r '.assets[] | [.id, .name, .size, .digest] | @tsv' \
+              "$RUNNER_TEMP/verified-draft-snapshot.json"
+          )
+
+      - name: Verify assets, retained evidence, and attestations
+        env:
+          RELEASE_COMMIT: ${{ needs.qualify.outputs.commit }}
+          RELEASE_TAG: ${{ needs.qualify.outputs.tag }}
+          SOURCE_ARCHIVE: ${{ runner.temp }}/release-assets/go-oidc-${{ needs.qualify.outputs.version }}.src.tar
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./trusted/scripts/verify-release-assets.sh \
+            "$RELEASE_TAG" "$RUNNER_TEMP/release-assets" "$RELEASE_COMMIT"
+          cmp "$RUNNER_TEMP/current-evidence.json" \
+            "$RUNNER_TEMP/release-assets/RELEASE-EVIDENCE.json"
+          provenance_subjects=(
+            "$SOURCE_ARCHIVE"
+            "$RUNNER_TEMP/release-assets/go-oidc-${{ needs.qualify.outputs.version }}.spdx.json"
+            "$RUNNER_TEMP/release-assets/PATCHES.txt"
+            "$RUNNER_TEMP/release-assets/RELEASE-EVIDENCE.json"
+            "$RUNNER_TEMP/release-assets/RELEASE-MANIFEST.json"
+            "$RUNNER_TEMP/release-assets/RELEASE-NOTES.md"
+          )
+          for subject in "${provenance_subjects[@]}"; do
+            gh attestation verify "$subject" \
+              --bundle "$RUNNER_TEMP/release-assets/provenance.sigstore.json" \
+              --deny-self-hosted-runners \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-digest "$RELEASE_COMMIT" \
+              --source-ref "refs/heads/main"
+          done
+          gh attestation verify "$SOURCE_ARCHIVE" \
+            --bundle "$RUNNER_TEMP/release-assets/sbom-attestation.sigstore.json" \
+            --deny-self-hosted-runners \
+            --predicate-type "https://spdx.dev/Document/v2.3" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$RELEASE_COMMIT" \
+            --source-ref "refs/heads/main"
+          jq -e \
+            --rawfile body "$RUNNER_TEMP/release-assets/RELEASE-NOTES.md" \
+            '.release.body == $body' \
+            "$RUNNER_TEMP/verified-draft-snapshot.json" >/dev/null
+          jq -n \
+            --arg tag "$RELEASE_TAG" \
+            --rawfile body "$RUNNER_TEMP/release-assets/RELEASE-NOTES.md" '
+              {
+                tag_name: $tag,
+                name: $tag,
+                body: $body,
+                draft: false,
+                prerelease: true,
+                make_latest: "false"
+              }
+            ' > "$RUNNER_TEMP/publish-release.json"
+
+      - name: Rebuild deterministic payload
+        env:
+          RELEASE_TAG: ${{ needs.qualify.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_SOURCE_ROOT="$GITHUB_WORKSPACE/release-tree" \
+            ./trusted/scripts/build-release-assets.sh \
+            "$RELEASE_TAG" "$RUNNER_TEMP/rebuilt-assets" \
+            "$RUNNER_TEMP/current-evidence.json"
+          for asset in \
+            "go-oidc-${{ needs.qualify.outputs.version }}.src.tar" \
+            "go-oidc-${{ needs.qualify.outputs.version }}.spdx.json" \
+            PATCHES.txt RELEASE-EVIDENCE.json RELEASE-MANIFEST.json \
+            RELEASE-NOTES.md; do
+            cmp "$RUNNER_TEMP/release-assets/$asset" \
+              "$RUNNER_TEMP/rebuilt-assets/$asset"
+          done
+
+      - name: Re-audit, revalidate remote bytes, and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GOVERNANCE_TOKEN: ${{ secrets.RELEASE_GOVERNANCE_TOKEN }}
+          RELEASE_COMMIT: ${{ needs.qualify.outputs.commit }}
+          RELEASE_TAG: ${{ needs.qualify.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_version=2026-03-10
+          GH_TOKEN="$GOVERNANCE_TOKEN" \
+            ./trusted/scripts/audit-repository-settings.sh
+
+          release_id="$(jq -r .release.id "$RUNNER_TEMP/verified-draft-snapshot.json")"
+          gh api -H "X-GitHub-Api-Version: $api_version" \
+            "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            > "$RUNNER_TEMP/final-draft-release.json"
+          gh api -H "X-GitHub-Api-Version: $api_version" \
+            --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" \
+            > "$RUNNER_TEMP/final-draft-asset-pages.json"
+          jq --sort-keys -n \
+            --slurpfile release "$RUNNER_TEMP/final-draft-release.json" \
+            --slurpfile pages "$RUNNER_TEMP/final-draft-asset-pages.json" '
+              ($release[0]) as $r |
+              (($pages[0] | add) // []) as $assets |
+              {
+                release: {
+                  id: $r.id,
+                  tagName: $r.tag_name,
+                  targetCommitish: $r.target_commitish,
+                  name: $r.name,
+                  body: $r.body,
+                  draft: $r.draft,
+                  prerelease: $r.prerelease,
+                  immutable: $r.immutable,
+                  publishedAt: $r.published_at
+                },
+                assets: ($assets | map({
+                  id,
+                  name,
+                  size,
+                  digest,
+                  state
+                }) | sort_by(.name))
+              }
+            ' > "$RUNNER_TEMP/final-draft-snapshot.json"
+          if ! cmp "$RUNNER_TEMP/verified-draft-snapshot.json" \
+            "$RUNNER_TEMP/final-draft-snapshot.json"; then
+            echo "Draft release body, state, or asset inventory changed" >&2
+            exit 1
+          fi
+
+          mkdir "$RUNNER_TEMP/final-release-assets"
+          while IFS=$'\t' read -r asset_id asset_name asset_size asset_digest; do
+            asset_path="$RUNNER_TEMP/final-release-assets/$asset_name"
+            gh api -H "X-GitHub-Api-Version: $api_version" \
+              -H "Accept: application/octet-stream" \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
+              > "$asset_path"
+            actual_size="$(wc -c < "$asset_path")"
+            actual_size="${actual_size//[[:space:]]/}"
+            actual_hash="$(sha256sum "$asset_path")"
+            actual_hash="${actual_hash%% *}"
+            if [[ "$actual_size" != "$asset_size" ||
+                  "sha256:$actual_hash" != "$asset_digest" ]] ||
+               ! cmp "$RUNNER_TEMP/release-assets/$asset_name" "$asset_path"; then
+              printf 'Draft asset bytes changed before publication: %s\n' \
+                "$asset_name" >&2
+              exit 1
+            fi
+          done < <(
+            jq -r '.assets[] | [.id, .name, .size, .digest] | @tsv' \
+              "$RUNNER_TEMP/final-draft-snapshot.json"
+          )
+
+          ./trusted/scripts/verify-release-assets.sh \
+            "$RELEASE_TAG" "$RUNNER_TEMP/final-release-assets" "$RELEASE_COMMIT"
+          gh api -H "X-GitHub-Api-Version: $api_version" \
+            "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            > "$RUNNER_TEMP/prepublish-draft-release.json"
+          gh api -H "X-GitHub-Api-Version: $api_version" \
+            --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" \
+            > "$RUNNER_TEMP/prepublish-draft-asset-pages.json"
+          jq --sort-keys -n \
+            --slurpfile release "$RUNNER_TEMP/prepublish-draft-release.json" \
+            --slurpfile pages "$RUNNER_TEMP/prepublish-draft-asset-pages.json" '
+              ($release[0]) as $r |
+              (($pages[0] | add) // []) as $assets |
+              {
+                release: {
+                  id: $r.id,
+                  tagName: $r.tag_name,
+                  targetCommitish: $r.target_commitish,
+                  name: $r.name,
+                  body: $r.body,
+                  draft: $r.draft,
+                  prerelease: $r.prerelease,
+                  immutable: $r.immutable,
+                  publishedAt: $r.published_at
+                },
+                assets: ($assets | map({
+                  id,
+                  name,
+                  size,
+                  digest,
+                  state
+                }) | sort_by(.name))
+              }
+            ' > "$RUNNER_TEMP/prepublish-draft-snapshot.json"
+          cmp "$RUNNER_TEMP/verified-draft-snapshot.json" \
+            "$RUNNER_TEMP/prepublish-draft-snapshot.json"
+          gh api --method PATCH \
+            -H "X-GitHub-Api-Version: $api_version" \
+            "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            --input "$RUNNER_TEMP/publish-release.json" \
+            > "$RUNNER_TEMP/published-release-response.json"
+
+          gh api -H "X-GitHub-Api-Version: $api_version" \
+            "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            > "$RUNNER_TEMP/published-release.json"
+          gh api -H "X-GitHub-Api-Version: $api_version" \
+            --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" \
+            > "$RUNNER_TEMP/published-asset-pages.json"
+          if ! jq -e \
+            --arg tag "$RELEASE_TAG" \
+            --argjson id "$release_id" \
+            --rawfile body "$RUNNER_TEMP/release-assets/RELEASE-NOTES.md" '
+              .id == $id and .tag_name == $tag and .name == $tag and
+              .body == $body and .draft == false and .prerelease == true and
+              .immutable == true
+            ' "$RUNNER_TEMP/published-release.json" >/dev/null; then
+            echo "Published release identity, state, or immutability is invalid" >&2
+            exit 1
+          fi
+          jq --sort-keys \
+            '[.[][] | {id, name, size, digest, state}] | sort_by(.name)' \
+            "$RUNNER_TEMP/published-asset-pages.json" \
+            > "$RUNNER_TEMP/published-assets.json"
+          jq --sort-keys '.assets' "$RUNNER_TEMP/verified-draft-snapshot.json" \
+            > "$RUNNER_TEMP/verified-assets.json"
+          if ! cmp "$RUNNER_TEMP/verified-assets.json" \
+            "$RUNNER_TEMP/published-assets.json"; then
+            echo "Immutable release froze an asset inventory different from the verified draft" >&2
+            exit 1
+          fi

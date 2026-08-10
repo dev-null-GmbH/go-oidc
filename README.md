@@ -1,8 +1,18 @@
-# go-oidc
+# go-oidc — d0 governed fork
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/luikyv/go-oidc.svg)](https://pkg.go.dev/github.com/luikyv/go-oidc)
-[![Go Report Card](https://goreportcard.com/badge/github.com/luikyv/go-oidc)](https://goreportcard.com/report/github.com/luikyv/go-oidc)
-[![License](https://img.shields.io/github/license/luikyv/go-oidc)](LICENSE)
+[![CI](https://github.com/dev-null-GmbH/go-oidc/actions/workflows/ci.yml/badge.svg)](https://github.com/dev-null-GmbH/go-oidc/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/dev-null-GmbH/go-oidc.svg)](https://pkg.go.dev/github.com/dev-null-GmbH/go-oidc)
+[![License](https://img.shields.io/github/license/dev-null-GmbH/go-oidc)](LICENSE)
+
+> [!IMPORTANT]
+> This repository is the `/dev/null GmbH` governed fork of
+> [`luikyv/go-oidc`](https://github.com/luikyv/go-oidc), currently based on
+> upstream `v0.25.0` (`6aeac93f370044ca9a59a556b9230cd10bd96868`).
+> It carries reviewed runtime and security seams required by d0 services.
+> Upstream certification statements below describe the upstream project; they
+> do not automatically certify modified fork releases. See [NOTICE](NOTICE),
+> [security reporting](SECURITY.md), [contribution rules](CONTRIBUTING.md), and
+> the [release policy](.github/RELEASE_POLICY.md).
 
 A configurable OpenID Connect Provider for Go.
 
@@ -59,8 +69,13 @@ Luiky Vasconcelos has certified that [go-oidc](https://pkg.go.dev/github.com/lui
 
 Install the module:
 ```
-go get github.com/luikyv/go-oidc@latest
+go get github.com/dev-null-GmbH/go-oidc@v0.25.1-d0.1
 ```
+
+Fork consumers must exact-pin a governed `-d0.N` tag and must not use
+`@latest`. The fork uses a distinct module path, but Go treats `-d0.N` as a
+prerelease and can otherwise select the copied stable upstream `v0.25.0` tag,
+whose `go.mod` still declares the upstream module path.
 
 Create and run a provider:
 ```go
@@ -908,6 +923,30 @@ op, _ := provider.New(
 )
 ```
 
+## Discovery endpoints
+
+By default, the provider exposes both OpenID Provider Configuration and OAuth
+2.0 Authorization Server Metadata at their standards-defined well-known paths.
+The documents are built independently: the RFC 8414 response advertises only
+enabled OAuth endpoints and capabilities and does not copy unrelated OpenID
+Provider fields.
+
+OAuth-only deployments can expose only RFC 8414 metadata:
+
+```go
+op, _ := provider.New(
+  ...,
+  provider.WithDiscoveryEndpoints(
+    provider.DiscoveryEndpointAuthorizationServerMetadata,
+  ),
+  provider.WithOAuthScopes(
+    goidc.NewScope("einvoice.documents:read"),
+    goidc.NewScope("einvoice.documents:write"),
+  ),
+  ...,
+)
+```
+
 ## Client resolution
 
 Use `provider.WithClientResolver` when clients live in an external store but
@@ -1036,10 +1075,14 @@ provider.WithDPoP(
 
 The manager issues unpredictable nonces and validates them independently for
 authorization-server and resource-server scopes. In a multi-instance
-deployment, it should use shared state and retain a window of recent nonces for
-concurrent requests. Reusable recent nonces are supported; a manager that
-chooses single-use nonces must validate and consume them atomically. It can
-optionally return a replacement nonce to rotate it on a successful response.
+deployment, every issued nonce must already validate on every serving replica.
+The manager can provide that guarantee through shared persistence or through
+deterministic authenticated derivation from cluster-shared,
+scope/domain-separated key material, and should retain a window of recent
+nonces for concurrent requests. Reusable recent nonces are supported; a
+manager that chooses single-use nonces must validate and consume them
+atomically. It can optionally return a replacement nonce to rotate it on a
+successful response.
 Unknown or expired nonces produce the RFC 9449 `use_dpop_nonce` challenge;
 storage failures fail closed as internal errors.
 Nonce handling does not replace `provider.WithJTIConsumer`; JTI tracking
