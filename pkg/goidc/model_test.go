@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 func TestProfileIsFAPI(t *testing.T) {

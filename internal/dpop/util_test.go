@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dev-null-GmbH/go-oidc/internal/dpop"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidctest"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/go-jose/go-jose/v4"
-	"github.com/luikyv/go-oidc/internal/dpop"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/oidctest"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 func TestValidateJWT(t *testing.T) {

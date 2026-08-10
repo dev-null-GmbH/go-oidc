@@ -16,10 +16,10 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/dev-null-GmbH/go-oidc/examples/keys"
+	"github.com/dev-null-GmbH/go-oidc/examples/ui"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/google/uuid"
-	"github.com/luikyv/go-oidc/examples/keys"
-	"github.com/luikyv/go-oidc/examples/ui"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 const (

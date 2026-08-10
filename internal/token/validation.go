@@ -6,10 +6,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/luikyv/go-oidc/internal/dpop"
-	"github.com/luikyv/go-oidc/internal/hashutil"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/dpop"
+	"github.com/dev-null-GmbH/go-oidc/internal/hashutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 // ValidateBinding checks both DPoP and TLS binding for issuing a token.

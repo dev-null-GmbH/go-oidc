@@ -1,6 +1,6 @@
 package client
 
-import "github.com/luikyv/go-oidc/pkg/goidc"
+import "github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 
 var JSONFields = []string{
 	"client_id",

@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 type Option func(p *Provider) error

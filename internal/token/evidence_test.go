@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 func TestTokenEndpointResultFromErrorIsClosed(t *testing.T) {

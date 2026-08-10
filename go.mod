@@ -1,6 +1,6 @@
-module github.com/luikyv/go-oidc
+module github.com/dev-null-GmbH/go-oidc
 
-go 1.25.0
+go 1.26.5
 
 require (
 	github.com/go-jose/go-jose/v4 v4.1.4

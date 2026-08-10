@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/google/go-cmp/cmp"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 func TestMetadataOperators_Merge(t *testing.T) {

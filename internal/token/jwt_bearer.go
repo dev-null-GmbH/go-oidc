@@ -6,10 +6,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/luikyv/go-oidc/internal/client"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/strutil"
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/client"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/strutil"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 func generateJWTBearerToken(ctx oidc.Context, req request) (response, error) {

@@ -1,8 +1,8 @@
 package federation
 
 import (
-	"github.com/luikyv/go-oidc/internal/client"
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/client"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 type metadata struct {

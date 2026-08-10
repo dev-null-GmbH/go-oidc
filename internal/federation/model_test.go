@@ -3,8 +3,8 @@ package federation
 import (
 	"testing"
 
-	"github.com/luikyv/go-oidc/internal/client"
-	"github.com/luikyv/go-oidc/internal/oidctest"
+	"github.com/dev-null-GmbH/go-oidc/internal/client"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidctest"
 )
 
 func TestMatchesNamespace(t *testing.T) {

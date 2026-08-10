@@ -1,6 +1,6 @@
 package discovery
 
-import "github.com/luikyv/go-oidc/pkg/goidc"
+import "github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 
 // authorizationServerMetadata is the OAuth-focused metadata document exposed
 // at the RFC 8414 well-known location. It does not inherit unrelated OpenID

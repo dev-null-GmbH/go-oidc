@@ -8,12 +8,12 @@ import (
 	"slices"
 	"time"
 
+	"github.com/dev-null-GmbH/go-oidc/internal/client"
+	"github.com/dev-null-GmbH/go-oidc/internal/joseutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/go-jose/go-jose/v4/jwt"
-	"github.com/luikyv/go-oidc/internal/client"
-	"github.com/luikyv/go-oidc/internal/joseutil"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/timeutil"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 const (

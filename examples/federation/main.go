@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dev-null-GmbH/go-oidc/examples/authutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/pkg/provider"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/json"
 	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/google/uuid"
-	"github.com/luikyv/go-oidc/examples/authutil"
-	"github.com/luikyv/go-oidc/internal/timeutil"
-	"github.com/luikyv/go-oidc/pkg/goidc"
-	"github.com/luikyv/go-oidc/pkg/provider"
 )
 
 const (

@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidctest"
+	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/oidctest"
-	"github.com/luikyv/go-oidc/internal/timeutil"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 func TestInitBackAuth(t *testing.T) {

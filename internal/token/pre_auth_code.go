@@ -6,11 +6,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/luikyv/go-oidc/internal/client"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/timeutil"
-	vcutil "github.com/luikyv/go-oidc/internal/vc/util"
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/client"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
+	vcutil "github.com/dev-null-GmbH/go-oidc/internal/vc/util"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 func generatePreAuthCodeToken(ctx oidc.Context, req request) (response, error) {

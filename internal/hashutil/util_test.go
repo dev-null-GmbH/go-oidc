@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/luikyv/go-oidc/internal/hashutil"
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/hashutil"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 func TestThumbprint(t *testing.T) {

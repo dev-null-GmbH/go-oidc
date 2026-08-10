@@ -3,7 +3,7 @@ package goidc
 import (
 	"context"
 
-	"github.com/luikyv/go-oidc/internal/timeutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
 )
 
 // LogoutManager contains all the logic needed to manage logout sessions.

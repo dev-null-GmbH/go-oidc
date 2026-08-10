@@ -15,12 +15,12 @@ import (
 	"slices"
 	"time"
 
+	"github.com/dev-null-GmbH/go-oidc/internal/dpop"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
-	"github.com/luikyv/go-oidc/internal/dpop"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/timeutil"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 const (

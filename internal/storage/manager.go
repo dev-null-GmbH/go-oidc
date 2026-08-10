@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 var _ goidc.AuthManager = &Manager{}

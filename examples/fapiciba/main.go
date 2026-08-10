@@ -11,9 +11,9 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/luikyv/go-oidc/examples/authutil"
-	"github.com/luikyv/go-oidc/pkg/goidc"
-	"github.com/luikyv/go-oidc/pkg/provider"
+	"github.com/dev-null-GmbH/go-oidc/examples/authutil"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/pkg/provider"
 )
 
 func main() {

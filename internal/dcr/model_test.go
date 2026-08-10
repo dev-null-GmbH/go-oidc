@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/dev-null-GmbH/go-oidc/internal/client"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/google/go-cmp/cmp"
-	"github.com/luikyv/go-oidc/internal/client"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 func TestResponseMarshalJSON(t *testing.T) {

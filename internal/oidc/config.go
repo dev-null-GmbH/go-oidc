@@ -3,7 +3,7 @@ package oidc
 import (
 	"context"
 
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 type Configuration struct {

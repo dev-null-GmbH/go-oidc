@@ -8,15 +8,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dev-null-GmbH/go-oidc/internal/hashutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/joseutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidctest"
+	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/luikyv/go-oidc/internal/hashutil"
-	"github.com/luikyv/go-oidc/internal/joseutil"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/oidctest"
-	"github.com/luikyv/go-oidc/internal/timeutil"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 func TestMakeIDToken(t *testing.T) {
