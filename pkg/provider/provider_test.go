@@ -277,6 +277,202 @@ func TestNewRejectsLegacyAndTypedJTIConsumers(t *testing.T) {
 	}
 }
 
+func TestNewRejectsExplicitlyNilQualifiedRuntimeCallbacks(t *testing.T) {
+	config := Config{
+		Issuer: "https://example.com",
+		JWKS: func(context.Context) (goidc.JSONWebKeySet, error) {
+			return goidc.JSONWebKeySet{}, nil
+		},
+		IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
+	}
+
+	if _, err := New(config, WithJTIUseConsumer(nil)); err == nil {
+		t.Fatal("New() error = nil for an explicitly nil typed JTI consumer")
+	}
+	if _, err := New(config, WithPrivateKeyJWTAssertionPolicy(nil)); err == nil {
+		t.Fatal("New() error = nil for an explicitly nil private_key_jwt assertion policy")
+	}
+}
+
+func TestTokenEndpointEvidenceDoesNotRunForMakeToken(t *testing.T) {
+	jwk := oidctest.PrivateRS256JWK(t, "signing-key", goidc.KeyUsageSignature)
+	var calls int
+	op, err := New(Config{
+		Issuer: "https://example.com",
+		JWKS: func(context.Context) (goidc.JSONWebKeySet, error) {
+			return goidc.JSONWebKeySet{Keys: []goidc.JSONWebKey{jwk}}, nil
+		},
+		IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
+	},
+		WithClientCredentialsGrant(),
+		WithTokenEndpointEvidence(func(context.Context, goidc.TokenEndpointEvidence) { calls++ }),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = op.MakeToken(t.Context(), &goidc.Grant{
+		ClientID: "client",
+		Subject:  "client",
+		Scopes:   "scope",
+	})
+	if err != nil {
+		t.Fatalf("MakeToken() error = %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("evidence callback calls = %d, want 0", calls)
+	}
+}
+
+func TestNewRejectsLegacyAndFallibleAccessTokenClaims(t *testing.T) {
+	_, err := New(Config{
+		Issuer: "https://example.com",
+		JWKS: func(context.Context) (goidc.JSONWebKeySet, error) {
+			return goidc.JSONWebKeySet{}, nil
+		},
+		IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
+	},
+		WithTokenClaims(func(context.Context, *goidc.Token, *goidc.Grant) map[string]any { return nil }),
+		WithAccessTokenClaims(func(context.Context, goidc.AccessTokenClaimsInput) (map[string]any, error) {
+			return nil, nil
+		}),
+	)
+	if err == nil {
+		t.Fatal("New() error = nil, want mutually exclusive token claims error")
+	}
+}
+
+func TestNewRejectsFallibleClaimsWithOpaqueTokens(t *testing.T) {
+	manager := storage.NewManager(100)
+	_, err := New(Config{
+		Issuer:  "https://example.com",
+		Manager: manager,
+		JWKS: func(context.Context) (goidc.JSONWebKeySet, error) {
+			return goidc.JSONWebKeySet{}, nil
+		},
+		IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
+	},
+		WithTokenOptions(
+			func(context.Context, *goidc.Grant, *goidc.Client) goidc.TokenOptions {
+				return goidc.NewOpaqueTokenOptions(60)
+			},
+			WithOpaqueTokens(manager),
+		),
+		WithAccessTokenClaims(func(context.Context, goidc.AccessTokenClaimsInput) (map[string]any, error) {
+			return nil, nil
+		}),
+	)
+	if err == nil {
+		t.Fatal("New() error = nil, want opaque-token incompatibility error")
+	}
+}
+
+func TestNewRestrictsFallibleClaimsToClientCredentialsOnly(t *testing.T) {
+	config := Config{
+		Issuer: "https://example.com",
+		JWKS: func(context.Context) (goidc.JSONWebKeySet, error) {
+			return goidc.JSONWebKeySet{}, nil
+		},
+		IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
+	}
+	claims := WithAccessTokenClaims(func(context.Context, goidc.AccessTokenClaimsInput) (map[string]any, error) {
+		return nil, nil
+	})
+
+	if _, err := New(config, claims); err == nil {
+		t.Fatal("New() error = nil, want missing client_credentials grant error")
+	}
+	if _, err := New(config, WithClientCredentialsGrant(), claims); err != nil {
+		t.Fatalf("New() client_credentials-only error = %v", err)
+	}
+	if _, err := New(config, WithClientCredentialsGrant(), WithAuthCodeGrant(AuthCodeGrantConfig{}), claims); err == nil {
+		t.Fatal("New() error = nil, want multi-grant incompatibility error")
+	}
+}
+
+func TestNewRequiresGrantIDConsumersDisabledBeforeOmittingGrantID(t *testing.T) {
+	config := Config{
+		Issuer: "https://example.com",
+		JWKS: func(context.Context) (goidc.JSONWebKeySet, error) {
+			return goidc.JSONWebKeySet{}, nil
+		},
+		IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
+	}
+
+	if _, err := New(config, WithAccessTokenGrantIDClaim(false)); err == nil {
+		t.Fatal("New() error = nil, want enabled userinfo incompatibility error")
+	}
+	if _, err := New(config, WithoutUserInfo(), WithAccessTokenGrantIDClaim(false)); err != nil {
+		t.Fatalf("New() with grant ID consumers disabled error = %v", err)
+	}
+	if _, err := New(
+		config,
+		WithoutUserInfo(),
+		WithTokenIntrospection(nil),
+		WithAccessTokenGrantIDClaim(false),
+	); err == nil {
+		t.Fatal("New() error = nil, want introspection incompatibility error")
+	}
+	if _, err := New(
+		config,
+		WithoutUserInfo(),
+		func(provider *Provider) error {
+			provider.config.VCIEnabled = true
+			return nil
+		},
+		WithAccessTokenGrantIDClaim(false),
+	); err == nil {
+		t.Fatal("New() error = nil, want credential-issuer incompatibility error")
+	}
+}
+
+func TestWithoutUserInfoDoesNotRegisterEndpoint(t *testing.T) {
+	op, err := New(Config{
+		Issuer: "https://example.com",
+		JWKS: func(context.Context) (goidc.JSONWebKeySet, error) {
+			return goidc.JSONWebKeySet{}, nil
+		},
+		IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
+	}, WithoutUserInfo())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "https://example.com/userinfo", nil)
+	response := httptest.NewRecorder()
+	op.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("GET /userinfo status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+}
+
+func TestMakeTokenRejectsFallibleClaimsBeforeSavingGrant(t *testing.T) {
+	manager := storage.NewManager(100)
+	op, err := New(Config{
+		Issuer:  "https://example.com",
+		Manager: manager,
+		JWKS: func(context.Context) (goidc.JSONWebKeySet, error) {
+			return goidc.JSONWebKeySet{}, nil
+		},
+		IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
+	},
+		WithClientCredentialsGrant(),
+		WithAccessTokenClaims(func(context.Context, goidc.AccessTokenClaimsInput) (map[string]any, error) {
+			return nil, nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	if _, err := op.MakeToken(context.Background(), &goidc.Grant{ClientID: "untrusted"}); err == nil {
+		t.Fatal("MakeToken() error = nil, want fallible-claims guard error")
+	}
+	if len(manager.Grants) != 0 {
+		t.Fatalf("len(manager.Grants) = %d, want 0", len(manager.Grants))
+	}
+}
+
 func TestNewFAPI2ClientCredentialsOnly(t *testing.T) {
 	jwk := oidctest.PrivatePS256JWK(t, "test_server_key", goidc.KeyUsageSignature)
 

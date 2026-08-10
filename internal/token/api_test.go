@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -218,6 +219,10 @@ func TestTokenEndpointDPoPNonce(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := oidctest.NewContext(t)
+			var evidence []goidc.TokenEndpointEvidence
+			ctx.TokenEndpointEvidenceFunc = func(_ context.Context, value goidc.TokenEndpointEvidence) {
+				evidence = append(evidence, value)
+			}
 			ctx.DPoPEnabled = true
 			ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
 			manager := oidctest.NewDPoPNonceManager(test.wantNonce)
@@ -266,6 +271,17 @@ func TestTokenEndpointDPoPNonce(t *testing.T) {
 			if got := rec.Header().Get("WWW-Authenticate"); got != "" {
 				t.Fatalf("WWW-Authenticate = %q, want empty", got)
 			}
+			wantResult := goidc.TokenEndpointResultIssued
+			if test.wantError == goidc.ErrorCodeUseDPoPNonce {
+				wantResult = goidc.TokenEndpointResultUseDPoPNonce
+			}
+			wantEvidence := []goidc.TokenEndpointEvidence{{
+				Result:                wantResult,
+				AuthenticatedClientID: client.ID,
+			}}
+			if !reflect.DeepEqual(evidence, wantEvidence) {
+				t.Fatalf("evidence = %#v, want %#v", evidence, wantEvidence)
+			}
 		})
 	}
 }
@@ -283,6 +299,10 @@ func TestTokenEndpointDPoPNonceStoreFailure(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := oidctest.NewContext(t)
+			var evidence []goidc.TokenEndpointEvidence
+			ctx.TokenEndpointEvidenceFunc = func(_ context.Context, value goidc.TokenEndpointEvidence) {
+				evidence = append(evidence, value)
+			}
 			ctx.DPoPEnabled = true
 			ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
 			ctx.DPoPNonceManager = failingDPoPNonceManager{err: storeErr}
@@ -312,8 +332,8 @@ func TestTokenEndpointDPoPNonceStoreFailure(t *testing.T) {
 			if rec.Code != http.StatusInternalServerError {
 				t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusInternalServerError, rec.Body.String())
 			}
-			if !strings.Contains(rec.Body.String(), `"error":"internal_error"`) {
-				t.Fatalf("body = %s, want internal_error", rec.Body.String())
+			if !strings.Contains(rec.Body.String(), `"error":"server_error"`) {
+				t.Fatalf("body = %s, want server_error", rec.Body.String())
 			}
 			if strings.Contains(rec.Body.String(), string(goidc.ErrorCodeUseDPoPNonce)) {
 				t.Fatalf("body = %s, must not downgrade to use_dpop_nonce", rec.Body.String())
@@ -321,7 +341,48 @@ func TestTokenEndpointDPoPNonceStoreFailure(t *testing.T) {
 			if got := rec.Header().Get(goidc.HeaderDPoPNonce); got != "" {
 				t.Fatalf("%s = %q, want empty", goidc.HeaderDPoPNonce, got)
 			}
+			wantEvidence := []goidc.TokenEndpointEvidence{{
+				Result:                goidc.TokenEndpointResultServerError,
+				AuthenticatedClientID: client.ID,
+			}}
+			if !reflect.DeepEqual(evidence, wantEvidence) {
+				t.Fatalf("evidence = %#v, want %#v", evidence, wantEvidence)
+			}
 		})
+	}
+}
+
+func TestTokenEndpointEvidenceInvalidDPoPProof(t *testing.T) {
+	ctx := oidctest.NewContext(t)
+	ctx.DPoPEnabled = true
+	ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
+	client, secret := oidctest.NewClient(t)
+	ctx.StaticClients = append(ctx.StaticClients, client)
+	var got []goidc.TokenEndpointEvidence
+	ctx.TokenEndpointEvidenceFunc = func(_ context.Context, evidence goidc.TokenEndpointEvidence) {
+		got = append(got, evidence)
+	}
+	form := url.Values{
+		"grant_type":    {string(goidc.GrantClientCredentials)},
+		"client_id":     {client.ID},
+		"client_secret": {secret},
+	}
+	request := httptest.NewRequest(http.MethodPost, ctx.TokenEndpoint, strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set(goidc.HeaderDPoP, "not-a-jwt")
+	response := httptest.NewRecorder()
+	handleCreate(oidc.NewHTTPContext(response, request, ctx.Configuration))
+
+	if response.Code != http.StatusBadRequest ||
+		!strings.Contains(response.Body.String(), `"error":"invalid_dpop_proof"`) {
+		t.Fatalf("response = (%d, %s), want invalid_dpop_proof", response.Code, response.Body.String())
+	}
+	want := []goidc.TokenEndpointEvidence{{
+		Result:                goidc.TokenEndpointResultInvalidDPoPProof,
+		AuthenticatedClientID: client.ID,
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("evidence = %#v, want %#v", got, want)
 	}
 }
 
@@ -394,5 +455,504 @@ func TestTokenEndpointErrorStatusCodes(t *testing.T) {
 				t.Fatalf("error = %s, want %s", body.Error, test.wantCode)
 			}
 		})
+	}
+}
+
+func TestTokenEndpointEvidenceSelectsClosedResultAndAuthenticationBoundary(t *testing.T) {
+	tests := []struct {
+		name             string
+		setup            func(oidc.Context, *goidc.Client, url.Values) string
+		wantResult       goidc.TokenEndpointResult
+		wantClientID     bool
+		wantStatus       int
+		wantProtocolCode goidc.ErrorCode
+	}{
+		{
+			name:         "issued",
+			setup:        func(oidc.Context, *goidc.Client, url.Values) string { return "application/x-www-form-urlencoded" },
+			wantResult:   goidc.TokenEndpointResultIssued,
+			wantClientID: true,
+			wantStatus:   http.StatusOK,
+		},
+		{
+			name: "invalid content type before authentication",
+			setup: func(oidc.Context, *goidc.Client, url.Values) string {
+				return "application/json"
+			},
+			wantResult:       goidc.TokenEndpointResultInvalidRequest,
+			wantStatus:       http.StatusBadRequest,
+			wantProtocolCode: goidc.ErrorCodeInvalidRequest,
+		},
+		{
+			name: "invalid client before authentication",
+			setup: func(_ oidc.Context, _ *goidc.Client, form url.Values) string {
+				form.Set("client_secret", "wrong-secret")
+				return "application/x-www-form-urlencoded"
+			},
+			wantResult:       goidc.TokenEndpointResultInvalidClient,
+			wantStatus:       http.StatusUnauthorized,
+			wantProtocolCode: goidc.ErrorCodeInvalidClient,
+		},
+		{
+			name: "unauthorized grant after authentication",
+			setup: func(_ oidc.Context, client *goidc.Client, _ url.Values) string {
+				client.GrantTypes = []goidc.GrantType{goidc.GrantAuthorizationCode}
+				return "application/x-www-form-urlencoded"
+			},
+			wantResult:       goidc.TokenEndpointResultUnauthorizedClient,
+			wantClientID:     true,
+			wantStatus:       http.StatusBadRequest,
+			wantProtocolCode: goidc.ErrorCodeUnauthorizedClient,
+		},
+		{
+			name: "invalid scope after authentication",
+			setup: func(_ oidc.Context, _ *goidc.Client, form url.Values) string {
+				form.Set("scope", "unavailable")
+				return "application/x-www-form-urlencoded"
+			},
+			wantResult:       goidc.TokenEndpointResultInvalidScope,
+			wantClientID:     true,
+			wantStatus:       http.StatusBadRequest,
+			wantProtocolCode: goidc.ErrorCodeInvalidScope,
+		},
+		{
+			name: "invalid target after authentication",
+			setup: func(ctx oidc.Context, _ *goidc.Client, form url.Values) string {
+				ctx.ResourceIndicatorsEnabled = true
+				ctx.ResourceIndicators = []goidc.ResourceIndicator{"https://resource.example/allowed"}
+				form["resource"] = []string{"https://resource.example/denied"}
+				return "application/x-www-form-urlencoded"
+			},
+			wantResult:       goidc.TokenEndpointResultInvalidTarget,
+			wantClientID:     true,
+			wantStatus:       http.StatusBadRequest,
+			wantProtocolCode: goidc.ErrorCodeInvalidTarget,
+		},
+		{
+			name: "unsupported grant before authentication",
+			setup: func(_ oidc.Context, _ *goidc.Client, form url.Values) string {
+				form.Set("grant_type", "future_grant")
+				return "application/x-www-form-urlencoded"
+			},
+			wantResult:       goidc.TokenEndpointResultProtocolDenied,
+			wantStatus:       http.StatusBadRequest,
+			wantProtocolCode: goidc.ErrorCodeUnsupportedGrantType,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := oidctest.NewContext(t)
+			client, secret := oidctest.NewClient(t)
+			ctx.StaticClients = append(ctx.StaticClients, client)
+			form := url.Values{
+				"grant_type":    {string(goidc.GrantClientCredentials)},
+				"client_id":     {client.ID},
+				"client_secret": {secret},
+				"scope":         {"scope1"},
+			}
+			contentType := test.setup(ctx, client, form)
+			type contextKey struct{}
+			requestContext := context.WithValue(t.Context(), contextKey{}, "context-canary")
+			request := httptest.NewRequest(http.MethodPost, ctx.TokenEndpoint, strings.NewReader(form.Encode())).WithContext(requestContext)
+			request.Header.Set("Content-Type", contentType)
+			response := httptest.NewRecorder()
+			var evidence []goidc.TokenEndpointEvidence
+			ctx.TokenEndpointEvidenceFunc = func(callbackContext context.Context, value goidc.TokenEndpointEvidence) {
+				if callbackContext != requestContext {
+					t.Errorf("callback context = %p, want exact request context %p", callbackContext, requestContext)
+				}
+				evidence = append(evidence, value)
+			}
+
+			handleCreate(oidc.NewHTTPContext(response, request, ctx.Configuration))
+
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", response.Code, test.wantStatus, response.Body.String())
+			}
+			if len(evidence) != 1 {
+				t.Fatalf("evidence calls = %d, want 1", len(evidence))
+			}
+			wantClientID := ""
+			if test.wantClientID {
+				wantClientID = client.ID
+			}
+			wantEvidence := goidc.TokenEndpointEvidence{Result: test.wantResult, AuthenticatedClientID: wantClientID}
+			if evidence[0] != wantEvidence {
+				t.Fatalf("evidence = %#v, want %#v", evidence[0], wantEvidence)
+			}
+			if test.wantProtocolCode != "" {
+				var body struct {
+					Error goidc.ErrorCode `json:"error"`
+				}
+				if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+					t.Fatalf("decode response: %v", err)
+				}
+				if body.Error != test.wantProtocolCode {
+					t.Fatalf("protocol error = %s, want %s", body.Error, test.wantProtocolCode)
+				}
+			}
+		})
+	}
+}
+
+func TestTokenEndpointEvidenceCallbackPanicCannotChangeProtocolResponse(t *testing.T) {
+	run := func(t *testing.T, callback goidc.TokenEndpointEvidenceFunc) *httptest.ResponseRecorder {
+		t.Helper()
+		ctx := oidctest.NewContext(t)
+		ctx.TokenEndpointEvidenceFunc = callback
+		request := httptest.NewRequest(http.MethodPost, ctx.TokenEndpoint, strings.NewReader("{}"))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		handleCreate(oidc.NewHTTPContext(response, request, ctx.Configuration))
+		return response
+	}
+
+	baseline := run(t, nil)
+	var calls int
+	withPanic := run(t, func(context.Context, goidc.TokenEndpointEvidence) {
+		calls++
+		panic("evidence callback panic canary")
+	})
+	if calls != 1 {
+		t.Fatalf("callback calls = %d, want 1", calls)
+	}
+	if baseline.Code != withPanic.Code || baseline.Body.String() != withPanic.Body.String() ||
+		!reflect.DeepEqual(baseline.Header(), withPanic.Header()) {
+		t.Fatalf("callback panic changed response: baseline=(%d,%q,%v), got=(%d,%q,%v)",
+			baseline.Code, baseline.Body.String(), baseline.Header(), withPanic.Code, withPanic.Body.String(), withPanic.Header())
+	}
+}
+
+func TestTokenEndpointEvidenceCallbackPanicCannotChangeSuccessfulIssuance(t *testing.T) {
+	ctx := oidctest.NewContext(t)
+	client, secret := oidctest.NewClient(t)
+	ctx.StaticClients = append(ctx.StaticClients, client)
+	var calls int
+	ctx.TokenEndpointEvidenceFunc = func(context.Context, goidc.TokenEndpointEvidence) {
+		calls++
+		panic("evidence callback panic canary")
+	}
+	form := url.Values{
+		"grant_type":    {string(goidc.GrantClientCredentials)},
+		"client_id":     {client.ID},
+		"client_secret": {secret},
+	}
+	request := httptest.NewRequest(http.MethodPost, ctx.TokenEndpoint, strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+
+	handleCreate(oidc.NewHTTPContext(response, request, ctx.Configuration))
+
+	if calls != 1 {
+		t.Fatalf("callback calls = %d, want 1", calls)
+	}
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", response.Code, response.Body.String())
+	}
+	var body struct {
+		AccessToken string `json:"access_token"`
+		TokenType   string `json:"token_type"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.AccessToken == "" || body.TokenType == "" {
+		t.Fatalf("successful response = %#v, want token", body)
+	}
+}
+
+func TestTokenEndpointEvidenceRetainsAuthenticatedClientSnapshotAfterMutation(t *testing.T) {
+	ctx := oidctest.NewContext(t)
+	client, secret := oidctest.NewClient(t)
+	originalClientID := client.ID
+	ctx.StaticClients = append(ctx.StaticClients, client)
+	originalTokenOptions := ctx.TokenOptionsFunc
+	ctx.TokenOptionsFunc = func(callbackContext context.Context, grant *goidc.Grant, callbackClient *goidc.Client) goidc.TokenOptions {
+		options := originalTokenOptions(callbackContext, grant, callbackClient)
+		callbackClient.ID = "mutated-after-authentication"
+		return options
+	}
+	var got goidc.TokenEndpointEvidence
+	ctx.TokenEndpointEvidenceFunc = func(_ context.Context, evidence goidc.TokenEndpointEvidence) {
+		got = evidence
+	}
+	form := url.Values{
+		"grant_type":    {string(goidc.GrantClientCredentials)},
+		"client_id":     {originalClientID},
+		"client_secret": {secret},
+	}
+	request := httptest.NewRequest(http.MethodPost, ctx.TokenEndpoint, strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+
+	handleCreate(oidc.NewHTTPContext(response, request, ctx.Configuration))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", response.Code, response.Body.String())
+	}
+	want := goidc.TokenEndpointEvidence{
+		Result:                goidc.TokenEndpointResultIssued,
+		AuthenticatedClientID: originalClientID,
+	}
+	if got != want {
+		t.Fatalf("evidence = %#v, want %#v", got, want)
+	}
+}
+
+func TestTokenEndpointEvidenceCallbackPanicPreservesEnginePanic(t *testing.T) {
+	ctx := oidctest.NewContext(t)
+	client, secret := oidctest.NewClient(t)
+	ctx.StaticClients = append(ctx.StaticClients, client)
+	enginePanic := &struct{ name string }{name: "engine panic"}
+	ctx.HandleGrantFunc = func(context.Context, goidc.GrantType, *goidc.Grant) error {
+		panic(enginePanic)
+	}
+	var evidence []goidc.TokenEndpointEvidence
+	ctx.TokenEndpointEvidenceFunc = func(_ context.Context, value goidc.TokenEndpointEvidence) {
+		evidence = append(evidence, value)
+		panic("evidence panic")
+	}
+	form := url.Values{
+		"grant_type":    {string(goidc.GrantClientCredentials)},
+		"client_id":     {client.ID},
+		"client_secret": {secret},
+	}
+	request := httptest.NewRequest(http.MethodPost, ctx.TokenEndpoint, strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		handleCreate(oidc.NewHTTPContext(httptest.NewRecorder(), request, ctx.Configuration))
+	}()
+
+	if recovered != enginePanic {
+		t.Fatalf("recovered panic = %#v, want original %#v", recovered, enginePanic)
+	}
+	want := []goidc.TokenEndpointEvidence{{
+		Result:                goidc.TokenEndpointResultServerError,
+		AuthenticatedClientID: client.ID,
+	}}
+	if !reflect.DeepEqual(evidence, want) {
+		t.Fatalf("evidence = %#v, want %#v", evidence, want)
+	}
+}
+
+func TestTokenEndpointEvidenceDoesNotObserveOtherTokenOperations(t *testing.T) {
+	ctx := oidctest.NewContext(t)
+	var calls int
+	ctx.TokenEndpointEvidenceFunc = func(context.Context, goidc.TokenEndpointEvidence) { calls++ }
+
+	for _, fn := range []func(oidc.Context){handleIntrospection, handleRevocation} {
+		request := httptest.NewRequest(http.MethodPost, "/operation", strings.NewReader("{}"))
+		request.Header.Set("Content-Type", "application/json")
+		fn(oidc.NewHTTPContext(httptest.NewRecorder(), request, ctx.Configuration))
+	}
+	if calls != 0 {
+		t.Fatalf("callback calls = %d, want 0 for introspection/revocation", calls)
+	}
+}
+
+type tokenEvidenceFailingResponseWriter struct {
+	header http.Header
+}
+
+func (writer *tokenEvidenceFailingResponseWriter) Header() http.Header {
+	if writer.header == nil {
+		writer.header = make(http.Header)
+	}
+	return writer.header
+}
+
+func (*tokenEvidenceFailingResponseWriter) WriteHeader(int) {}
+
+func (*tokenEvidenceFailingResponseWriter) Write([]byte) (int, error) {
+	return 0, errors.New("response write failed")
+}
+
+type tokenEvidencePanickingResponseWriter struct {
+	header http.Header
+	panic  any
+}
+
+func (writer *tokenEvidencePanickingResponseWriter) Header() http.Header {
+	if writer.header == nil {
+		writer.header = make(http.Header)
+	}
+	return writer.header
+}
+
+func (writer *tokenEvidencePanickingResponseWriter) WriteHeader(int) {
+	panic(writer.panic)
+}
+
+func (*tokenEvidencePanickingResponseWriter) Write(value []byte) (int, error) {
+	return len(value), nil
+}
+
+func TestTokenEndpointEvidenceResponseWriteFailureIsServerError(t *testing.T) {
+	ctx := oidctest.NewContext(t)
+	client, secret := oidctest.NewClient(t)
+	ctx.StaticClients = append(ctx.StaticClients, client)
+	var got []goidc.TokenEndpointEvidence
+	ctx.TokenEndpointEvidenceFunc = func(_ context.Context, evidence goidc.TokenEndpointEvidence) {
+		got = append(got, evidence)
+	}
+	form := url.Values{
+		"grant_type":    {string(goidc.GrantClientCredentials)},
+		"client_id":     {client.ID},
+		"client_secret": {secret},
+	}
+	request := httptest.NewRequest(http.MethodPost, ctx.TokenEndpoint, strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	handleCreate(oidc.NewHTTPContext(&tokenEvidenceFailingResponseWriter{}, request, ctx.Configuration))
+
+	want := []goidc.TokenEndpointEvidence{{
+		Result:                goidc.TokenEndpointResultServerError,
+		AuthenticatedClientID: client.ID,
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("evidence = %#v, want %#v", got, want)
+	}
+}
+
+func TestTokenEndpointEvidenceErrorRenderingFailureIsServerError(t *testing.T) {
+	ctx := oidctest.NewContext(t)
+	var got []goidc.TokenEndpointEvidence
+	ctx.TokenEndpointEvidenceFunc = func(_ context.Context, evidence goidc.TokenEndpointEvidence) {
+		got = append(got, evidence)
+	}
+	request := httptest.NewRequest(http.MethodPost, ctx.TokenEndpoint, strings.NewReader("{}"))
+	request.Header.Set("Content-Type", "application/json")
+	handleCreate(oidc.NewHTTPContext(&tokenEvidenceFailingResponseWriter{}, request, ctx.Configuration))
+
+	want := []goidc.TokenEndpointEvidence{{Result: goidc.TokenEndpointResultServerError}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("evidence = %#v, want %#v", got, want)
+	}
+}
+
+func TestTokenEndpointEvidenceResponseWriterPanicIsServerErrorAndPreserved(t *testing.T) {
+	ctx := oidctest.NewContext(t)
+	client, secret := oidctest.NewClient(t)
+	ctx.StaticClients = append(ctx.StaticClients, client)
+	var got []goidc.TokenEndpointEvidence
+	ctx.TokenEndpointEvidenceFunc = func(_ context.Context, evidence goidc.TokenEndpointEvidence) {
+		got = append(got, evidence)
+	}
+	form := url.Values{
+		"grant_type":    {string(goidc.GrantClientCredentials)},
+		"client_id":     {client.ID},
+		"client_secret": {secret},
+	}
+	request := httptest.NewRequest(http.MethodPost, ctx.TokenEndpoint, strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	writerPanic := &struct{ name string }{name: "writer panic"}
+
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		handleCreate(oidc.NewHTTPContext(
+			&tokenEvidencePanickingResponseWriter{panic: writerPanic},
+			request,
+			ctx.Configuration,
+		))
+	}()
+
+	if recovered != writerPanic {
+		t.Fatalf("recovered panic = %#v, want original %#v", recovered, writerPanic)
+	}
+	want := []goidc.TokenEndpointEvidence{{
+		Result:                goidc.TokenEndpointResultServerError,
+		AuthenticatedClientID: client.ID,
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("evidence = %#v, want %#v", got, want)
+	}
+}
+
+type tokenEvidenceCancelingResponseWriter struct {
+	response *httptest.ResponseRecorder
+	cancel   context.CancelFunc
+}
+
+func (writer tokenEvidenceCancelingResponseWriter) Header() http.Header {
+	return writer.response.Header()
+}
+
+func (writer tokenEvidenceCancelingResponseWriter) WriteHeader(status int) {
+	writer.response.WriteHeader(status)
+	writer.cancel()
+}
+
+func (writer tokenEvidenceCancelingResponseWriter) Write(value []byte) (int, error) {
+	return writer.response.Write(value)
+}
+
+func TestTokenEndpointEvidenceCancellationClassifiesByWriteCompletion(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		cancelBefore bool
+		want         goidc.TokenEndpointResult
+	}{
+		{name: "before write", cancelBefore: true, want: goidc.TokenEndpointResultServerError},
+		{name: "during successful write", want: goidc.TokenEndpointResultIssued},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := oidctest.NewContext(t)
+			client, secret := oidctest.NewClient(t)
+			ctx.StaticClients = append(ctx.StaticClients, client)
+			var got []goidc.TokenEndpointEvidence
+			ctx.TokenEndpointEvidenceFunc = func(_ context.Context, evidence goidc.TokenEndpointEvidence) {
+				got = append(got, evidence)
+			}
+			form := url.Values{
+				"grant_type":    {string(goidc.GrantClientCredentials)},
+				"client_id":     {client.ID},
+				"client_secret": {secret},
+			}
+			requestContext, cancel := context.WithCancel(t.Context())
+			request := httptest.NewRequest(http.MethodPost, ctx.TokenEndpoint, strings.NewReader(form.Encode())).WithContext(requestContext)
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			response := httptest.NewRecorder()
+			var writer http.ResponseWriter = response
+			if test.cancelBefore {
+				cancel()
+			} else {
+				writer = tokenEvidenceCancelingResponseWriter{response: response, cancel: cancel}
+			}
+			defer cancel()
+
+			handleCreate(oidc.NewHTTPContext(writer, request, ctx.Configuration))
+
+			if len(got) != 1 || got[0].Result != test.want {
+				t.Fatalf("evidence = %#v, want one %v result", got, test.want)
+			}
+		})
+	}
+}
+
+func TestTokenEndpointEvidenceCancellationDuringSuccessfulDenialWriteReportsDenial(t *testing.T) {
+	ctx := oidctest.NewContext(t)
+	var got []goidc.TokenEndpointEvidence
+	ctx.TokenEndpointEvidenceFunc = func(_ context.Context, evidence goidc.TokenEndpointEvidence) {
+		got = append(got, evidence)
+	}
+	requestContext, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	request := httptest.NewRequest(http.MethodPost, ctx.TokenEndpoint, strings.NewReader("{}")).WithContext(requestContext)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	handleCreate(oidc.NewHTTPContext(
+		tokenEvidenceCancelingResponseWriter{response: response, cancel: cancel},
+		request,
+		ctx.Configuration,
+	))
+
+	want := []goidc.TokenEndpointEvidence{{Result: goidc.TokenEndpointResultInvalidRequest}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("evidence = %#v, want %#v", got, want)
 	}
 }

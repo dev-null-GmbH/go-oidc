@@ -1978,6 +1978,9 @@ func TestWithJTIUseConsumer(t *testing.T) {
 	if p.config.ConsumeJTIUseFunc == nil {
 		t.Fatal("ConsumeJTIUseFunc cannot be nil")
 	}
+	if err := WithJTIUseConsumer(nil)(p); err == nil {
+		t.Fatal("WithJTIUseConsumer(nil) error = nil")
+	}
 }
 
 func TestWithPrivateKeyJWTAssertionPolicy(t *testing.T) {
@@ -1989,6 +1992,65 @@ func TestWithPrivateKeyJWTAssertionPolicy(t *testing.T) {
 	}
 	if p.config.PrivateKeyJWTAssertionPolicyFunc == nil {
 		t.Fatal("PrivateKeyJWTAssertionPolicyFunc cannot be nil")
+	}
+	if err := WithPrivateKeyJWTAssertionPolicy(nil)(p); err == nil {
+		t.Fatal("WithPrivateKeyJWTAssertionPolicy(nil) error = nil")
+	}
+}
+
+func TestWithTokenEndpointEvidence(t *testing.T) {
+	p := &Provider{config: oidc.Configuration{}}
+	callback := func(context.Context, goidc.TokenEndpointEvidence) {}
+
+	if err := WithTokenEndpointEvidence(callback)(p); err != nil {
+		t.Fatalf("WithTokenEndpointEvidence() error = %v", err)
+	}
+	if p.config.TokenEndpointEvidenceFunc == nil {
+		t.Fatal("TokenEndpointEvidenceFunc cannot be nil")
+	}
+	if err := WithTokenEndpointEvidence(nil)(p); err == nil {
+		t.Fatal("WithTokenEndpointEvidence(nil) error = nil")
+	}
+}
+
+func TestWithAccessTokenClaims(t *testing.T) {
+	p := &Provider{config: oidc.Configuration{}}
+	claims := func(context.Context, goidc.AccessTokenClaimsInput) (map[string]any, error) {
+		return nil, nil
+	}
+
+	if err := WithAccessTokenClaims(claims)(p); err != nil {
+		t.Fatalf("WithAccessTokenClaims() error = %v", err)
+	}
+	if p.config.AccessTokenClaimsFunc == nil {
+		t.Fatal("AccessTokenClaimsFunc cannot be nil")
+	}
+}
+
+func TestWithAccessTokenGrantIDClaim(t *testing.T) {
+	p := &Provider{config: oidc.Configuration{}}
+
+	if err := WithAccessTokenGrantIDClaim(false)(p); err != nil {
+		t.Fatalf("WithAccessTokenGrantIDClaim() error = %v", err)
+	}
+	if !p.config.AccessTokenGrantIDClaimDisabled {
+		t.Fatal("AccessTokenGrantIDClaimDisabled = false, want true")
+	}
+	if err := WithAccessTokenGrantIDClaim(true)(p); err != nil {
+		t.Fatalf("WithAccessTokenGrantIDClaim() error = %v", err)
+	}
+	if p.config.AccessTokenGrantIDClaimDisabled {
+		t.Fatal("AccessTokenGrantIDClaimDisabled = true, want false")
+	}
+}
+
+func TestWithoutUserInfo(t *testing.T) {
+	p := &Provider{config: oidc.Configuration{}}
+	if err := WithoutUserInfo()(p); err != nil {
+		t.Fatalf("WithoutUserInfo() error = %v", err)
+	}
+	if !p.config.UserInfoDisabled {
+		t.Fatal("UserInfoDisabled = false, want true")
 	}
 }
 

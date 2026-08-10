@@ -178,6 +178,44 @@ func TestValidateBindingRequirement(t *testing.T) {
 	}
 }
 
+func TestValidateBindingDPoPRequiredMissingProofUsesDPoPError(t *testing.T) {
+	ctx := oidctest.NewContext(t)
+	ctx.DPoPEnabled = true
+	ctx.DPoPRequired = true
+	client, _ := oidctest.NewClient(t)
+
+	err := ValidateBinding(ctx, client, nil)
+
+	var oidcErr goidc.Error
+	if !errors.As(err, &oidcErr) {
+		t.Fatalf("error = %v, want goidc.Error", err)
+	}
+	if oidcErr.Code != goidc.ErrorCodeInvalidDPoPProof {
+		t.Fatalf("error code = %q, want %q", oidcErr.Code, goidc.ErrorCodeInvalidDPoPProof)
+	}
+	if oidcErr.StatusCode() != 400 {
+		t.Fatalf("HTTP status = %d, want 400", oidcErr.StatusCode())
+	}
+}
+
+func TestValidateBindingRejectsMultipleDPoPHeadersWhenProofIsOptional(t *testing.T) {
+	ctx := oidctest.NewContext(t)
+	ctx.DPoPEnabled = true
+	ctx.Request.Header.Add(goidc.HeaderDPoP, "proof_one")
+	ctx.Request.Header.Add(goidc.HeaderDPoP, "proof_two")
+	client, _ := oidctest.NewClient(t)
+
+	err := ValidateBinding(ctx, client, nil)
+
+	var oidcErr goidc.Error
+	if !errors.As(err, &oidcErr) {
+		t.Fatalf("error = %v, want goidc.Error", err)
+	}
+	if oidcErr.Code != goidc.ErrorCodeInvalidDPoPProof {
+		t.Fatalf("error code = %q, want %q", oidcErr.Code, goidc.ErrorCodeInvalidDPoPProof)
+	}
+}
+
 func TestValidateBinding_DisabledFeatureForBoundGrant(t *testing.T) {
 	tests := []struct {
 		name    string

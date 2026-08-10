@@ -36,6 +36,10 @@ func validateDPoPWithNonceScope(ctx oidc.Context, token string, confirmation goi
 		return nil
 	}
 	if !ctx.DPoPEnabled {
+		if nonceScope == goidc.DPoPNonceScopeAuthorizationServer {
+			return goidc.WrapError(goidc.ErrorCodeInvalidDPoPProof, "invalid DPoP proof",
+				errors.New("the token is bound to DPoP, but DPoP support is disabled"))
+		}
 		return goidc.WrapError(goidc.ErrorCodeUnauthorizedClient, "unauthorized client",
 			errors.New("the token is bound to DPoP, but DPoP support is disabled"))
 	}
@@ -43,6 +47,10 @@ func validateDPoPWithNonceScope(ctx oidc.Context, token string, confirmation goi
 	dpopJWT, ok := dpop.JWT(ctx)
 	if !ok {
 		// The session was created with DPoP, then the DPoP header must be passed.
+		if nonceScope == goidc.DPoPNonceScopeAuthorizationServer {
+			return goidc.WrapError(goidc.ErrorCodeInvalidDPoPProof, "invalid DPoP proof",
+				errors.New("a DPoP proof is required for this token"))
+		}
 		return goidc.WrapError(goidc.ErrorCodeUnauthorizedClient, "unauthorized client",
 			errors.New("a DPoP proof is required for this token"))
 	}
@@ -51,6 +59,7 @@ func validateDPoPWithNonceScope(ctx oidc.Context, token string, confirmation goi
 		AccessToken:   token,
 		JWKThumbprint: confirmation.JWKThumbprint,
 		NonceScope:    nonceScope,
+		TokenEndpoint: nonceScope == goidc.DPoPNonceScopeAuthorizationServer,
 	})
 }
 

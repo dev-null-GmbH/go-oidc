@@ -101,6 +101,16 @@ func WithUserInfoEndpoint(endpoint string) Option {
 	}
 }
 
+// WithoutUserInfo disables registration and metadata advertisement of the
+// UserInfo endpoint. This is intended for OAuth-only deployments that do not
+// issue OpenID ID tokens.
+func WithoutUserInfo() Option {
+	return func(p *Provider) error {
+		p.config.UserInfoDisabled = true
+		return nil
+	}
+}
+
 // WithTokenIntrospectionEndpoint overrides the default value for the introspection
 // endpoint which is [defaultEndpointTokenIntrospection].
 // To enable token introspection, see [WithTokenIntrospection].
@@ -139,6 +149,20 @@ func WithErrorRenderer(render goidc.RenderErrorFunc) Option {
 func WithErrorHandler(f goidc.HandleErrorFunc) Option {
 	return func(p *Provider) error {
 		p.config.HandleErrorFunc = f
+		return nil
+	}
+}
+
+// WithTokenEndpointEvidence configures a bounded observer invoked exactly once
+// after each token endpoint response is selected. It receives only a closed
+// result and a snapshotted authenticated client ID. Callback panics are
+// contained and cannot alter protocol behavior.
+func WithTokenEndpointEvidence(f goidc.TokenEndpointEvidenceFunc) Option {
+	return func(p *Provider) error {
+		if f == nil {
+			return errors.New("token endpoint evidence function cannot be nil")
+		}
+		p.config.TokenEndpointEvidenceFunc = f
 		return nil
 	}
 }
@@ -185,6 +209,9 @@ func WithJTIConsumer(f goidc.ConsumeJTIFunc) Option {
 // It cannot be combined with WithJTIConsumer.
 func WithJTIUseConsumer(f goidc.ConsumeJTIUseFunc) Option {
 	return func(p *Provider) error {
+		if f == nil {
+			return errors.New("typed JTI consumer cannot be nil")
+		}
 		p.config.ConsumeJTIUseFunc = f
 		return nil
 	}
@@ -311,6 +338,32 @@ func WithTokenClaims(f goidc.TokenClaimsFunc) Option {
 	}
 }
 
+// WithAccessTokenClaims configures a fallible, client-aware additional-claims
+// projection for JWT access tokens. For newly created client_credentials
+// grants it runs after grant validation and before grant persistence and
+// signing. Engine-owned claims cannot be returned by the callback.
+//
+// This option and [WithTokenClaims] are mutually exclusive.
+func WithAccessTokenClaims(f goidc.AccessTokenClaimsFunc) Option {
+	return func(p *Provider) error {
+		if f == nil {
+			return errors.New("access token claims function cannot be nil")
+		}
+		p.config.AccessTokenClaimsFunc = f
+		return nil
+	}
+}
+
+// WithAccessTokenGrantIDClaim controls whether grant_id is serialized in JWT
+// access tokens. The default is true for compatibility. Disabling the claim
+// does not remove the provider's internal token-to-grant association.
+func WithAccessTokenGrantIDClaim(enabled bool) Option {
+	return func(p *Provider) error {
+		p.config.AccessTokenGrantIDClaimDisabled = !enabled
+		return nil
+	}
+}
+
 // ── Subject Identifiers ───────────────────────────────────────────────────────
 
 // SubjectIdentifierOption is an option for [WithSubjectIdentifiers].
@@ -409,6 +462,9 @@ func WithPrivateKeyJWTAuthn(algs ...goidc.SignatureAlgorithm) Option {
 // its JTI is consumed.
 func WithPrivateKeyJWTAssertionPolicy(f goidc.PrivateKeyJWTAssertionPolicyFunc) Option {
 	return func(p *Provider) error {
+		if f == nil {
+			return errors.New("private_key_jwt assertion policy cannot be nil")
+		}
 		p.config.PrivateKeyJWTAssertionPolicyFunc = f
 		return nil
 	}

@@ -145,18 +145,36 @@ func Authenticated(ctx oidc.Context, authnCtx AuthnContext) (*goidc.Client, erro
 		if errors.Is(err, goidc.ErrNotFound) {
 			return nil, goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client", err)
 		}
-		return nil, fmt.Errorf("could not load the client: %w", err)
+		return nil, clientResolutionServerError(err)
 	}
 
 	if err := Authenticate(ctx, c, authnCtx); err != nil {
-		var oidcErr goidc.Error
-		if errors.As(err, &oidcErr) && oidcErr.Code == goidc.ErrorCodeInternalError {
+		if isClientAuthenticationServerError(err) {
 			return nil, err
 		}
 		return nil, goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client", err)
 	}
+	if authnCtx == AuthnContextToken {
+		ctx.MarkTokenEndpointClientAuthenticated(c.ID)
+	}
 
 	return c, nil
+}
+
+type clientResolutionError struct {
+	cause error
+}
+
+func (clientResolutionError) Error() string { return "client resolution failed" }
+
+func (err clientResolutionError) Unwrap() error { return err.cause }
+
+func clientResolutionServerError(cause error) error {
+	return goidc.WrapError(
+		goidc.ErrorCodeServerError,
+		"server error",
+		clientResolutionError{cause: cause},
+	)
 }
 
 func Authenticate(ctx oidc.Context, c *goidc.Client, authnCtx AuthnContext) error {
@@ -274,6 +292,7 @@ func authenticatePrivateKeyJWT(ctx oidc.Context, c *goidc.Client, authnCtx Authn
 	header := parsedAssertion.Headers[0]
 	typ, _ := header.ExtraHeaders[jose.HeaderType].(string)
 	if err := ctx.ApplyPrivateKeyJWTAssertionPolicy(goidc.VerifiedClientAssertion{
+		AuthenticatedClientID: c.ID,
 		Header: goidc.VerifiedClientAssertionHeader{
 			Algorithm: goidc.SignatureAlgorithm(header.Algorithm),
 			KeyID:     header.KeyID,
@@ -281,14 +300,19 @@ func authenticatePrivateKeyJWT(ctx oidc.Context, c *goidc.Client, authnCtx Authn
 		},
 		Claims: rawClaims,
 	}); err != nil {
-		var oidcErr goidc.Error
-		if errors.As(err, &oidcErr) && oidcErr.Code == goidc.ErrorCodeInternalError {
+		if isClientAuthenticationServerError(err) {
 			return err
 		}
 		return goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client", err)
 	}
 
-	return consumeClientAssertionJTI(ctx, claims)
+	return consumeClientAssertionJTI(ctx, c, claims, authnCtx)
+}
+
+func isClientAuthenticationServerError(err error) bool {
+	var oidcErr goidc.Error
+	return errors.As(err, &oidcErr) &&
+		(oidcErr.Code == goidc.ErrorCodeServerError || oidcErr.Code == goidc.ErrorCodeInternalError)
 }
 
 func JWKMatchingHeader(ctx oidc.Context, c *goidc.Client, header jose.Header) (goidc.JSONWebKey, error) {
@@ -332,7 +356,7 @@ func authenticateSecretJWT(ctx oidc.Context, c *goidc.Client, authnCtx AuthnCont
 		return err
 	}
 
-	return consumeClientAssertionJTI(ctx, claims)
+	return consumeClientAssertionJTI(ctx, c, claims, authnCtx)
 }
 
 func authnSigAlgs(c *goidc.Client, authnCtx AuthnContext, algs []goidc.SignatureAlgorithm) []goidc.SignatureAlgorithm {
@@ -408,7 +432,15 @@ func areClaimsValid(ctx oidc.Context, claims jwt.Claims, client *goidc.Client, _
 	return nil
 }
 
-func consumeClientAssertionJTI(ctx oidc.Context, claims jwt.Claims) error {
+func consumeClientAssertionJTI(
+	ctx oidc.Context,
+	c *goidc.Client,
+	claims jwt.Claims,
+	authnCtx AuthnContext,
+) error {
+	if authnCtx == AuthnContextToken {
+		ctx.MarkTokenEndpointClientAuthenticated(c.ID)
+	}
 	return ctx.ReserveJTI(goidc.JTIUse{
 		ID:        claims.ID,
 		Issuer:    claims.Issuer,
@@ -741,6 +773,9 @@ func authenticateAttestationJWT(ctx oidc.Context, c *goidc.Client, authnCtx Auth
 		return goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client", err)
 	}
 
+	if authnCtx == AuthnContextToken {
+		ctx.MarkTokenEndpointClientAuthenticated(c.ID)
+	}
 	return ctx.ReserveJTI(goidc.JTIUse{
 		ID:        popClaims.ID,
 		Issuer:    popClaims.Issuer,

@@ -141,6 +141,24 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 	if op.config.ConsumeJTIFunc != nil && op.config.ConsumeJTIUseFunc != nil {
 		return nil, errors.New("legacy and typed JTI consumers are mutually exclusive")
 	}
+	if op.config.TokenClaimsFunc != nil && op.config.AccessTokenClaimsFunc != nil {
+		return nil, errors.New("legacy and fallible access token claims functions are mutually exclusive")
+	}
+	if op.config.AccessTokenClaimsFunc != nil && op.config.OpaqueTokenEnabled {
+		return nil, errors.New("fallible access token claims cannot be combined with opaque tokens")
+	}
+	if op.config.AccessTokenClaimsFunc != nil &&
+		(len(op.config.GrantTypes) != 1 || op.config.GrantTypes[0] != goidc.GrantClientCredentials) {
+		return nil, errors.New("fallible access token claims require a client_credentials-only provider")
+	}
+	if op.config.OAuthScopesOnly && !op.config.OpenIDConfigurationDisabled {
+		return nil, errors.New("oauth-only scopes require OpenID configuration discovery to be disabled")
+	}
+	if op.config.AccessTokenGrantIDClaimDisabled &&
+		(!op.config.UserInfoDisabled || op.config.TokenIntrospectionEnabled || op.config.TokenRevocationEnabled ||
+			op.config.VCIEnabled) {
+		return nil, errors.New("grant_id cannot be omitted while a grant-dependent token endpoint is enabled")
+	}
 
 	if op.config.ConsumeJTIFunc == nil && op.config.ConsumeJTIUseFunc == nil {
 		slog.Warn("JTI consumer is not configured; JTI replay protection is disabled. Configure provider.WithJTIUseConsumer for production use.")
@@ -484,7 +502,9 @@ func (op Provider) RegisterRoutes(mux *http.ServeMux, middlewares ...goidc.Middl
 	discovery.RegisterHandlers(mux, &op.config, middlewares...)
 	token.RegisterHandlers(mux, &op.config, middlewares...)
 	authorize.RegisterHandlers(mux, &op.config, middlewares...)
-	userinfo.RegisterHandlers(mux, &op.config, middlewares...)
+	if !op.config.UserInfoDisabled {
+		userinfo.RegisterHandlers(mux, &op.config, middlewares...)
+	}
 	dcr.RegisterHandlers(mux, &op.config, middlewares...)
 	federation.RegisterHandlers(mux, &op.config, middlewares...)
 	logout.RegisterHandlers(mux, &op.config, middlewares...)
@@ -581,6 +601,12 @@ func (op *Provider) CreatePreAuthCodeGrant(ctx context.Context, grant *goidc.Gra
 // MakeToken generates a new access token based on the provided grant
 // and stores the corresponding grant session and token.
 func (op *Provider) MakeToken(ctx context.Context, grant *goidc.Grant) (string, error) {
+	if grant == nil {
+		return "", errors.New("grant is required")
+	}
+	if op.config.AccessTokenClaimsFunc != nil {
+		return "", errors.New("MakeToken is unavailable with fallible access token claims")
+	}
 	oidcCtx := oidc.NewContext(ctx, &op.config)
 	c := &goidc.Client{ID: grant.ClientID}
 

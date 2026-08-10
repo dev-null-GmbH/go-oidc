@@ -19,6 +19,11 @@ var ErrNotFound = errors.New("not found")
 // errors are treated as operational failures by the provider.
 var ErrJTIReplay = errors.New("jti replay")
 
+// ErrInvalidJTIUse signals that a validated JWT ID reservation is malformed or
+// otherwise cannot be accepted by a JTI consumer. This is a protocol rejection,
+// distinct from both a replay and an operational storage failure.
+var ErrInvalidJTIUse = errors.New("invalid jti use")
+
 type ErrorCode string
 
 const (
@@ -26,6 +31,7 @@ const (
 	ErrorCodeInvalidClient            ErrorCode = "invalid_client"
 	ErrorCodeInvalidGrant             ErrorCode = "invalid_grant"
 	ErrorCodeInvalidRequest           ErrorCode = "invalid_request"
+	ErrorCodeInvalidDPoPProof         ErrorCode = "invalid_dpop_proof"
 	ErrorCodeInvalidCredentialRequest ErrorCode = "invalid_credential_request" //nolint:gosec
 	ErrorCodeUnauthorizedClient       ErrorCode = "unauthorized_client"
 	ErrorCodeInvalidScope             ErrorCode = "invalid_scope"
@@ -34,6 +40,7 @@ const (
 	ErrorCodeInvalidRequestObject     ErrorCode = "invalid_request_object"
 	ErrorCodeInvalidToken             ErrorCode = "invalid_token"
 	ErrorCodeUseDPoPNonce             ErrorCode = "use_dpop_nonce"
+	ErrorCodeServerError              ErrorCode = "server_error"
 	ErrorCodeInternalError            ErrorCode = "internal_error"
 	ErrorCodeInvalidTarget            ErrorCode = "invalid_target"
 	ErrorCodeInvalidRedirectURI       ErrorCode = "invalid_redirect_uri"
@@ -63,7 +70,7 @@ func (c ErrorCode) StatusCode() int {
 		return http.StatusForbidden
 	case ErrorCodeInvalidClient, ErrorCodeInvalidToken, ErrorCodeUnauthorizedClient:
 		return http.StatusUnauthorized
-	case ErrorCodeInternalError:
+	case ErrorCodeServerError, ErrorCodeInternalError:
 		return http.StatusInternalServerError
 	default:
 		return http.StatusBadRequest

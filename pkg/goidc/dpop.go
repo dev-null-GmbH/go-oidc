@@ -26,8 +26,8 @@ type DPoPNonceValidation struct {
 // IssueNonce must generate an unpredictable nonce, persist it as valid for the
 // supplied scope before returning, and leave other outstanding nonces valid so
 // concurrent client requests remain usable. The returned value must use the
-// nonce syntax from RFC 9449 Section 8.1. Implementations are responsible for
-// expiring unused nonces.
+// nonce syntax from RFC 9449 Section 8.1 and must not exceed 512 bytes.
+// Implementations are responsible for expiring unused nonces.
 //
 // ValidateNonce must return ErrNotFound for an unknown or expired nonce. RFC
 // 9449 permits the same recent nonce to be accepted in multiple proofs. An
@@ -38,8 +38,9 @@ type DPoPNonceValidation struct {
 //
 // ValidateNonce may return a NextNonce to rotate the nonce in the successful
 // response. The replacement must be unpredictable, use the RFC 9449 nonce
-// syntax, and be persisted as valid before the method returns. Implementations
-// should retain a suitable window of recent nonces for concurrent requests.
+// syntax, must not exceed 512 bytes, and must be persisted as valid before the
+// method returns. Implementations should retain a suitable window of recent
+// nonces for concurrent requests.
 type DPoPNonceManager interface {
 	IssueNonce(context.Context, DPoPNonceScope) (string, error)
 	ValidateNonce(context.Context, DPoPNonceScope, string) (DPoPNonceValidation, error)

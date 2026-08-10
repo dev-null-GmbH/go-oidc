@@ -490,7 +490,7 @@ func TestGenerateAuthCodeToken(t *testing.T) {
 				}
 				return ctx, req, c, grant
 			},
-			wantErr: goidc.ErrorCodeInvalidRequest,
+			wantErr: goidc.ErrorCodeInvalidDPoPProof,
 		},
 		{
 			name: "dpop binding missing header",
@@ -506,7 +506,7 @@ func TestGenerateAuthCodeToken(t *testing.T) {
 				}
 				return ctx, req, c, grant
 			},
-			wantErr: goidc.ErrorCodeInvalidRequest,
+			wantErr: goidc.ErrorCodeInvalidDPoPProof,
 		},
 		{
 			name: "tls binding",
@@ -641,7 +641,7 @@ func TestGenerateAuthCodeToken(t *testing.T) {
 				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
 				return ctx, req, c, grant
 			},
-			wantErr: goidc.ErrorCodeInvalidRequest,
+			wantErr: goidc.ErrorCodeInvalidDPoPProof,
 		},
 		{
 			name: "dpop required by client but not sent",
@@ -652,7 +652,7 @@ func TestGenerateAuthCodeToken(t *testing.T) {
 				c.DPoPTokenBindingRequired = true
 				return ctx, req, c, grant
 			},
-			wantErr: goidc.ErrorCodeInvalidRequest,
+			wantErr: goidc.ErrorCodeInvalidDPoPProof,
 		},
 		{
 			name: "mtls binding no grant thumbprint",

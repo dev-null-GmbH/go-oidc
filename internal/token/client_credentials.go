@@ -15,6 +15,7 @@ func generateClientCredentialsToken(ctx oidc.Context, req request) (response, er
 	if err != nil {
 		return response{}, err
 	}
+	authenticatedClientID := c.ID
 
 	if !slices.Contains(c.GrantTypes, goidc.GrantClientCredentials) {
 		return response{}, goidc.WrapError(goidc.ErrorCodeUnauthorizedClient, "unauthorized client",
@@ -49,7 +50,7 @@ func generateClientCredentialsToken(ctx oidc.Context, req request) (response, er
 		}
 	}
 
-	grant, err := NewGrant(ctx, c, GrantOptions{
+	grantOptions := GrantOptions{
 		Type:                 goidc.GrantClientCredentials,
 		Subject:              c.ID,
 		ClientID:             c.ID,
@@ -58,12 +59,26 @@ func generateClientCredentialsToken(ctx oidc.Context, req request) (response, er
 		Resources:            req.resources,
 		JWKThumbprint:        dpopThumbprint(ctx),
 		ClientCertThumbprint: tlsThumbprint(ctx),
-	})
+	}
+	var grant *goidc.Grant
+	if ctx.UsesAccessTokenClaims() {
+		grant, err = newGrant(ctx, c, grantOptions)
+	} else {
+		grant, err = NewGrant(ctx, c, grantOptions)
+	}
 	if err != nil {
 		return response{}, err
 	}
 
-	tkn, tokenValue, err := Issue(ctx, grant, c, nil)
+	var issuanceOptions *IssuanceOptions
+	if ctx.UsesAccessTokenClaims() {
+		issuanceOptions = &IssuanceOptions{
+			grantType:                 goidc.GrantClientCredentials,
+			authenticatedClientID:     authenticatedClientID,
+			persistGrantBeforeSigning: true,
+		}
+	}
+	tkn, tokenValue, err := Issue(ctx, grant, c, issuanceOptions)
 	if err != nil {
 		return response{}, err
 	}

@@ -180,6 +180,27 @@ func TestValidateDPoP_MissingHeader(t *testing.T) {
 	}
 }
 
+func TestValidateDPoPAuthorizationServerMissingHeaderUsesDPoPError(t *testing.T) {
+	ctx := oidctest.NewContext(t)
+	ctx.DPoPEnabled = true
+	cnf := goidc.TokenConfirmation{JWKThumbprint: "random_thumbprint"}
+
+	err := validateDPoPWithNonceScope(
+		ctx,
+		"random_token",
+		cnf,
+		goidc.DPoPNonceScopeAuthorizationServer,
+	)
+
+	var oidcErr goidc.Error
+	if !errors.As(err, &oidcErr) {
+		t.Fatalf("error = %v, want goidc.Error", err)
+	}
+	if oidcErr.Code != goidc.ErrorCodeInvalidDPoPProof {
+		t.Fatalf("error code = %q, want %q", oidcErr.Code, goidc.ErrorCodeInvalidDPoPProof)
+	}
+}
+
 func TestValidateDPoP_DisabledButBound(t *testing.T) {
 	ctx := oidctest.NewContext(t)
 	cnf := goidc.TokenConfirmation{

@@ -116,6 +116,12 @@ func TestValidateJWTDPoPNoncePositiveResponseRotation(t *testing.T) {
 	manager.nextValues = []string{"next_nonce"}
 	manager.add(goidc.DPoPNonceScopeAuthorizationServer, "current_nonce")
 	ctx, rec := nonceContext(t, manager, http.MethodPost, "/token")
+	ctx.ConsumeJTIUseFunc = func(context.Context, goidc.JTIUse) error {
+		if got := rec.Header().Get(goidc.HeaderDPoPNonce); got != "" {
+			t.Fatalf("%s was emitted before JTI reservation: %q", goidc.HeaderDPoPNonce, got)
+		}
+		return nil
+	}
 	proof, _ := oidctest.DPoPProof(t, oidctest.DPoPProofOptions{
 		Method: http.MethodPost,
 		URI:    ctx.Host + "/token",
@@ -123,7 +129,8 @@ func TestValidateJWTDPoPNoncePositiveResponseRotation(t *testing.T) {
 	})
 
 	err := dpop.ValidateJWT(ctx, proof, dpop.ValidationOptions{
-		NonceScope: goidc.DPoPNonceScopeAuthorizationServer,
+		NonceScope:    goidc.DPoPNonceScopeAuthorizationServer,
+		TokenEndpoint: true,
 	})
 
 	if err != nil {
@@ -138,6 +145,103 @@ func TestValidateJWTDPoPNoncePositiveResponseRotation(t *testing.T) {
 	if !manager.has(goidc.DPoPNonceScopeAuthorizationServer, "next_nonce") {
 		t.Fatal("the replacement nonce was not persisted before validation returned")
 	}
+}
+
+func TestValidateJWTDPoPNonceDoesNotRotateAfterJTIReservationFailure(t *testing.T) {
+	manager := newNonceManager()
+	manager.nextValues = []string{"next_nonce"}
+	manager.add(goidc.DPoPNonceScopeAuthorizationServer, "current_nonce")
+	ctx, rec := nonceContext(t, manager, http.MethodPost, "/token")
+	ctx.ConsumeJTIUseFunc = func(context.Context, goidc.JTIUse) error {
+		return goidc.ErrJTIReplay
+	}
+	proof, _ := oidctest.DPoPProof(t, oidctest.DPoPProofOptions{
+		Method: http.MethodPost,
+		URI:    ctx.Host + "/token",
+		Nonce:  "current_nonce",
+	})
+
+	err := dpop.ValidateJWT(ctx, proof, dpop.ValidationOptions{
+		NonceScope:    goidc.DPoPNonceScopeAuthorizationServer,
+		TokenEndpoint: true,
+	})
+
+	assertOAuthError(t, err, goidc.ErrorCodeInvalidDPoPProof, http.StatusBadRequest)
+	if got := rec.Header().Get(goidc.HeaderDPoPNonce); got != "" {
+		t.Fatalf("%s = %q, want empty", goidc.HeaderDPoPNonce, got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "" {
+		t.Fatalf("Cache-Control = %q, want empty", got)
+	}
+}
+
+func TestValidateJWTDPoPNonceEnforces512ByteLimit(t *testing.T) {
+	t.Run("incoming nonce", func(t *testing.T) {
+		overlong := strings.Repeat("n", 513)
+		manager := newNonceManager("fresh_nonce")
+		manager.add(goidc.DPoPNonceScopeAuthorizationServer, overlong)
+		ctx, rec := nonceContext(t, manager, http.MethodPost, "/token")
+		ctx.ConsumeJTIUseFunc = func(context.Context, goidc.JTIUse) error {
+			t.Fatal("overlong nonce reached JTI reservation")
+			return nil
+		}
+		proof, _ := oidctest.DPoPProof(t, oidctest.DPoPProofOptions{
+			Method: http.MethodPost,
+			URI:    ctx.Host + "/token",
+			Nonce:  overlong,
+		})
+
+		err := dpop.ValidateJWT(ctx, proof, dpop.ValidationOptions{
+			NonceScope: goidc.DPoPNonceScopeAuthorizationServer,
+		})
+
+		assertOAuthError(t, err, goidc.ErrorCodeUseDPoPNonce, http.StatusBadRequest)
+		if got := rec.Header().Get(goidc.HeaderDPoPNonce); got != "fresh_nonce" {
+			t.Fatalf("%s = %q, want fresh_nonce", goidc.HeaderDPoPNonce, got)
+		}
+		if manager.validateCallCount() != 0 {
+			t.Fatalf("ValidateNonce() calls = %d, want 0", manager.validateCallCount())
+		}
+	})
+
+	t.Run("issued challenge nonce", func(t *testing.T) {
+		manager := newNonceManager(strings.Repeat("n", 513))
+		ctx, rec := nonceContext(t, manager, http.MethodPost, "/token")
+		proof, _ := oidctest.DPoPProof(t, oidctest.DPoPProofOptions{
+			Method: http.MethodPost,
+			URI:    ctx.Host + "/token",
+		})
+
+		err := dpop.ValidateJWT(ctx, proof, dpop.ValidationOptions{
+			NonceScope: goidc.DPoPNonceScopeAuthorizationServer,
+		})
+
+		assertServerError(t, err)
+		assertNotNonceChallenge(t, err, rec)
+	})
+
+	t.Run("positive response nonce", func(t *testing.T) {
+		manager := newNonceManager()
+		manager.nextValues = []string{strings.Repeat("n", 513)}
+		manager.add(goidc.DPoPNonceScopeAuthorizationServer, "current_nonce")
+		ctx, rec := nonceContext(t, manager, http.MethodPost, "/token")
+		ctx.ConsumeJTIUseFunc = func(context.Context, goidc.JTIUse) error {
+			t.Fatal("invalid next nonce reached JTI reservation")
+			return nil
+		}
+		proof, _ := oidctest.DPoPProof(t, oidctest.DPoPProofOptions{
+			Method: http.MethodPost,
+			URI:    ctx.Host + "/token",
+			Nonce:  "current_nonce",
+		})
+
+		err := dpop.ValidateJWT(ctx, proof, dpop.ValidationOptions{
+			NonceScope: goidc.DPoPNonceScopeAuthorizationServer,
+		})
+
+		assertServerError(t, err)
+		assertNotNonceChallenge(t, err, rec)
+	})
 }
 
 func TestValidateJWTDPoPNonceMismatch(t *testing.T) {
@@ -210,6 +314,10 @@ func TestValidateJWTDPoPNonceOperationalErrorsFailClosed(t *testing.T) {
 		if !errors.Is(err, storeErr) {
 			t.Fatalf("ValidateJWT() error = %v, want wrapped store error", err)
 		}
+		if strings.Contains(err.Error(), storeErr.Error()) {
+			t.Fatalf("error leaked nonce manager detail: %v", err)
+		}
+		assertServerError(t, err)
 		assertNotNonceChallenge(t, err, rec)
 		if manager.issueCallCount() != 0 {
 			t.Fatalf("IssueNonce() calls = %d, want 0", manager.issueCallCount())
@@ -235,6 +343,10 @@ func TestValidateJWTDPoPNonceOperationalErrorsFailClosed(t *testing.T) {
 		if !errors.Is(err, storeErr) {
 			t.Fatalf("ValidateJWT() error = %v, want wrapped store error", err)
 		}
+		if strings.Contains(err.Error(), storeErr.Error()) {
+			t.Fatalf("error leaked nonce manager detail: %v", err)
+		}
+		assertServerError(t, err)
 		assertNotNonceChallenge(t, err, rec)
 	})
 
@@ -250,9 +362,7 @@ func TestValidateJWTDPoPNonceOperationalErrorsFailClosed(t *testing.T) {
 			NonceScope: goidc.DPoPNonceScopeAuthorizationServer,
 		})
 
-		if err == nil || !strings.Contains(err.Error(), "invalid DPoP nonce") {
-			t.Fatalf("ValidateJWT() error = %v, want invalid nonce error", err)
-		}
+		assertServerError(t, err)
 		assertNotNonceChallenge(t, err, rec)
 	})
 
@@ -271,9 +381,7 @@ func TestValidateJWTDPoPNonceOperationalErrorsFailClosed(t *testing.T) {
 			NonceScope: goidc.DPoPNonceScopeAuthorizationServer,
 		})
 
-		if err == nil || !strings.Contains(err.Error(), "invalid DPoP nonce") {
-			t.Fatalf("ValidateJWT() error = %v, want invalid nonce error", err)
-		}
+		assertServerError(t, err)
 		assertNotNonceChallenge(t, err, rec)
 	})
 }
@@ -288,9 +396,7 @@ func TestValidateJWTDPoPNonceMissingScopeFailsClosed(t *testing.T) {
 
 	err := dpop.ValidateJWT(ctx, proof, dpop.ValidationOptions{})
 
-	if err == nil || !strings.Contains(err.Error(), "nonce scope") {
-		t.Fatalf("ValidateJWT() error = %v, want missing nonce scope error", err)
-	}
+	assertServerError(t, err)
 	assertNotNonceChallenge(t, err, rec)
 	if manager.issueCallCount() != 0 || manager.validateCallCount() != 0 {
 		t.Fatalf("nonce manager calls = issue %d, validate %d; want none", manager.issueCallCount(), manager.validateCallCount())
@@ -384,6 +490,20 @@ func assertNotNonceChallenge(t *testing.T, err error, rec *httptest.ResponseReco
 	}
 	if got := rec.Header().Get("WWW-Authenticate"); got != "" {
 		t.Fatalf("WWW-Authenticate = %q, want empty", got)
+	}
+}
+
+func assertServerError(t *testing.T, err error) {
+	t.Helper()
+	var oauthErr goidc.Error
+	if !errors.As(err, &oauthErr) {
+		t.Fatalf("error = %v, want OAuth error", err)
+	}
+	if oauthErr.Code != goidc.ErrorCodeServerError {
+		t.Fatalf("error code = %q, want %q", oauthErr.Code, goidc.ErrorCodeServerError)
+	}
+	if oauthErr.Description != "server error" {
+		t.Fatalf("error description = %q, want server error", oauthErr.Description)
 	}
 }
 

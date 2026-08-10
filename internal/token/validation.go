@@ -39,13 +39,24 @@ func validateBindingDPoP(ctx oidc.Context, c *goidc.Client, opts bindindValidati
 
 	dpopJWT, ok := dpop.JWT(ctx)
 	if !ok {
+		if dpop.HasJWT(ctx) {
+			return goidc.WrapError(
+				goidc.ErrorCodeInvalidDPoPProof,
+				"invalid DPoP proof",
+				errors.New("the token request must contain at most one DPoP header field value"),
+			)
+		}
 		// Return an error if the DPoP header was not informed and one of the
 		// below applies:
 		// 	* DPoP is required as a general configuration.
 		// 	* The client requires DPoP.
 		// 	* DPoP is required as a validation option.
 		if ctx.DPoPRequired || c.DPoPTokenBindingRequired || opts.dpopRequired {
-			return goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request", errors.New("a DPoP proof is required for this token request"))
+			return goidc.WrapError(
+				goidc.ErrorCodeInvalidDPoPProof,
+				"invalid DPoP proof",
+				errors.New("a DPoP proof is required for this token request"),
+			)
 		}
 		return nil
 	}
@@ -53,6 +64,7 @@ func validateBindingDPoP(ctx oidc.Context, c *goidc.Client, opts bindindValidati
 	return dpop.ValidateJWT(ctx, dpopJWT, dpop.ValidationOptions{
 		JWKThumbprint: opts.dpopJWKThumbprint,
 		NonceScope:    goidc.DPoPNonceScopeAuthorizationServer,
+		TokenEndpoint: true,
 	})
 }
 

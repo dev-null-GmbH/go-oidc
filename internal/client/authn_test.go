@@ -12,6 +12,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-jose/go-jose/v4"
@@ -1218,22 +1219,122 @@ func TestAuthenticated(t *testing.T) {
 }
 
 func TestAuthenticated_PreservesClientResolverOperationalError(t *testing.T) {
-	ctx := oidctest.NewContext(t)
-	ctx.Request.PostForm = map[string][]string{"client_id": {"client"}}
-	resolverErr := errors.New("client store unavailable")
-	ctx.ResolveClientFunc = func(context.Context, string) (*goidc.Client, error) {
-		return nil, resolverErr
+	resolverErr := errors.New("client store unavailable canary")
+	tests := []struct {
+		name    string
+		resolve goidc.ResolveClientFunc
+		cause   error
+		leaks   []string
+	}{
+		{
+			name: "resolver operational error",
+			resolve: func(context.Context, string) (*goidc.Client, error) {
+				return nil, resolverErr
+			},
+			cause: resolverErr,
+			leaks: []string{resolverErr.Error()},
+		},
+		{
+			name: "nil resolved client",
+			resolve: func(context.Context, string) (*goidc.Client, error) {
+				return nil, nil
+			},
+			leaks: []string{"nil client"},
+		},
+		{
+			name: "mismatched resolved client",
+			resolve: func(context.Context, string) (*goidc.Client, error) {
+				return &goidc.Client{ID: "different-client"}, nil
+			},
+			leaks: []string{"different-client", "client resolver returned"},
+		},
 	}
 
-	_, err := client.Authenticated(ctx, client.AuthnContextToken)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := oidctest.NewContext(t)
+			ctx.Request.PostForm = map[string][]string{"client_id": {"client"}}
+			ctx.ResolveClientFunc = test.resolve
 
-	if !errors.Is(err, resolverErr) {
-		t.Fatalf("Authenticated() error = %v, want wrapped %v", err, resolverErr)
+			_, err := client.Authenticated(ctx, client.AuthnContextToken)
+			if test.cause != nil && !errors.Is(err, test.cause) {
+				t.Fatalf("Authenticated() error = %v, want wrapped cause", err)
+			}
+			var oidcErr goidc.Error
+			if !errors.As(err, &oidcErr) || oidcErr.Code != goidc.ErrorCodeServerError ||
+				oidcErr.StatusCode() != http.StatusInternalServerError {
+				t.Fatalf("Authenticated() error = %v, want bounded server_error/500", err)
+			}
+			for _, leak := range test.leaks {
+				if strings.Contains(err.Error(), leak) {
+					t.Fatalf("bounded error %q leaked %q", err, leak)
+				}
+			}
+		})
 	}
-	var oidcErr goidc.Error
-	if errors.As(err, &oidcErr) {
-		t.Fatalf("operational error was converted to protocol error %q", oidcErr.Code)
+}
+
+func TestAuthenticatedBoundsDynamicClientManagerOperationalErrors(t *testing.T) {
+	managerErr := errors.New("dynamic client store unavailable canary")
+	tests := []struct {
+		name     string
+		clientID string
+		setup    func(*oidc.Context)
+	}{
+		{
+			name:     "dynamic registration manager",
+			clientID: "lookup-subject-canary",
+			setup: func(ctx *oidc.Context) {
+				ctx.DCREnabled = true
+				ctx.DCRManager = failingClientLookupManager{err: managerErr}
+			},
+		},
+		{
+			name:     "federation manager",
+			clientID: "https://client.example",
+			setup: func(ctx *oidc.Context) {
+				ctx.OpenIDFedEnabled = true
+				ctx.OpenIDFedManager = failingClientLookupManager{err: managerErr}
+			},
+		},
 	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := oidctest.NewContext(t)
+			ctx.Request.PostForm = map[string][]string{"client_id": {test.clientID}}
+			test.setup(&ctx)
+
+			_, err := client.Authenticated(ctx, client.AuthnContextToken)
+			if !errors.Is(err, managerErr) {
+				t.Fatalf("Authenticated() error = %v, want wrapped manager cause", err)
+			}
+			var oidcErr goidc.Error
+			if !errors.As(err, &oidcErr) || oidcErr.Code != goidc.ErrorCodeServerError ||
+				oidcErr.StatusCode() != http.StatusInternalServerError {
+				t.Fatalf("Authenticated() error = %v, want bounded server_error/500", err)
+			}
+			if strings.Contains(err.Error(), managerErr.Error()) || strings.Contains(err.Error(), test.clientID) {
+				t.Fatalf("bounded error leaked dynamic lookup input or cause: %q", err)
+			}
+		})
+	}
+}
+
+type failingClientLookupManager struct {
+	err error
+}
+
+func (manager failingClientLookupManager) SaveClient(context.Context, *goidc.Client) error {
+	return manager.err
+}
+
+func (manager failingClientLookupManager) Client(context.Context, string) (*goidc.Client, error) {
+	return nil, manager.err
+}
+
+func (manager failingClientLookupManager) DeleteClient(context.Context, string) error {
+	return manager.err
 }
 
 func TestExtractID(t *testing.T) {

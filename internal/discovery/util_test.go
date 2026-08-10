@@ -1,7 +1,9 @@
 package discovery
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -230,6 +232,46 @@ func TestOIDCConfig_WithVariants(t *testing.T) {
 	}
 	if diff := cmp.Diff(got, want); diff != "" {
 		t.Error(diff)
+	}
+}
+
+func TestOIDCConfigWithoutUserInfoOmitsEndpointAndCapabilities(t *testing.T) {
+	ctx := oidctest.NewContext(t)
+	ctx.UserInfoDisabled = true
+	ctx.UserInfoEndpoint = "/userinfo"
+	ctx.UserInfoSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgPS256}
+	ctx.UserInfoEncEnabled = true
+	ctx.UserInfoKeyEncAlgs = []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP}
+	ctx.UserInfoContentEncAlgs = []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM}
+	ctx.MTLSEnabled = true
+
+	got := NewConfiguration(ctx)
+	if got.UserInfoEndpoint != "" {
+		t.Fatalf("UserInfoEndpoint = %q, want empty", got.UserInfoEndpoint)
+	}
+	if len(got.UserInfoSigAlgs) != 0 || len(got.UserInfoKeyEncAlgs) != 0 || len(got.UserInfoContentEncAlgs) != 0 {
+		t.Fatal("userinfo capabilities were advertised while userinfo is disabled")
+	}
+	if got.MTLSAliases == nil {
+		t.Fatal("MTLSAliases = nil, want token endpoint alias")
+	}
+	if got.MTLSAliases.UserInfoEndpoint != "" {
+		t.Fatalf("MTLS userinfo endpoint = %q, want empty", got.MTLSAliases.UserInfoEndpoint)
+	}
+
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	for _, field := range []string{
+		`"userinfo_endpoint"`,
+		`"userinfo_signing_alg_values_supported"`,
+		`"userinfo_encryption_alg_values_supported"`,
+		`"userinfo_encryption_enc_values_supported"`,
+	} {
+		if bytes.Contains(encoded, []byte(field)) {
+			t.Fatalf("configuration JSON contains disabled field %s: %s", field, encoded)
+		}
 	}
 }
 

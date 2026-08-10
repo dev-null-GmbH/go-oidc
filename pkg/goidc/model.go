@@ -17,7 +17,7 @@ type Configuration struct {
 	ClientRegistrationEndpoint        string                       `json:"registration_endpoint,omitempty"`
 	AuthorizationEndpoint             string                       `json:"authorization_endpoint"`
 	TokenEndpoint                     string                       `json:"token_endpoint"`
-	UserInfoEndpoint                  string                       `json:"userinfo_endpoint"`
+	UserInfoEndpoint                  string                       `json:"userinfo_endpoint,omitempty"`
 	JWKSEndpoint                      string                       `json:"jwks_uri,omitempty"`
 	PAREndpoint                       string                       `json:"pushed_authorization_request_endpoint,omitempty"`
 	PARRequired                       bool                         `json:"require_pushed_authorization_requests,omitempty"`
@@ -65,7 +65,7 @@ type Configuration struct {
 	MTLSAliases                       *struct {
 		TokenEndpoint              string `json:"token_endpoint"`
 		ParEndpoint                string `json:"pushed_authorization_request_endpoint,omitempty"`
-		UserInfoEndpoint           string `json:"userinfo_endpoint"`
+		UserInfoEndpoint           string `json:"userinfo_endpoint,omitempty"`
 		ClientRegistrationEndpoint string `json:"registration_endpoint,omitempty"`
 		TokenIntrospectionEndpoint string `json:"introspection_endpoint,omitempty"`
 		TokenRevocationEndpoint    string `json:"revocation_endpoint,omitempty"`
@@ -571,8 +571,9 @@ type JTIUse struct {
 
 // ConsumeJTIUseFunc atomically reserves a validated JWT ID. Implementations
 // must be safe for concurrent calls. They should return ErrJTIReplay when the
-// use was already reserved and any other error, including ErrNotFound, for an
-// operational failure.
+// use was already reserved, ErrInvalidJTIUse when the reservation itself cannot
+// be accepted, and any other error, including ErrNotFound, for an operational
+// failure.
 type ConsumeJTIUseFunc func(context.Context, JTIUse) error
 
 // VerifiedClientAssertionHeader is the bounded subset of a JOSE header exposed
@@ -583,13 +584,16 @@ type VerifiedClientAssertionHeader struct {
 	Type      string
 }
 
-// VerifiedClientAssertion contains the protected header fields and claims of a
-// client assertion whose signature and standard claims have been verified.
-// Custom headers and claims remain client-controlled: validate them before use,
-// and do not log the raw claims because they may contain sensitive values.
+// VerifiedClientAssertion contains the authenticated client identity, protected
+// header fields, and claims of a client assertion whose signature and standard
+// claims have been verified. AuthenticatedClientID comes from the resolved
+// client, not from client-controlled claims. Custom headers and claims remain
+// client-controlled: validate them before use, and do not log the raw claims
+// because they may contain sensitive values.
 type VerifiedClientAssertion struct {
-	Header VerifiedClientAssertionHeader
-	Claims json.RawMessage
+	AuthenticatedClientID string
+	Header                VerifiedClientAssertionHeader
+	Claims                json.RawMessage
 }
 
 // PrivateKeyJWTAssertionPolicyFunc applies deployment-specific policy to a
@@ -624,6 +628,36 @@ type UserInfoClaimsFunc func(context.Context, *Grant) map[string]any
 // TokenClaimsFunc defines a function that returns additional claims to include
 // in JWT access tokens. It is called at access token issuance time.
 type TokenClaimsFunc func(context.Context, *Token, *Grant) map[string]any
+
+// AccessTokenClaimsInput is the closed, provider-authenticated input to an
+// access-token claim projection. It contains immutable scalar values and a
+// defensive copy of Resources; it never exposes mutable Client, Grant, or Token
+// objects. AuthenticatedClientID is snapshotted immediately after token-endpoint
+// authentication, before any issuance callback can mutate provider objects.
+type AccessTokenClaimsInput struct {
+	GrantType                   GrantType
+	AuthenticatedClientID       string
+	ClientID                    string
+	Subject                     string
+	Scopes                      string
+	Resources                   Resources
+	Format                      TokenFormat
+	Type                        TokenType
+	SignatureAlgorithm          SignatureAlgorithm
+	IssuedAt                    int
+	ExpiresAt                   int
+	DPoPJWKThumbprint           string
+	CertificateThumbprint       string
+	AuthorizationDetailsPresent bool
+	ActorPresent                bool
+}
+
+// AccessTokenClaimsFunc returns additional JWT access-token claims through a
+// fallible, collision-safe issuance boundary. The first qualified version of
+// this boundary is restricted to client_credentials-only providers. The
+// provider calls it after grant validation and final token construction, and
+// before persisting the grant or invoking the signer.
+type AccessTokenClaimsFunc func(context.Context, AccessTokenClaimsInput) (map[string]any, error)
 
 // TokenOptions defines a template for generating access tokens.
 type TokenOptions struct {

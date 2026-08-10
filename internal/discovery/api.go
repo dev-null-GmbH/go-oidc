@@ -12,17 +12,38 @@ import (
 func RegisterHandlers(router *http.ServeMux, config *oidc.Configuration, middlewares ...goidc.MiddlewareFunc) {
 	issuer, _ := url.Parse(config.Host)
 	issuerPath := strings.TrimSuffix(issuer.Path, "/")
-	metadataHandler := goidc.ApplyMiddlewares(oidc.Handler(config, handleWellKnown), middlewares...)
-	router.Handle("GET "+issuerPath+"/.well-known/openid-configuration", metadataHandler)
-	router.Handle("GET /.well-known/oauth-authorization-server"+issuerPath, metadataHandler)
+	if !config.OpenIDConfigurationDisabled {
+		openidHandler := goidc.ApplyMiddlewares(
+			oidc.Handler(config, handleOpenIDConfiguration),
+			middlewares...,
+		)
+		router.Handle("GET "+issuerPath+"/.well-known/openid-configuration", openidHandler)
+	}
+	if !config.AuthorizationServerMetadataDisabled {
+		authorizationServerHandler := goidc.ApplyMiddlewares(
+			oidc.Handler(config, handleAuthorizationServerMetadata),
+			middlewares...,
+		)
+		router.Handle(
+			"GET /.well-known/oauth-authorization-server"+issuerPath,
+			authorizationServerHandler,
+		)
+	}
 
 	router.Handle("GET "+config.EndpointPrefix+config.JWKSEndpoint,
 		goidc.ApplyMiddlewares(oidc.Handler(config, handleJWKS), middlewares...))
 }
 
-func handleWellKnown(ctx oidc.Context) {
+func handleOpenIDConfiguration(ctx oidc.Context) {
 	openidConfig := NewConfiguration(ctx)
 	if err := ctx.Write(openidConfig, http.StatusOK); err != nil {
+		ctx.WriteError(err)
+	}
+}
+
+func handleAuthorizationServerMetadata(ctx oidc.Context) {
+	metadata := NewAuthorizationServerMetadata(ctx)
+	if err := ctx.Write(metadata, http.StatusOK); err != nil {
 		ctx.WriteError(err)
 	}
 }
