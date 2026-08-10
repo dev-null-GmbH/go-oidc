@@ -15,7 +15,8 @@ const (
 // DPoPNonceValidation is the result of validating a server-provided DPoP nonce.
 type DPoPNonceValidation struct {
 	// NextNonce optionally rotates the nonce on the current successful response.
-	// It must already be persisted as valid before ValidateNonce returns.
+	// It must already be valid on every serving replica before ValidateNonce
+	// returns.
 	NextNonce string
 }
 
@@ -23,10 +24,13 @@ type DPoPNonceValidation struct {
 // Its methods may be called concurrently and implementations must be safe for
 // concurrent use.
 //
-// IssueNonce must generate an unpredictable nonce, persist it as valid for the
-// supplied scope before returning, and leave other outstanding nonces valid so
-// concurrent client requests remain usable. The returned value must use the
-// nonce syntax from RFC 9449 Section 8.1 and must not exceed 512 bytes.
+// IssueNonce must generate an unpredictable nonce that is already valid for
+// the supplied scope on every serving replica before returning, and leave
+// other outstanding nonces valid so concurrent client requests remain usable.
+// Implementations may satisfy that guarantee through shared persistence or
+// deterministic authenticated derivation from cluster-shared,
+// scope/domain-separated key material. The returned value must use the nonce
+// syntax from RFC 9449 Section 8.1 and must not exceed 512 bytes.
 // Implementations are responsible for expiring unused nonces.
 //
 // ValidateNonce must return ErrNotFound for an unknown or expired nonce. RFC
@@ -38,9 +42,9 @@ type DPoPNonceValidation struct {
 //
 // ValidateNonce may return a NextNonce to rotate the nonce in the successful
 // response. The replacement must be unpredictable, use the RFC 9449 nonce
-// syntax, must not exceed 512 bytes, and must be persisted as valid before the
-// method returns. Implementations should retain a suitable window of recent
-// nonces for concurrent requests.
+// syntax, must not exceed 512 bytes, and must already be valid on every serving
+// replica before the method returns. Implementations should retain a suitable
+// window of recent nonces for concurrent requests.
 type DPoPNonceManager interface {
 	IssueNonce(context.Context, DPoPNonceScope) (string, error)
 	ValidateNonce(context.Context, DPoPNonceScope, string) (DPoPNonceValidation, error)
