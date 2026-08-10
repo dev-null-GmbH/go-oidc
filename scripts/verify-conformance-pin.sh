@@ -41,6 +41,7 @@ make_commit="$(make_value CS_COMMIT)"
 make_maven_image="$(make_value CS_MAVEN_IMAGE)"
 workflow_version="$(workflow_value CS_VERSION)"
 workflow_commit="$(workflow_value CS_COMMIT)"
+workflow_maven_image="$(workflow_value CS_MAVEN_IMAGE)"
 workflow_python="$(workflow_value PYTHON_VERSION)"
 workflow_cache_schema="$(workflow_value CS_CACHE_SCHEMA)"
 
@@ -66,9 +67,10 @@ if [[ "$workflow_cache_schema" != "$expected_cache_schema" ]]; then
     "$expected_cache_schema" "$workflow_cache_schema" >&2
   exit 1
 fi
-if [[ "$make_maven_image" != "$expected_maven_image" ]]; then
-  printf 'Conformance Maven image drift: expected %s, got %s\n' \
-    "$expected_maven_image" "$make_maven_image" >&2
+if [[ "$make_maven_image" != "$expected_maven_image" || \
+      "$workflow_maven_image" != "$expected_maven_image" ]]; then
+  printf 'Conformance Maven image drift: expected %s (Makefile=%s workflow=%s)\n' \
+    "$expected_maven_image" "$make_maven_image" "$workflow_maven_image" >&2
   exit 1
 fi
 
@@ -82,10 +84,13 @@ require_literal .github/workflows/conformance.yml \
 require_literal .github/workflows/conformance.yml \
   "./scripts/prepare-conformance-suite.sh conformance-suite"
 require_literal .github/workflows/conformance.yml \
+  "./scripts/generate-conformance-certificates.sh"
+require_literal .github/workflows/conformance.yml \
   '${{ env.MAVEN_CACHE_DIR }}'
 require_literal .github/workflows/conformance.yml \
   '${{ env.PIP_CACHE_DIR }}'
 require_literal Makefile "./scripts/prepare-conformance-suite.sh conformance-suite"
+require_literal Makefile "./scripts/generate-conformance-certificates.sh"
 
 if grep -Eq '^[[:space:]]+path:[[:space:]]+conformance-suite$' \
   .github/workflows/conformance.yml; then
@@ -97,6 +102,43 @@ if [[ "$(grep -c 'git init --quiet conformance-suite' \
       "$(grep -c 'mvn -B clean package -DskipTests=true' \
   .github/workflows/conformance.yml)" -lt 2 ]]; then
   echo "Every conformance phase must use a fresh checkout and rebuilt JAR" >&2
+  exit 1
+fi
+
+if [[ "$(grep -Fc 'for attempt in 1 2 3 4; do' \
+  .github/workflows/conformance.yml)" != "2" ||
+      "$(grep -Fc 'timeout --kill-after=10s 120s docker pull "$CS_MAVEN_IMAGE"' \
+  .github/workflows/conformance.yml)" != "2" ||
+      "$(grep -Fc 'docker run --rm --pull=never \' \
+  .github/workflows/conformance.yml)" != "2" ]]; then
+  echo "Every conformance phase must use the bounded pinned-image pull contract" >&2
+  exit 1
+fi
+
+certificate_generation_line="$(
+  grep -nF './scripts/generate-conformance-certificates.sh' \
+    .github/workflows/conformance.yml | cut -d: -f1
+)"
+suite_start_line="$(
+  grep -nF 'docker compose up --build --detach' \
+    .github/workflows/conformance.yml | cut -d: -f1
+)"
+server_start_line="$(
+  grep -nF 'sudo "$go_binary" run' .github/workflows/conformance.yml |
+    cut -d: -f1
+)"
+test_start_line="$(
+  grep -nF 'run: make "cs-${{ matrix.profile }}-tests"' \
+    .github/workflows/conformance.yml | cut -d: -f1
+)"
+if [[ ! "$certificate_generation_line" =~ ^[0-9]+$ ||
+      ! "$suite_start_line" =~ ^[0-9]+$ ||
+      ! "$server_start_line" =~ ^[0-9]+$ ||
+      ! "$test_start_line" =~ ^[0-9]+$ ||
+      "$certificate_generation_line" -ge "$suite_start_line" ||
+      "$suite_start_line" -ge "$server_start_line" ||
+      "$server_start_line" -ge "$test_start_line" ]]; then
+  echo "Ephemeral TLS generation must precede suite, server, and test execution" >&2
   exit 1
 fi
 

@@ -18,6 +18,7 @@ env:
   CS_VERSION: release-v5.2.2
   CS_COMMIT: 321bc5bc53601b9690b54c023c0cbfac0f0230f2
   CS_CACHE_SCHEMA: v3-dependencies-only
+  CS_MAVEN_IMAGE: maven:3.9.16-eclipse-temurin-21@sha256:c07f7ccfb8ca6c9fa29ee523f00afa7d2ca6132c92f8652c4aebb5ee3491f502
   PYTHON_VERSION: "3.14.6"
 
 jobs:
@@ -57,6 +58,24 @@ jobs:
             ${{ env.PIP_CACHE_DIR }}
           key: ${{ runner.os }}-conformance-${{ env.CS_CACHE_SCHEMA }}-${{ env.CS_COMMIT }}-python-${{ env.PYTHON_VERSION }}-${{ hashFiles('scripts/conformance-requirements.lock', 'scripts/prepare-conformance-suite.sh', 'docker-compose.yml', 'Makefile') }}
 
+      - name: Pull pinned Maven image with bounded retry
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4; do
+            if timeout --kill-after=10s 120s docker pull "$CS_MAVEN_IMAGE"; then
+              break
+            fi
+            if (( attempt == 4 )); then
+              echo "Unable to pull the pinned Maven image after 4 attempts" >&2
+              exit 1
+            fi
+            retry_delay=$((attempt * 5 + RANDOM % 5))
+            printf 'Pinned Maven image pull failed; retrying in %s seconds\n' \
+              "$retry_delay" >&2
+            sleep "$retry_delay"
+          done
+
       - name: Build from a fresh exact conformance checkout
         shell: bash
         run: |
@@ -75,11 +94,11 @@ jobs:
           ./scripts/prepare-conformance-suite.sh conformance-suite
 
           mkdir -p "$MAVEN_CACHE_DIR"
-          docker run --rm \
+          docker run --rm --pull=never \
             --mount "type=bind,src=$PWD/conformance-suite,dst=/usr/src/mymaven" \
             --mount "type=bind,src=$MAVEN_CACHE_DIR,dst=/root/.m2/repository" \
             --workdir /usr/src/mymaven \
-            maven:3.9.16-eclipse-temurin-21@sha256:c07f7ccfb8ca6c9fa29ee523f00afa7d2ca6132c92f8652c4aebb5ee3491f502 \
+            "$CS_MAVEN_IMAGE" \
             mvn -B clean package -DskipTests=true
 
       - name: Verify prepared conformance suite
@@ -167,6 +186,24 @@ jobs:
           key: ${{ runner.os }}-conformance-${{ env.CS_CACHE_SCHEMA }}-${{ env.CS_COMMIT }}-python-${{ env.PYTHON_VERSION }}-${{ hashFiles('scripts/conformance-requirements.lock', 'scripts/prepare-conformance-suite.sh', 'docker-compose.yml', 'Makefile') }}
           fail-on-cache-miss: true
 
+      - name: Pull pinned Maven image with bounded retry
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4; do
+            if timeout --kill-after=10s 120s docker pull "$CS_MAVEN_IMAGE"; then
+              break
+            fi
+            if (( attempt == 4 )); then
+              echo "Unable to pull the pinned Maven image after 4 attempts" >&2
+              exit 1
+            fi
+            retry_delay=$((attempt * 5 + RANDOM % 5))
+            printf 'Pinned Maven image pull failed; retrying in %s seconds\n' \
+              "$retry_delay" >&2
+            sleep "$retry_delay"
+          done
+
       - name: Build from a fresh exact conformance checkout
         shell: bash
         run: |
@@ -190,13 +227,19 @@ jobs:
           ./scripts/prepare-conformance-suite.sh conformance-suite
 
           mkdir -p "$MAVEN_CACHE_DIR"
-          docker run --rm \
+          docker run --rm --pull=never \
             --mount "type=bind,src=$PWD/conformance-suite,dst=/usr/src/mymaven" \
             --mount "type=bind,src=$MAVEN_CACHE_DIR,dst=/root/.m2/repository" \
             --workdir /usr/src/mymaven \
-            maven:3.9.16-eclipse-temurin-21@sha256:c07f7ccfb8ca6c9fa29ee523f00afa7d2ca6132c92f8652c4aebb5ee3491f502 \
+            "$CS_MAVEN_IMAGE" \
             mvn -B clean package -DskipTests=true
           test -s conformance-suite/target/fapi-test-suite.jar
+
+      - name: Generate ephemeral conformance TLS fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/generate-conformance-certificates.sh
 
       - name: Start conformance suite
         shell: bash

@@ -37,6 +37,9 @@ jobs:
           ./scripts/verify-action-pins.sh
           ./scripts/verify-conformance-pin.sh
 
+      - name: Test ephemeral conformance TLS fixtures
+        run: ./scripts/test-conformance-certificates.sh
+
       - name: Download modules
         run: go mod download
 

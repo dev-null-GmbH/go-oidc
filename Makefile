@@ -54,12 +54,7 @@ test-benchmark:
 	@go test -bench=. -benchmem ./pkg/... ./internal/...
 
 keys:
-	@openssl req -x509 -newkey rsa:2048 -keyout examples/keys/server.key -out examples/keys/server.crt -days 365 -nodes \
-		-subj "/CN=op"
-	@openssl req -x509 -newkey rsa:2048 -keyout examples/keys/client_one.key -out examples/keys/client_one.crt -days 365 -nodes \
-		-subj "/CN=client_one"
-	@openssl req -x509 -newkey rsa:2048 -keyout examples/keys/client_two.key -out examples/keys/client_two.crt -days 365 -nodes \
-		-subj "/CN=client_two"
+	@./scripts/generate-conformance-certificates.sh
 
 run-cs:
 	@docker compose up
