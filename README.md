@@ -69,7 +69,7 @@ Luiky Vasconcelos has certified that [go-oidc](https://pkg.go.dev/github.com/lui
 
 Install the module:
 ```
-go get github.com/dev-null-GmbH/go-oidc@v0.25.1-d0.1
+go get github.com/dev-null-GmbH/go-oidc@v0.25.1-d0.2
 ```
 
 Fork consumers must exact-pin a governed `-d0.N` tag and must not use

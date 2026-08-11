@@ -7,13 +7,16 @@ certification practices.
 ## Version identity
 
 Fork releases use `v<upstream-major>.<upstream-minor>.<patch>-d0.<revision>`.
-The first release based on upstream `v0.25.0` is `v0.25.1-d0.1`. The fork has
-a distinct module path, so it does not collide with upstream under Minimal
-Version Selection. However, `v0.25.1-d0.1` is a prerelease, while the copied
-upstream `v0.25.0` tag is stable and declares the old upstream module path.
-Consumers **must** exact-pin `v0.25.1-d0.1` (or a later governed fork tag) and
-must not use `@latest`. A released version is never rebuilt, retagged, or
-reused.
+The `v0.25.1-d0.1` tag was a preparation candidate for which no GitHub Release
+was published; its read-only governance audit exposed a permission-filtered
+GitHub API field. The tag is retained and retracted rather than moved or
+deleted. The first publishable release based on upstream `v0.25.0` is
+`v0.25.1-d0.2`. The fork has a distinct module path, so it does not collide
+with upstream under Minimal Version Selection. However, `v0.25.1-d0.2` is a
+prerelease, while the copied upstream `v0.25.0` tag is stable and declares the
+old upstream module path. Consumers **must** exact-pin `v0.25.1-d0.2` (or a
+later governed fork tag) and must not use `@latest`. A released version is
+never rebuilt, retagged, or reused.
 
 Every release records:
 
@@ -159,8 +162,10 @@ The workflow's repository-settings audit uses the
 `RELEASE_GOVERNANCE_TOKEN` Actions secret. It must be a fine-grained,
 read-only credential scoped only to this repository with `Metadata: read`,
 `Administration: read`, and `Actions: read`; release creation continues to use
-the ephemeral `GITHUB_TOKEN`. The audit requires squash-only merges; active,
-no-bypass main protection with the exact seven strict
+the ephemeral `GITHUB_TOKEN`. The audit reads repository merge controls
+through a validated, read-only GraphQL snapshot, requires automatic merged
+branch cleanup, and independently treats the active, no-bypass main ruleset as
+the authoritative squash-only control with its exact seven strict
 GitHub-Actions-sourced checks retained by release evidence; the exact named tag
 creation actors plus a no-bypass immutable-tag ruleset; GitHub Actions SHA
 enforcement and an action allowlist; the no-admin-bypass `governed-release`
