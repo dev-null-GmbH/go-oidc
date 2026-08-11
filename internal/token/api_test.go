@@ -15,6 +15,7 @@ import (
 	"github.com/dev-null-GmbH/go-oidc/internal/oidctest"
 	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
 	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
+	"github.com/go-jose/go-jose/v4"
 )
 
 func TestRegisterHandlers(t *testing.T) {
@@ -384,6 +385,179 @@ func TestTokenEndpointEvidenceInvalidDPoPProof(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("evidence = %#v, want %#v", got, want)
 	}
+}
+
+func TestTokenEndpointAttestationDPoPRefreshRequiresVerifiedProof(t *testing.T) {
+	for _, test := range []struct {
+		name             string
+		boundGrant       bool
+		corruptProof     bool
+		reserveErr       error
+		wantStatus       int
+		wantResult       goidc.TokenEndpointResult
+		wantClientID     bool
+		wantReservations int
+	}{
+		{
+			name:             "valid proof is consumed once",
+			wantStatus:       http.StatusOK,
+			wantResult:       goidc.TokenEndpointResultIssued,
+			wantClientID:     true,
+			wantReservations: 1,
+		},
+		{
+			name:             "valid proof for bound grant is consumed once",
+			boundGrant:       true,
+			wantStatus:       http.StatusOK,
+			wantResult:       goidc.TokenEndpointResultIssued,
+			wantClientID:     true,
+			wantReservations: 1,
+		},
+		{
+			name:         "forged signature is rejected without attribution",
+			corruptProof: true,
+			wantStatus:   http.StatusBadRequest,
+			wantResult:   goidc.TokenEndpointResultInvalidDPoPProof,
+		},
+		{
+			name:             "replayed proof is attributed",
+			reserveErr:       goidc.ErrJTIReplay,
+			wantStatus:       http.StatusBadRequest,
+			wantResult:       goidc.TokenEndpointResultInvalidDPoPProof,
+			wantClientID:     true,
+			wantReservations: 1,
+		},
+		{
+			name:             "replay store failure is attributed",
+			reserveErr:       errors.New("replay store unavailable"),
+			wantStatus:       http.StatusInternalServerError,
+			wantResult:       goidc.TokenEndpointResultServerError,
+			wantClientID:     true,
+			wantReservations: 1,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := oidctest.NewContext(t)
+			ctx.RefreshTokenManager = oidctest.Manager(t, ctx)
+			ctx.AuthnMethods = []goidc.AuthnMethod{goidc.AuthnMethodAttestationJWT}
+			ctx.DPoPEnabled = true
+			ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgPS256}
+
+			issuerKey := oidctest.PrivateRS256JWK(t, "attestation-issuer", goidc.KeyUsageSignature)
+			issuerJWKS := goidc.JSONWebKeySet{Keys: []goidc.JSONWebKey{issuerKey.Public()}}
+			issuerServer := httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+				response.Header().Set("Content-Type", "application/json")
+				if err := json.NewEncoder(response).Encode(issuerJWKS); err != nil {
+					t.Errorf("encode issuer JWKS: %v", err)
+				}
+			}))
+			t.Cleanup(issuerServer.Close)
+			ctx.HTTPClientFunc = func(context.Context) *http.Client { return issuerServer.Client() }
+			ctx.AuthnMethodAttestationJWTIssuers = []goidc.AttestationIssuer{{
+				Issuer:  "https://attester.example.com",
+				JWKSURI: issuerServer.URL + "/jwks",
+			}}
+
+			client, _ := oidctest.NewClient(t)
+			client.TokenAuthnMethod = goidc.AuthnMethodAttestationJWT
+			client.GrantTypes = []goidc.GrantType{goidc.GrantRefreshToken}
+			ctx.StaticClients = append(ctx.StaticClients, client)
+
+			now := timeutil.TimestampNow()
+			grant := &goidc.Grant{
+				ID:                    "unbound-refresh-grant",
+				RefreshToken:          "unbound-refresh-token",
+				RefreshTokenExpiresAt: now + 60,
+				CreatedAt:             now,
+				Subject:               "subject",
+				ClientID:              client.ID,
+				Scopes:                client.ScopeIDs,
+				Store:                 make(map[string]any),
+			}
+			if test.boundGrant {
+				grant.JWKThumbprint = "existing-binding"
+			}
+			if err := ctx.SaveGrant(grant); err != nil {
+				t.Fatalf("SaveGrant() error = %v", err)
+			}
+
+			clientKey := oidctest.PrivatePS256JWK(t, "attestation-client", goidc.KeyUsageSignature)
+			attestation := oidctest.SignWithOptions(t, map[string]any{
+				goidc.ClaimIssuer:  "https://attester.example.com",
+				goidc.ClaimSubject: client.ID,
+				goidc.ClaimExpiry:  now + 300,
+				"cnf":              map[string]any{"jwk": clientKey.Public()},
+			}, issuerKey, (&jose.SignerOptions{}).WithType("oauth-client-attestation+jwt"))
+			proof, _ := oidctest.DPoPProof(t, oidctest.DPoPProofOptions{
+				Method: http.MethodPost,
+				URI:    ctx.Host + ctx.TokenEndpoint,
+				Key:    clientKey.Key,
+			})
+			if test.corruptProof {
+				proof = corruptCompactJWSSignature(t, proof)
+			}
+
+			var reservations int
+			ctx.ConsumeJTIUseFunc = func(_ context.Context, use goidc.JTIUse) error {
+				if use.Purpose != goidc.JTIUsePurposeDPoPProof {
+					t.Fatalf("JTI purpose = %q, want DPoP proof", use.Purpose)
+				}
+				reservations++
+				return test.reserveErr
+			}
+			var evidence []goidc.TokenEndpointEvidence
+			ctx.TokenEndpointEvidenceFunc = func(_ context.Context, value goidc.TokenEndpointEvidence) {
+				evidence = append(evidence, value)
+			}
+
+			form := url.Values{
+				"grant_type":    {string(goidc.GrantRefreshToken)},
+				"refresh_token": {grant.RefreshToken},
+				"client_id":     {client.ID},
+			}
+			request := httptest.NewRequest(http.MethodPost, ctx.TokenEndpoint, strings.NewReader(form.Encode()))
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			request.Header.Set("Oauth-Client-Attestation", attestation)
+			request.Header.Set(goidc.HeaderDPoP, proof)
+			response := httptest.NewRecorder()
+
+			handleCreate(oidc.NewHTTPContext(response, request, ctx.Configuration))
+
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", response.Code, test.wantStatus, response.Body.String())
+			}
+			if reservations != test.wantReservations {
+				t.Fatalf("DPoP JTI reservations = %d, want %d", reservations, test.wantReservations)
+			}
+			wantClientID := ""
+			if test.wantClientID {
+				wantClientID = client.ID
+			}
+			wantEvidence := []goidc.TokenEndpointEvidence{{
+				Result:                test.wantResult,
+				AuthenticatedClientID: wantClientID,
+			}}
+			if !reflect.DeepEqual(evidence, wantEvidence) {
+				t.Fatalf("evidence = %#v, want %#v", evidence, wantEvidence)
+			}
+		})
+	}
+}
+
+func corruptCompactJWSSignature(t *testing.T, compact string) string {
+	t.Helper()
+	parts := strings.Split(compact, ".")
+	if len(parts) != 3 || len(parts[2]) == 0 {
+		t.Fatalf("JWS = %q, want compact serialization", compact)
+	}
+	signature := []byte(parts[2])
+	if signature[0] == 'A' {
+		signature[0] = 'B'
+	} else {
+		signature[0] = 'A'
+	}
+	parts[2] = string(signature)
+	return strings.Join(parts, ".")
 }
 
 type failingDPoPNonceManager struct {

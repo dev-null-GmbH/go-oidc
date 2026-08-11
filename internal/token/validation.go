@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/dev-null-GmbH/go-oidc/internal/client"
 	"github.com/dev-null-GmbH/go-oidc/internal/dpop"
 	"github.com/dev-null-GmbH/go-oidc/internal/hashutil"
 	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
@@ -61,11 +62,17 @@ func validateBindingDPoP(ctx oidc.Context, c *goidc.Client, opts bindindValidati
 		return nil
 	}
 
-	return dpop.ValidateJWT(ctx, dpopJWT, dpop.ValidationOptions{
+	validationOptions := dpop.ValidationOptions{
 		JWKThumbprint: opts.dpopJWKThumbprint,
 		NonceScope:    goidc.DPoPNonceScopeAuthorizationServer,
 		TokenEndpoint: true,
-	})
+	}
+	if client.UsesAttestationDPoP(ctx, c) {
+		validationOptions.OnProofValidated = func() {
+			ctx.MarkTokenEndpointClientAuthenticated(c.ID)
+		}
+	}
+	return dpop.ValidateJWT(ctx, dpopJWT, validationOptions)
 }
 
 func validateBindingTLS(ctx oidc.Context, c *goidc.Client, opts bindindValidationOptions) error {

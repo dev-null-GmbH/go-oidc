@@ -154,11 +154,26 @@ func Authenticated(ctx oidc.Context, authnCtx AuthnContext) (*goidc.Client, erro
 		}
 		return nil, goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client", err)
 	}
-	if authnCtx == AuthnContextToken {
+	if authnCtx == AuthnContextToken && c.TokenAuthnMethod != goidc.AuthnMethodNone &&
+		!UsesAttestationDPoP(ctx, c) {
 		ctx.MarkTokenEndpointClientAuthenticated(c.ID)
 	}
 
 	return c, nil
+}
+
+// UsesAttestationDPoP reports whether the request uses a DPoP proof in place
+// of the dedicated attestation PoP JWT. Callers must only rely on this after
+// attestation authentication has otherwise succeeded.
+func UsesAttestationDPoP(ctx oidc.Context, c *goidc.Client) bool {
+	if c == nil || c.TokenAuthnMethod != goidc.AuthnMethodAttestationJWT {
+		return false
+	}
+	if len(ctx.Request.Header[http.CanonicalHeaderKey(headerAttestionPoP)]) != 0 {
+		return false
+	}
+	_, ok := dpop.JWT(ctx)
+	return ok
 }
 
 type clientResolutionError struct {

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
 	"github.com/dev-null-GmbH/go-oidc/internal/oidctest"
 	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/token"
 	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/go-jose/go-jose/v4"
 )
@@ -414,6 +417,121 @@ func TestTokenEndpointEvidenceAttributesSecretJWTReplayAfterVerification(t *test
 		Result:                goidc.TokenEndpointResultInvalidClient,
 		AuthenticatedClientID: c.ID,
 	}
+	if got != want {
+		t.Fatalf("evidence = %#v, want %#v", got, want)
+	}
+}
+
+func TestTokenEndpointEvidenceDefersAttestationDPoPAttributionUntilProofValidation(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		corruptProof bool
+		wantResult   goidc.TokenEndpointResult
+		wantClientID bool
+	}{
+		{
+			name:         "valid proof is attributed",
+			wantResult:   goidc.TokenEndpointResultIssued,
+			wantClientID: true,
+		},
+		{
+			name:         "invalid signature is not attributed",
+			corruptProof: true,
+			wantResult:   goidc.TokenEndpointResultInvalidDPoPProof,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, c, issuerKey, clientKey := setUpAttestationAuthn(t)
+			ctx.DPoPEnabled = true
+			ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
+			ctx.Request.Method = http.MethodPost
+			ctx.Request.RequestURI = ctx.TokenEndpoint
+
+			cnfJWK := jose.JSONWebKey{Key: clientKey.Public(), Algorithm: string(goidc.SigAlgES256)}
+			attestation := oidctest.SignWithOptions(t, map[string]any{
+				goidc.ClaimIssuer:  "https://attester.example.com",
+				goidc.ClaimSubject: c.ID,
+				goidc.ClaimExpiry:  timeutil.TimestampNow() + 300,
+				"cnf":              map[string]any{"jwk": cnfJWK},
+			}, issuerKey, (&jose.SignerOptions{}).WithType("oauth-client-attestation+jwt"))
+			ctx.Request.Header.Set("Oauth-Client-Attestation", attestation)
+
+			proof, _ := oidctest.DPoPProof(t, oidctest.DPoPProofOptions{
+				Method: http.MethodPost,
+				URI:    ctx.Host + ctx.TokenEndpoint,
+				Key:    clientKey,
+			})
+			if test.corruptProof {
+				parts := strings.Split(proof, ".")
+				if len(parts) != 3 || len(parts[2]) == 0 {
+					t.Fatalf("DPoP proof = %q, want compact JWS", proof)
+				}
+				signature := []byte(parts[2])
+				if signature[0] == 'A' {
+					signature[0] = 'B'
+				} else {
+					signature[0] = 'A'
+				}
+				parts[2] = string(signature)
+				proof = strings.Join(parts, ".")
+			}
+			ctx.Request.Header.Set(goidc.HeaderDPoP, proof)
+
+			var got goidc.TokenEndpointEvidence
+			ctx.TokenEndpointEvidenceFunc = func(_ context.Context, evidence goidc.TokenEndpointEvidence) {
+				got = evidence
+			}
+			ctx = ctx.BeginTokenEndpointEvidence()
+
+			authenticated, err := client.Authenticated(ctx, client.AuthnContextToken)
+			if err != nil {
+				t.Fatalf("Authenticated() error = %v", err)
+			}
+			err = token.ValidateBinding(ctx, authenticated, nil)
+			if test.corruptProof {
+				assertErrorCode(t, err, goidc.ErrorCodeInvalidDPoPProof)
+			} else if err != nil {
+				t.Fatalf("ValidateBinding() error = %v", err)
+			}
+			ctx.EmitTokenEndpointEvidence(test.wantResult)
+
+			wantClientID := ""
+			if test.wantClientID {
+				wantClientID = c.ID
+			}
+			want := goidc.TokenEndpointEvidence{
+				Result:                test.wantResult,
+				AuthenticatedClientID: wantClientID,
+			}
+			if got != want {
+				t.Fatalf("evidence = %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestTokenEndpointEvidenceDoesNotAttributeUnauthenticatedClient(t *testing.T) {
+	ctx := oidctest.NewContext(t)
+	c := &goidc.Client{
+		ID: "public-client",
+		ClientMeta: goidc.ClientMeta{
+			TokenAuthnMethod: goidc.AuthnMethodNone,
+		},
+	}
+	ctx.StaticClients = append(ctx.StaticClients, c)
+	ctx.Request.PostForm = map[string][]string{"client_id": {c.ID}}
+	var got goidc.TokenEndpointEvidence
+	ctx.TokenEndpointEvidenceFunc = func(_ context.Context, evidence goidc.TokenEndpointEvidence) {
+		got = evidence
+	}
+	ctx = ctx.BeginTokenEndpointEvidence()
+
+	if _, err := client.Authenticated(ctx, client.AuthnContextToken); err != nil {
+		t.Fatalf("Authenticated() error = %v", err)
+	}
+	ctx.EmitTokenEndpointEvidence(goidc.TokenEndpointResultProtocolDenied)
+
+	want := goidc.TokenEndpointEvidence{Result: goidc.TokenEndpointResultProtocolDenied}
 	if got != want {
 		t.Fatalf("evidence = %#v, want %#v", got, want)
 	}

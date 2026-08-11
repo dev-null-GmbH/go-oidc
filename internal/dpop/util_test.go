@@ -158,6 +158,63 @@ func TestValidateJWTConsumesTypedJTIOnlyAfterProofValidation(t *testing.T) {
 	}
 }
 
+func TestValidateJWTCallsValidatedHookAfterNonceBeforeReplayReservation(t *testing.T) {
+	var calls []string
+	proof, _ := oidctest.DPoPProof(t, oidctest.DPoPProofOptions{
+		Method: http.MethodPost,
+		URI:    "https://server.example.com/token",
+		Nonce:  "current_nonce",
+	})
+	ctx := oidc.Context{
+		Configuration: &oidc.Configuration{
+			Host:             "https://server.example.com",
+			DPoPEnabled:      true,
+			DPoPSigAlgs:      []goidc.SignatureAlgorithm{goidc.SigAlgES256},
+			JWTLifetimeSecs:  60,
+			DPoPNonceManager: orderedDPoPNonceManager{calls: &calls},
+			ConsumeJTIUseFunc: func(context.Context, goidc.JTIUse) error {
+				calls = append(calls, "reserve")
+				return goidc.ErrJTIReplay
+			},
+		},
+		Request:  httptest.NewRequest(http.MethodPost, "/token", nil),
+		Response: httptest.NewRecorder(),
+	}
+
+	err := dpop.ValidateJWT(ctx, proof, dpop.ValidationOptions{
+		NonceScope:    goidc.DPoPNonceScopeAuthorizationServer,
+		TokenEndpoint: true,
+		OnProofValidated: func() {
+			calls = append(calls, "validated")
+		},
+	})
+	var oidcErr goidc.Error
+	if !errors.As(err, &oidcErr) || oidcErr.Code != goidc.ErrorCodeInvalidDPoPProof {
+		t.Fatalf("ValidateJWT() error = %v, want invalid_dpop_proof", err)
+	}
+	want := []string{"nonce", "validated", "reserve"}
+	if fmt.Sprint(calls) != fmt.Sprint(want) {
+		t.Fatalf("call order = %v, want %v", calls, want)
+	}
+}
+
+type orderedDPoPNonceManager struct {
+	calls *[]string
+}
+
+func (orderedDPoPNonceManager) IssueNonce(context.Context, goidc.DPoPNonceScope) (string, error) {
+	return "fresh_nonce", nil
+}
+
+func (manager orderedDPoPNonceManager) ValidateNonce(
+	context.Context,
+	goidc.DPoPNonceScope,
+	string,
+) (goidc.DPoPNonceValidation, error) {
+	*manager.calls = append(*manager.calls, "nonce")
+	return goidc.DPoPNonceValidation{}, nil
+}
+
 func TestValidateJWTComparesCanonicalHTUUsingRFC9449RulesByDefault(t *testing.T) {
 	tests := []struct {
 		name        string

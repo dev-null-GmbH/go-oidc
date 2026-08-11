@@ -29,6 +29,9 @@ type ValidationOptions struct {
 	JWKThumbprint string
 	NonceScope    goidc.DPoPNonceScope
 	TokenEndpoint bool
+	// OnProofValidated is an internal engine hook invoked after proof and nonce
+	// validation, immediately before replay reservation.
+	OnProofValidated func()
 }
 
 type Claims struct {
@@ -178,6 +181,9 @@ func ValidateJWT(ctx oidc.Context, dpopJWT string, opts ValidationOptions) error
 	thumbprint, err := jwk.Thumbprint(crypto.SHA256)
 	if err != nil {
 		return invalidProofError(opts.TokenEndpoint, goidc.ErrorCodeInvalidRequest, "invalid DPoP proof", err)
+	}
+	if opts.OnProofValidated != nil {
+		opts.OnProofValidated()
 	}
 	replayCode, replayDescription := invalidProofCode(opts.TokenEndpoint, goidc.ErrorCodeInvalidRequest, "invalid DPoP proof")
 	err = ctx.ReserveJTI(goidc.JTIUse{
