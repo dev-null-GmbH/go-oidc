@@ -95,6 +95,27 @@ if [[ "$(grep -Fc '/release-assets/CONFORMANCE-EVIDENCE.tar' "$workflow")" -lt 2
   exit 1
 fi
 if ! awk '
+  /gh release (view|create)/ {
+    calls++
+    has_repository = ($0 ~ /--repo "[$]GITHUB_REPOSITORY"/)
+    while ($0 ~ /\\[[:space:]]*$/) {
+      if (getline <= 0) {
+        break
+      }
+      if ($0 ~ /--repo "[$]GITHUB_REPOSITORY"/) {
+        has_repository = 1
+      }
+    }
+    if (!has_repository) {
+      missing_repository++
+    }
+  }
+  END { exit(calls == 4 && missing_repository == 0 ? 0 : 1) }
+' "$workflow"; then
+  echo "Every gh release call must select the repository explicitly" >&2
+  exit 1
+fi
+if ! awk '
   /cmp "[$]RUNNER_TEMP\/verified-draft-snapshot[.]json"/ {
     getline
     if ($0 ~ /prepublish-draft-snapshot[.]json/) {

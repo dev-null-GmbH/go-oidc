@@ -2,7 +2,10 @@ module github.com/dev-null-GmbH/go-oidc
 
 go 1.26.5
 
-retract v0.25.1-d0.1 // Release preparation failed; use v0.25.1-d0.2.
+retract (
+	v0.25.1-d0.2 // Draft creation failed; use v0.25.1-d0.3.
+	v0.25.1-d0.1 // Governance audit failed; use v0.25.1-d0.3.
+)
 
 require (
 	github.com/go-jose/go-jose/v4 v4.1.4

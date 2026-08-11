@@ -7,16 +7,19 @@ certification practices.
 ## Version identity
 
 Fork releases use `v<upstream-major>.<upstream-minor>.<patch>-d0.<revision>`.
-The `v0.25.1-d0.1` tag was a preparation candidate for which no GitHub Release
-was published; its read-only governance audit exposed a permission-filtered
-GitHub API field. The tag is retained and retracted rather than moved or
-deleted. The first publishable release based on upstream `v0.25.0` is
-`v0.25.1-d0.2`. The fork has a distinct module path, so it does not collide
-with upstream under Minimal Version Selection. However, `v0.25.1-d0.2` is a
-prerelease, while the copied upstream `v0.25.0` tag is stable and declares the
-old upstream module path. Consumers **must** exact-pin `v0.25.1-d0.2` (or a
-later governed fork tag) and must not use `@latest`. A released version is
-never rebuilt, retagged, or reused.
+The `v0.25.1-d0.1` and `v0.25.1-d0.2` tags were preparation candidates for
+which no GitHub Release was published. The `.1` read-only governance audit
+exposed a permission-filtered GitHub REST field. The `.2` preparation passed
+qualification, governance, payload generation, attestations, and staged-asset
+verification, then failed before draft creation because the release CLI tried
+to discover a repository outside a checkout. Both tags are retained and
+retracted rather than moved or deleted. The first publishable release based on
+upstream `v0.25.0` is `v0.25.1-d0.3`. The fork has a distinct module path, so
+it does not collide with upstream under Minimal Version Selection. However,
+`v0.25.1-d0.3` is a prerelease, while the copied upstream `v0.25.0` tag is
+stable and declares the old upstream module path. Consumers **must** exact-pin
+`v0.25.1-d0.3` (or a later governed fork tag) and must not use `@latest`. A
+released version is never rebuilt, retagged, or reused.
 
 Every release records:
 
