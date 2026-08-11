@@ -284,6 +284,22 @@ jobs:
       - name: Run tests
         run: make "cs-${{ matrix.profile }}-tests"
 
+      - name: Verify retained conformance outputs
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          exports=("examples/${PROFILE_FOLDER}"/*.zip)
+          if (( ${#exports[@]} == 0 )); then
+            echo "Conformance run produced no signed export archives" >&2
+            exit 1
+          fi
+          for export_archive in "${exports[@]}"; do
+            unzip -tq "$export_archive" >/dev/null
+          done
+          test -s "$RUNNER_TEMP/auth-server.log"
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -292,7 +308,7 @@ jobs:
           path: |
             examples/${{ env.PROFILE_FOLDER }}/*.zip
             ${{ runner.temp }}/auth-server.log
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
 
       - name: Stop test services

@@ -235,6 +235,9 @@ jobs:
             "$RELEASE_TAG" "$RELEASE_COMMIT"
           ./trusted/scripts/verify-release-checks.sh \
             "$RELEASE_COMMIT" "$RUNNER_TEMP/RELEASE-EVIDENCE.json"
+          ./trusted/scripts/download-conformance-evidence.sh \
+            "$RUNNER_TEMP/RELEASE-EVIDENCE.json" \
+            "$RUNNER_TEMP/CONFORMANCE-EVIDENCE.tar"
 
       - name: Audit repository governance settings
         env:
@@ -262,7 +265,8 @@ jobs:
           RELEASE_SOURCE_ROOT="$GITHUB_WORKSPACE/release-tree" \
             ./trusted/scripts/build-release-assets.sh \
             "$RELEASE_TAG" "$RUNNER_TEMP/release-assets" \
-            "$RUNNER_TEMP/RELEASE-EVIDENCE.json"
+            "$RUNNER_TEMP/RELEASE-EVIDENCE.json" \
+            "$RUNNER_TEMP/CONFORMANCE-EVIDENCE.tar"
 
       - name: Attest release payload provenance
         id: provenance
@@ -273,6 +277,7 @@ jobs:
             ${{ runner.temp }}/release-assets/go-oidc-${{ needs.qualify.outputs.version }}.spdx.json
             ${{ runner.temp }}/release-assets/PATCHES.txt
             ${{ runner.temp }}/release-assets/RELEASE-EVIDENCE.json
+            ${{ runner.temp }}/release-assets/CONFORMANCE-EVIDENCE.tar
             ${{ runner.temp }}/release-assets/RELEASE-MANIFEST.json
             ${{ runner.temp }}/release-assets/RELEASE-NOTES.md
 
@@ -396,6 +401,9 @@ jobs:
             "$RELEASE_TAG" "$RELEASE_COMMIT"
           ./trusted/scripts/verify-release-checks.sh \
             "$RELEASE_COMMIT" "$RUNNER_TEMP/current-evidence.json"
+          ./trusted/scripts/download-conformance-evidence.sh \
+            "$RUNNER_TEMP/current-evidence.json" \
+            "$RUNNER_TEMP/current-conformance-evidence.tar"
 
       - name: Audit repository governance settings
         env:
@@ -459,7 +467,7 @@ jobs:
             (.release.body | type) == "string" and
             .release.draft == true and .release.prerelease == true and
             .release.immutable == false and .release.publishedAt == null and
-            (.assets | length) == 9 and
+            (.assets | length) == 10 and
             ([.assets[].id] | length) == ([.assets[].id] | unique | length) and
             ([.assets[].name] | length) ==
               ([.assets[].name] | unique | length) and
@@ -515,6 +523,7 @@ jobs:
             "$RUNNER_TEMP/release-assets/go-oidc-${{ needs.qualify.outputs.version }}.spdx.json"
             "$RUNNER_TEMP/release-assets/PATCHES.txt"
             "$RUNNER_TEMP/release-assets/RELEASE-EVIDENCE.json"
+            "$RUNNER_TEMP/release-assets/CONFORMANCE-EVIDENCE.tar"
             "$RUNNER_TEMP/release-assets/RELEASE-MANIFEST.json"
             "$RUNNER_TEMP/release-assets/RELEASE-NOTES.md"
           )
@@ -561,11 +570,13 @@ jobs:
           RELEASE_SOURCE_ROOT="$GITHUB_WORKSPACE/release-tree" \
             ./trusted/scripts/build-release-assets.sh \
             "$RELEASE_TAG" "$RUNNER_TEMP/rebuilt-assets" \
-            "$RUNNER_TEMP/current-evidence.json"
+            "$RUNNER_TEMP/current-evidence.json" \
+            "$RUNNER_TEMP/current-conformance-evidence.tar"
           for asset in \
             "go-oidc-${{ needs.qualify.outputs.version }}.src.tar" \
             "go-oidc-${{ needs.qualify.outputs.version }}.spdx.json" \
-            PATCHES.txt RELEASE-EVIDENCE.json RELEASE-MANIFEST.json \
+            PATCHES.txt RELEASE-EVIDENCE.json CONFORMANCE-EVIDENCE.tar \
+            RELEASE-MANIFEST.json \
             RELEASE-NOTES.md; do
             cmp "$RUNNER_TEMP/release-assets/$asset" \
               "$RUNNER_TEMP/rebuilt-assets/$asset"

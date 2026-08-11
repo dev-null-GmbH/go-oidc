@@ -20,7 +20,7 @@ jq -e --arg commit "$expected_commit" '
     .workflow.conclusion == "success";
 
   . as $root |
-  .schemaVersion == 1 and
+  .schemaVersion == 2 and
   .repository == "dev-null-GmbH/go-oidc" and
   .releaseCommit == $commit and
   .commitVerification.sha == $commit and
@@ -56,15 +56,11 @@ jq -e --arg commit "$expected_commit" '
     .pullRequestEvidence.head.sha and
   .pullRequestEvidence.headVerification.verification.verified == true and
   .pullRequestEvidence.headVerification.verification.reason == "valid" and
-  (.pullRequestEvidence.approvals | length) >= 1 and
-  (all(.pullRequestEvidence.approvals[];
-    .state == "APPROVED" and
-    .commitId == $root.pullRequestEvidence.head.sha and
-    .user.login != $root.pullRequestEvidence.author.login and
-    .user.id != $root.pullRequestEvidence.author.id and
-    ((.user.login == "greg6775" and .user.id == 33130539) or
-     (.user.login == "Schlauer-Hax" and .user.id == 32987311))
-  )) and
+  .pullRequestEvidence.reviewPolicy == {
+    mode: "solo-maintainer-signed-head-and-required-checks",
+    requiredApprovalCount: 0
+  } and
+  (.pullRequestEvidence | has("approvals") | not) and
   (.pullRequestEvidence.dependencyReview |
     successful_actions_check(
       $root.pullRequestEvidence.head.sha;

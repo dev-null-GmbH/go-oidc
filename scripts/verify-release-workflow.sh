@@ -47,10 +47,14 @@ required_literals=(
   'path: release-tree'
   './trusted/scripts/verify-release-tag.sh'
   './trusted/scripts/verify-release-checks.sh'
+  './trusted/scripts/download-conformance-evidence.sh'
   '$RUNNER_TEMP/RELEASE-EVIDENCE.json'
+  '$RUNNER_TEMP/CONFORMANCE-EVIDENCE.tar'
   '$RUNNER_TEMP/current-evidence.json'
+  '$RUNNER_TEMP/current-conformance-evidence.tar'
   './trusted/scripts/build-release-assets.sh'
-  'RELEASE-EVIDENCE.json RELEASE-MANIFEST.json'
+  'PATCHES.txt RELEASE-EVIDENCE.json CONFORMANCE-EVIDENCE.tar'
+  '(.assets | length) == 10'
   '--source-ref "refs/heads/main"'
   '$RUNNER_TEMP/verified-draft-snapshot.json'
   'repos/$GITHUB_REPOSITORY/releases/assets/$asset_id'
@@ -81,8 +85,13 @@ if grep -Fq './release-tree/scripts/' "$workflow"; then
   exit 1
 fi
 if [[ "$(grep -c 'verify-release-checks.sh \\' "$workflow")" -lt 2 ||
+      "$(grep -c 'download-conformance-evidence.sh \\' "$workflow")" != "2" ||
       "$(grep -c 'build-release-assets.sh \\' "$workflow")" != "2" ]]; then
-  echo "Release evidence generation is not wired into both stages" >&2
+  echo "Release and conformance evidence generation is not wired into both stages" >&2
+  exit 1
+fi
+if [[ "$(grep -Fc '/release-assets/CONFORMANCE-EVIDENCE.tar' "$workflow")" -lt 2 ]]; then
+  echo "Retained conformance evidence must be attested and reverified" >&2
   exit 1
 fi
 if ! awk '

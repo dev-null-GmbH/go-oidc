@@ -53,9 +53,11 @@ cannot persist partial state or trigger signing/side effects out of order.
 - Keep GitHub Actions pinned to audited full commit SHAs with the corresponding
   release version in an inline comment.
 
-Pull requests require `CODEOWNERS` review. Security-critical changes should be
-reviewed independently by both named maintainers whenever practical, and all
-required checks must pass before merge.
+`CODEOWNERS` routes changes to the maintainers but is not a required-approval
+gate. The fork uses an explicit solo-maintainer model: the accepting maintainer
+reviews the complete signed head and remains accountable for it. Independent
+human review is welcome but is not claimed or required. All required checks
+must pass before merge.
 
 ## Upstream and release discipline
 

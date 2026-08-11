@@ -6,9 +6,32 @@ tool_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 temporary_root="$(mktemp -d)"
 trap 'rm -rf "$temporary_root"' EXIT
 
+"$tool_root/scripts/test-conformance-evidence-bundle.sh"
+
 asset_dir="$temporary_root/assets"
 source_dir="$temporary_root/source"
-mkdir -p "$asset_dir" "$source_dir"
+conformance_archives_dir="$temporary_root/conformance-archives"
+conformance_fixture_dir="$temporary_root/conformance-fixture"
+mkdir -p \
+  "$asset_dir" "$source_dir" \
+  "$conformance_archives_dir" "$conformance_fixture_dir"
+
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
+printf '{"result":"PASSED"}\n' > "$conformance_fixture_dir/result.json"
+printf 'test signature\n' > "$conformance_fixture_dir/result.sig"
+(
+  cd "$conformance_fixture_dir"
+  zip -q export.zip result.json result.sig
+)
+printf 'ephemeral authorization-server log\n' \
+  > "$conformance_fixture_dir/auth-server.log"
 
 release_tag='v0.25.1-d0.1'
 release_version="${release_tag#v}"
@@ -99,13 +122,22 @@ profiles=(
 profile_records=()
 profile_id=1000
 for profile in "${profiles[@]}"; do
+  artifact_archive="$conformance_archives_dir/$profile_id.zip"
+  (
+    cd "$conformance_fixture_dir"
+    zip -q -j "$artifact_archive" export.zip auth-server.log
+  )
+  artifact_size="$(wc -c < "$artifact_archive")"
+  artifact_size="${artifact_size//[[:space:]]/}"
+  artifact_digest="sha256:$(sha256_file "$artifact_archive")"
   profile_records+=("$(
     jq -n \
       --arg profile "$profile" \
       --arg commit "$release_commit" \
-      --arg digest "$digest" \
+      --arg digest "$artifact_digest" \
       --argjson id "$profile_id" \
-      --argjson run_id "$conformance_run_id" '
+      --argjson run_id "$conformance_run_id" \
+      --argjson size "$artifact_size" '
       {
         profile: $profile,
         job: {
@@ -118,7 +150,7 @@ for profile in "${profiles[@]}"; do
         artifact: {
           id: $id,
           name: ("conformance-" + $profile + "-" + ($run_id | tostring)),
-          sizeInBytes: 1,
+          sizeInBytes: $size,
           digest: $digest,
           expired: false,
           archiveDownloadUrl: "https://example.invalid/artifact",
@@ -138,7 +170,7 @@ jq -n \
   --argjson aggregate "$aggregate_check" \
   --argjson profiles "$profiles_json" '
   {
-    schemaVersion: 1,
+    schemaVersion: 2,
     repository: "dev-null-GmbH/go-oidc",
     releaseCommit: $commit,
     commitVerification: {
@@ -155,12 +187,10 @@ jq -n \
         sha: $head,
         verification: {verified: true, reason: "valid"}
       },
-      approvals: [{
-        id: 1,
-        user: {login: "Schlauer-Hax", id: 32987311},
-        state: "APPROVED",
-        commitId: $head
-      }],
+      reviewPolicy: {
+        mode: "solo-maintainer-signed-head-and-required-checks",
+        requiredApprovalCount: 0
+      },
       dependencyReview: $dependency
     },
     conformance: {
@@ -168,6 +198,12 @@ jq -n \
       profiles: $profiles
     }
   }' > "$asset_dir/RELEASE-EVIDENCE.json"
+
+go run "$tool_root/scripts/conformance-evidence-bundle.go" \
+  -mode pack \
+  -evidence "$asset_dir/RELEASE-EVIDENCE.json" \
+  -archives-dir "$conformance_archives_dir" \
+  -bundle "$asset_dir/CONFORMANCE-EVIDENCE.tar" >/dev/null
 
 jq -n \
   --arg tag "$release_tag" \
@@ -183,12 +219,15 @@ jq -n \
       sourceRef: "refs/heads/main",
       sourceDigest: $commit
     },
-    conformance: {images: {
-      maven: ("maven@" + $digest),
-      mongodb: ("mongo@" + $digest),
-      nginx: ("nginx@" + $digest),
-      temurin: ("temurin@" + $digest)
-    }},
+    conformance: {
+      evidence: "CONFORMANCE-EVIDENCE.tar",
+      images: {
+        maven: ("maven@" + $digest),
+        mongodb: ("mongo@" + $digest),
+        nginx: ("nginx@" + $digest),
+        temurin: ("temurin@" + $digest)
+      }
+    },
     releaseEvidence: "RELEASE-EVIDENCE.json"
   }' > "$asset_dir/RELEASE-MANIFEST.json"
 
@@ -234,6 +273,38 @@ printf '{}\n' > "$asset_dir/sbom-attestation.sigstore.json"
 "$tool_root/scripts/verify-release-assets.sh" \
   "$release_tag" "$asset_dir" "$release_commit" >/dev/null
 
+cp "$asset_dir/CONFORMANCE-EVIDENCE.tar" \
+  "$temporary_root/valid-conformance-evidence.tar"
+printf 'X' | dd of="$asset_dir/CONFORMANCE-EVIDENCE.tar" \
+  bs=1 seek=512 conv=notrunc 2>/dev/null
+"$tool_root/scripts/write-release-checksums.sh" "$asset_dir" >/dev/null
+if "$tool_root/scripts/verify-release-assets.sh" \
+  "$release_tag" "$asset_dir" "$release_commit" >/dev/null 2>&1; then
+  echo "Release verifier accepted altered conformance evidence" >&2
+  exit 1
+fi
+mv "$temporary_root/valid-conformance-evidence.tar" \
+  "$asset_dir/CONFORMANCE-EVIDENCE.tar"
+"$tool_root/scripts/write-release-checksums.sh" "$asset_dir" >/dev/null
+
+cp "$asset_dir/RELEASE-EVIDENCE.json" "$temporary_root/valid-release-evidence.json"
+jq '.schemaVersion = 1' "$temporary_root/valid-release-evidence.json" \
+  > "$asset_dir/RELEASE-EVIDENCE.json"
+if "$tool_root/scripts/verify-release-evidence.sh" \
+  "$asset_dir/RELEASE-EVIDENCE.json" "$release_commit" >/dev/null 2>&1; then
+  echo "Verifier accepted obsolete two-person evidence schema" >&2
+  exit 1
+fi
+jq '.pullRequestEvidence.approvals = []' \
+  "$temporary_root/valid-release-evidence.json" \
+  > "$asset_dir/RELEASE-EVIDENCE.json"
+if "$tool_root/scripts/verify-release-evidence.sh" \
+  "$asset_dir/RELEASE-EVIDENCE.json" "$release_commit" >/dev/null 2>&1; then
+  echo "Verifier accepted ambiguous approval evidence in the solo model" >&2
+  exit 1
+fi
+cp "$temporary_root/valid-release-evidence.json" "$asset_dir/RELEASE-EVIDENCE.json"
+
 cp "$asset_dir/SHA256SUMS" "$temporary_root/valid-checksums"
 awk '$2 != "RELEASE-NOTES.md"' "$temporary_root/valid-checksums" \
   > "$asset_dir/SHA256SUMS"
@@ -251,4 +322,4 @@ if "$tool_root/scripts/verify-release-assets.sh" \
   exit 1
 fi
 
-echo "Release asset verifier rejects omitted and duplicate checksum entries"
+echo "Release asset verifier rejects stale review evidence and incomplete checksums"

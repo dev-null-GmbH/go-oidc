@@ -14,6 +14,10 @@ api() {
   gh api -H "X-GitHub-Api-Version: $api_version" "$@"
 }
 
+api_pages() {
+  api --paginate --slurp "$1"
+}
+
 status=0
 require_json() {
   local description="$1"
@@ -40,14 +44,23 @@ immutable_releases_json="$(
   api "repos/$repository/immutable-releases" 2>/dev/null ||
     printf '{"enabled":false}'
 )"
-rulesets_json="$(api "repos/$repository/rulesets")"
+rulesets_json="$(
+  api_pages "repos/$repository/rulesets?per_page=100" |
+    jq '[.[][]?]'
+)"
+effective_main_rules_json="$(
+  api_pages "repos/$repository/rules/branches/main?per_page=100" |
+    jq '[.[][]?]'
+)"
 release_environment_json="$(
   api "repos/$repository/environments/governed-release" 2>/dev/null ||
     printf '{}'
 )"
 release_environment_branches_json="$(
-  api "repos/$repository/environments/governed-release/deployment-branch-policies?per_page=100" \
-    2>/dev/null || printf '{}'
+  api_pages \
+    "repos/$repository/environments/governed-release/deployment-branch-policies?per_page=100" \
+    2>/dev/null |
+    jq '{branch_policies: [.[].branch_policies[]?]}' || printf '{}'
 )"
 
 require_json "issues are enabled for non-sensitive coordination" \
@@ -87,14 +100,8 @@ require_json "workflow tokens default to read-only and cannot approve pull reque
 require_json "governed release environment cannot be bypassed by admins" \
   '.name == "governed-release" and .can_admins_bypass == false' \
   "$release_environment_json"
-require_json "governed release environment has exact two-person reviewers" \
-  'any((.protection_rules // [])[];
-    .type == "required_reviewers" and .prevent_self_review == true and
-    (.reviewers | length) == 2 and
-    (all(.reviewers[];
-      .type == "User" and
-      (.reviewer.id == 33130539 or .reviewer.id == 32987311))) and
-    ([.reviewers[].reviewer.id] | sort) == [32987311, 33130539])' \
+require_json "governed release environment has no second-person approval gate" \
+  '([(.protection_rules // [])[].type] | sort) == ["branch_policy"]' \
   "$release_environment_json"
 require_json "governed release environment permits only main" \
   '.deployment_branch_policy.protected_branches == false and
@@ -126,6 +133,27 @@ tag_creation_ruleset_id="$(
     <<< "$rulesets_json" | head -n 1
 )"
 
+require_json "Protect main is the only active branch ruleset" \
+  '([.[] | select(.target == "branch" and .enforcement == "active")]) as $rules |
+   ($rules | length) == 1 and $rules[0].name == "Protect main"' \
+  "$rulesets_json"
+require_json "main has exactly one effective pull-request rule" \
+  '([.[] | select(.type == "pull_request")]) as $rules |
+   ($rules | length) == 1 and
+   $rules[0].ruleset_source_type == "Repository" and
+   $rules[0].ruleset_source == "dev-null-GmbH/go-oidc"' \
+  "$effective_main_rules_json"
+
+if legacy_branch_protection="$(
+  api --include "repos/$repository/branches/main/protection" 2>&1
+)"; then
+  echo "Repository governance requirement failed: legacy main branch protection is disabled" >&2
+  status=1
+elif ! grep -Eq '^HTTP/[0-9.]+ 404 ' <<< "$legacy_branch_protection"; then
+  echo "Repository governance requirement failed: legacy main branch protection could not be audited" >&2
+  status=1
+fi
+
 if [[ -z "$main_ruleset_id" ]]; then
   echo "Repository governance requirement failed: active Protect main ruleset" >&2
   status=1
@@ -142,12 +170,13 @@ else
     require_json "main ruleset contains $rule_type" \
       "any(.rules[]; .type == \"$rule_type\")" "$main_ruleset_json"
   done
-  require_json "main requires a CODEOWNERS approval" \
+  require_json "main permits the documented solo-maintainer merge model" \
     'any(.rules[]; .type == "pull_request" and
-      .parameters.required_approving_review_count == 1 and
-      .parameters.require_code_owner_review == true and
-      .parameters.dismiss_stale_reviews_on_push == true and
-      .parameters.require_last_push_approval == true and
+      .parameters.required_approving_review_count == 0 and
+      .parameters.required_reviewers == [] and
+      .parameters.require_code_owner_review == false and
+      .parameters.dismiss_stale_reviews_on_push == false and
+      .parameters.require_last_push_approval == false and
       .parameters.required_review_thread_resolution == true and
       .parameters.allowed_merge_methods == ["squash"])' "$main_ruleset_json"
   require_json "main has exactly the retained trusted required-check set" \

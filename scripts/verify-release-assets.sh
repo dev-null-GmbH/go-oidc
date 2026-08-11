@@ -25,6 +25,7 @@ required_assets=(
   "RELEASE-MANIFEST.json"
   "RELEASE-NOTES.md"
   "RELEASE-EVIDENCE.json"
+  "CONFORMANCE-EVIDENCE.tar"
   "provenance.sigstore.json"
   "sbom-attestation.sigstore.json"
   "SHA256SUMS"
@@ -91,10 +92,15 @@ jq -e \
    .provenanceBinding.sourceRef == "refs/heads/main" and
    .provenanceBinding.sourceDigest == $commit and
    .releaseEvidence == "RELEASE-EVIDENCE.json" and
+   .conformance.evidence == "CONFORMANCE-EVIDENCE.tar" and
    (.conformance.images | all(.[]; test("@sha256:[0-9a-f]{64}$")))' \
   "$asset_dir/RELEASE-MANIFEST.json" >/dev/null
 "$tool_root/scripts/verify-release-evidence.sh" \
   "$asset_dir/RELEASE-EVIDENCE.json" "$expected_commit"
+go run "$tool_root/scripts/conformance-evidence-bundle.go" \
+  -mode verify \
+  -evidence "$asset_dir/RELEASE-EVIDENCE.json" \
+  -bundle "$asset_dir/CONFORMANCE-EVIDENCE.tar" >/dev/null
 jq -e \
   --arg version "$tag" \
   --arg commit "$expected_commit" \

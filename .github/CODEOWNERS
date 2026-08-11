@@ -1,4 +1,5 @@
-# The governed fork requires review from its named maintainers.
+# Route changes to the named maintainers; required checks, not approval count,
+# enforce the documented solo-maintainer merge model.
 * @greg6775 @Schlauer-Hax
 
 /.github/ @greg6775 @Schlauer-Hax

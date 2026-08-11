@@ -22,7 +22,7 @@ Every release records:
 - the Go toolchain from `go.mod` and the conformance-suite revision;
 - checksums, an SPDX SBOM covering every shipped Go module, and build
   provenance for every primary generated payload asset;
-- retained machine-readable CI, review, vulnerability, CodeQL, dependency,
+- retained machine-readable CI, signed-change, vulnerability, CodeQL, dependency,
   and OpenID conformance evidence bound to the release commit.
 
 ## Release requirements
@@ -32,15 +32,16 @@ created**. The setting applies only to future releases, so enabling it after a
 release is published does not protect that release. Tags and immutable
 releases are never deleted or rewritten to conceal a defect.
 
-The protected repository uses squash-only merges. The pull request's current
-author head must be signed and GitHub-verified. GitHub must separately report
-the exact squash release commit as validly signed and verified; the release
-workflow retains both verification records, the merged pull request,
-current-head approval, dependency review, and required check evidence. The
-annotated release tag is separately signed by a principal in
-`.github/release-signers`. This makes the reviewed merge path achievable
-without assuming that GitHub's squash commit can be verified by a maintainer's
-local SSH key.
+The protected repository uses a documented solo-maintainer model and
+squash-only merges. A second human approval is not required or claimed. The
+pull request's current author head must be signed and GitHub-verified. GitHub
+must separately report the exact squash release commit as validly signed and
+verified; the release workflow retains both verification records, the merged
+pull request, the explicit solo-maintainer review model, dependency review, and
+required check evidence. The annotated release tag is separately signed by a
+principal in `.github/release-signers`. This keeps the reviewed merge path
+achievable without assuming that GitHub's squash commit can be verified by a
+maintainer's local SSH key.
 
 Every release follows this order:
 
@@ -53,12 +54,16 @@ Every release follows this order:
    bypass actors and blocks update and deletion while requiring verified
    commits. Splitting the rulesets lets authorized maintainers create a tag
    without allowing anyone to move or delete it.
-2. Squash-merge the approved release pull request to protected `main`. All
-   required checks must pass for the exact GitHub-verified squash commit. The
-   dependency review must pass on the pull request's current head, and a named
-   maintainer other than the author must approve that same head. Security- or
-   protocol-relevant changes require the full conformance matrix; waivers must
-   be explicit, time-bounded, and approved by both maintainers.
+2. Squash-merge the reviewed release pull request to protected `main`. The six
+   push-capable required checks must pass for the exact GitHub-verified squash
+   commit, while `Dependency review` must pass on the pull request's current
+   signed head. Together these are the repository's exact seven required
+   checks.
+   GitHub approval is neither required nor used as release evidence in this
+   solo-maintainer model. Instead the retained evidence records the model and
+   the exact signed head, merge commit, checks, and conformance runs.
+   Security- or protocol-relevant changes require the full conformance matrix;
+   this first governed release has no conformance-waiver path.
 3. An authorized release maintainer creates and pushes a signed annotated tag
    whose embedded name and direct commit object exactly match the requested
    release identity. The tag is never updated, replayed under another name, or
@@ -87,17 +92,22 @@ Every release follows this order:
 5. The preparation job keeps trusted scripts/signers and the release tree in
    separate checkouts, revalidates the qualification, and generates a
    deterministic source archive, complete patch inventory, release manifest,
-   retained release evidence, strict SHA-256 manifest, multi-module SPDX SBOM,
-   and GitHub provenance/SBOM bundles. It uploads all nine assets to an
-   unpublished **draft prerelease** and never publishes it.
-6. Independently inspect the draft. Then send the trusted default-branch
+   retained release evidence, a deterministic `CONFORMANCE-EVIDENCE.tar`
+   containing the exact 17 qualified GitHub Actions artifact archives, a strict
+   SHA-256 manifest, a multi-module SPDX SBOM, and GitHub provenance/SBOM
+   bundles. It uploads all ten assets to an unpublished **draft prerelease** and
+   never publishes it. Every conformance archive is downloaded by immutable
+   artifact ID and checked against its recorded byte size and SHA-256 digest;
+   the checksummed and attested release bundle remains inspectable after the
+   short-lived Actions copies expire.
+6. Inspect the draft as a separate operator step. Then send the trusted default-branch
    `governed-release-publish` repository dispatch with confirmation
    `publish <tag>@<commit>`. It repeats qualification, downloads and strictly
    verifies the exact draft asset set by asset ID, size, server SHA-256 digest,
    and downloaded bytes; regenerates and compares current release evidence and
    all deterministic primary payloads; verifies both attestation bundles; and
-   re-audits governance immediately before publication. After environment
-   approval, one final shell step re-fetches the complete release body/state
+   re-audits governance immediately before publication. In the publish job,
+   one final shell step re-fetches the complete release body/state
    and asset inventory, compares it with the verified snapshot, re-downloads
    and re-hashes every asset by immutable asset ID, runs the strict asset
    verifier, and re-fetches the body/state plus complete paginated inventory
@@ -117,12 +127,13 @@ Every release follows this order:
    consumers reject unauthorized or incomplete bytes. This is a detectable
    residual platform risk, not an atomicity guarantee.
 
-   The publish job targets the protected `governed-release` environment. Its
-   required reviewers are exactly `greg6775` and `Schlauer-Hax`; GitHub needs
-   one approval, prevents the dispatching actor from self-approving, disallows
-   administrator bypass, and permits only `main`. Therefore one maintainer
-   sends the publish dispatch and the other approves the waiting environment
-   deployment before any publish step or job token becomes available.
+   The publish job targets the protected `governed-release` environment. The
+   environment disallows administrator bypass, permits only `main`, and has no
+   required-reviewer rule. The explicit prepare and publish dispatches are two
+   separate operator decisions; one authorized maintainer may perform both.
+   Every deterministic payload, check, attestation, governance setting, and
+   remote draft byte is revalidated between them. This is intentionally not
+   described as two-person control.
 
    ```sh
    gh api --method POST repos/dev-null-GmbH/go-oidc/dispatches \
@@ -152,8 +163,8 @@ the ephemeral `GITHUB_TOKEN`. The audit requires squash-only merges; active,
 no-bypass main protection with the exact seven strict
 GitHub-Actions-sourced checks retained by release evidence; the exact named tag
 creation actors plus a no-bypass immutable-tag ruleset; GitHub Actions SHA
-enforcement and an action allowlist; the no-admin-bypass, self-review-blocked
-`governed-release` environment with exactly both maintainers; private
+enforcement and an action allowlist; the no-admin-bypass `governed-release`
+environment restricted to `main` with no second-person approval gate; private
 vulnerability reporting; Dependabot alerts and security updates; secret
 scanning with push protection; and immutable releases.
 
@@ -168,7 +179,7 @@ tag and commit. A maintainer must:
 3. resolve conflicts without weakening fork security contracts;
 4. update `NOTICE` and the patch inventory;
 5. rerun unit, race, static, vulnerability, and conformance qualification; and
-6. obtain a `CODEOWNERS` review before merging.
+6. record the maintainer's review of the complete signed head before merging.
 
 Released history is never rebased during an upstream sync. Upstream signature
 verification is required when upstream publishes signed objects; otherwise,

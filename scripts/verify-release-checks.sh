@@ -170,9 +170,6 @@ if [[ -z "$pull_request" ]]; then
   exit 1
 fi
 
-pull_number="$(jq -r .number <<< "$pull_request")"
-pull_author="$(jq -r .user.login <<< "$pull_request")"
-pull_author_id="$(jq -r .user.id <<< "$pull_request")"
 pull_head_sha="$(jq -r .head.sha <<< "$pull_request")"
 pull_head_commit_json="$(api "repos/$repository/commits/$pull_head_sha")"
 if ! jq -e --arg head "$pull_head_sha" '
@@ -194,36 +191,6 @@ pull_head_verification="$(
     }
   }' <<< "$pull_head_commit_json"
 )"
-reviews="$(api_pages "repos/$repository/pulls/$pull_number/reviews?per_page=100" | jq '[.[][]?]')"
-approved_reviews="$(
-  jq \
-    --arg author "$pull_author" \
-    --argjson author_id "$pull_author_id" \
-    --arg head_sha "$pull_head_sha" '
-    map(select(.state != "COMMENTED")) |
-    sort_by(.user.login, .submitted_at, .id) |
-    group_by(.user.login) | map(last) |
-    map(select(
-      .state == "APPROVED" and .commit_id == $head_sha and
-      .user.login != $author and .user.id != $author_id and
-      ((.user.login == "greg6775" and .user.id == 33130539) or
-       (.user.login == "Schlauer-Hax" and .user.id == 32987311))
-    )) |
-    map({
-      id,
-      user: {login: .user.login, id: .user.id},
-      state,
-      submittedAt: .submitted_at,
-      commitId: .commit_id,
-      htmlUrl: .html_url
-    })
-  ' <<< "$reviews"
-)"
-if [[ "$(jq length <<< "$approved_reviews")" -lt 1 ]]; then
-  echo "Release pull request lacks an approval from another named maintainer" >&2
-  exit 1
-fi
-
 pull_checks="$(check_runs_for_commit "$pull_head_sha")"
 dependency_review="$(
   trusted_check "$pull_checks" "Dependency review" "$pull_head_sha" \
@@ -234,7 +201,6 @@ pull_request_evidence="$(
   jq -n \
     --argjson pull "$pull_request" \
     --argjson head_verification "$pull_head_verification" \
-    --argjson reviews "$approved_reviews" \
     --argjson dependency "$dependency_review" '
     {
       number: $pull.number,
@@ -247,7 +213,10 @@ pull_request_evidence="$(
       base: {ref: $pull.base.ref, sha: $pull.base.sha},
       head: {ref: $pull.head.ref, sha: $pull.head.sha},
       headVerification: $head_verification,
-      approvals: $reviews,
+      reviewPolicy: {
+        mode: "solo-maintainer-signed-head-and-required-checks",
+        requiredApprovalCount: 0
+      },
       dependencyReview: $dependency
     }'
 )"
@@ -357,7 +326,7 @@ evidence="$(
     --argjson conformance_check "$conformance_check" \
     --argjson profiles "$profile_evidence_json" '
     {
-      schemaVersion: 1,
+      schemaVersion: 2,
       repository: $repository,
       releaseCommit: $commit,
       commitVerification: $verification,

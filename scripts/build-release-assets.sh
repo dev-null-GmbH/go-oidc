@@ -8,10 +8,12 @@ source_root="$(cd "$source_root" && pwd)"
 cd "$source_root"
 export LC_ALL=C
 
-tag="${1:?usage: build-release-assets.sh <tag> <output-directory> <evidence-json>}"
-output_dir="${2:?usage: build-release-assets.sh <tag> <output-directory> <evidence-json>}"
-evidence_file="${3:?usage: build-release-assets.sh <tag> <output-directory> <evidence-json>}"
+tag="${1:?usage: build-release-assets.sh <tag> <output-directory> <evidence-json> <conformance-evidence>}"
+output_dir="${2:?usage: build-release-assets.sh <tag> <output-directory> <evidence-json> <conformance-evidence>}"
+evidence_file="${3:?usage: build-release-assets.sh <tag> <output-directory> <evidence-json> <conformance-evidence>}"
+conformance_evidence_file="${4:?usage: build-release-assets.sh <tag> <output-directory> <evidence-json> <conformance-evidence>}"
 evidence_file="$(cd "$(dirname "$evidence_file")" && pwd)/$(basename "$evidence_file")"
+conformance_evidence_file="$(cd "$(dirname "$conformance_evidence_file")" && pwd)/$(basename "$conformance_evidence_file")"
 
 if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-d0\.[1-9][0-9]*$ ]]; then
   printf 'Invalid governed fork release tag: %s\n' "$tag" >&2
@@ -27,6 +29,13 @@ if [[ -n "$(git status --porcelain)" ]]; then
 fi
 if [[ ! -s "$evidence_file" ]]; then
   printf 'Release evidence is missing or empty: %s\n' "$evidence_file" >&2
+  exit 1
+fi
+if [[ ! -f "$conformance_evidence_file" ||
+      -L "$conformance_evidence_file" ||
+      ! -s "$conformance_evidence_file" ]]; then
+  printf 'Conformance evidence is missing, unsafe, or empty: %s\n' \
+    "$conformance_evidence_file" >&2
   exit 1
 fi
 if [[ -e "$output_dir" ]] && \
@@ -119,6 +128,11 @@ git archive \
 "$tool_root/scripts/verify-release-evidence.sh" \
   "$evidence_file" "$release_commit"
 cp "$evidence_file" "$output_dir/RELEASE-EVIDENCE.json"
+go run "$tool_root/scripts/conformance-evidence-bundle.go" \
+  -mode verify \
+  -evidence "$evidence_file" \
+  -bundle "$conformance_evidence_file"
+cp "$conformance_evidence_file" "$output_dir/CONFORMANCE-EVIDENCE.tar"
 
 lock_sha256="$(sha256sum scripts/conformance-requirements.lock | awk '{print $1}')"
 cat > "$output_dir/RELEASE-MANIFEST.json" <<EOF
@@ -155,6 +169,7 @@ cat > "$output_dir/RELEASE-MANIFEST.json" <<EOF
     "commit": "$conformance_commit",
     "python": "$python_version",
     "requirementsLockSHA256": "$lock_sha256",
+    "evidence": "CONFORMANCE-EVIDENCE.tar",
     "images": {
       "maven": "$maven_image",
       "mongodb": "$mongo_image",
@@ -182,7 +197,8 @@ Governed d0 fork release based on upstream $upstream_tag
 
 The staged release contains a deterministic source archive, the complete
 fork-only patch inventory, a machine-readable release manifest, retained check
-and conformance evidence, an SPDX 2.3 SBOM, SHA-256 checksums, and GitHub
+metadata and the exact 17 conformance artifact archives, an SPDX 2.3 SBOM,
+SHA-256 checksums, and GitHub
 Sigstore attestation bundles. OpenID
 certification statements for upstream versions do not automatically apply to
 this fork release.
@@ -191,7 +207,7 @@ Verify after downloading all assets:
 
 \`sha256sum --check SHA256SUMS\`
 
-\`for subject in $archive_name $sbom_name PATCHES.txt RELEASE-EVIDENCE.json RELEASE-MANIFEST.json RELEASE-NOTES.md; do gh attestation verify "\$subject" --bundle provenance.sigstore.json --deny-self-hosted-runners --repo dev-null-GmbH/go-oidc --signer-workflow github.com/dev-null-GmbH/go-oidc/.github/workflows/release.yml --source-ref refs/heads/main --source-digest $release_commit; done\`
+\`for subject in $archive_name $sbom_name PATCHES.txt RELEASE-EVIDENCE.json CONFORMANCE-EVIDENCE.tar RELEASE-MANIFEST.json RELEASE-NOTES.md; do gh attestation verify "\$subject" --bundle provenance.sigstore.json --deny-self-hosted-runners --repo dev-null-GmbH/go-oidc --signer-workflow github.com/dev-null-GmbH/go-oidc/.github/workflows/release.yml --source-ref refs/heads/main --source-digest $release_commit; done\`
 
 \`gh attestation verify $archive_name --bundle sbom-attestation.sigstore.json --deny-self-hosted-runners --predicate-type https://spdx.dev/Document/v2.3 --repo dev-null-GmbH/go-oidc --signer-workflow github.com/dev-null-GmbH/go-oidc/.github/workflows/release.yml --source-ref refs/heads/main --source-digest $release_commit\`
 EOF
