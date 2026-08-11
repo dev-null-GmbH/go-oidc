@@ -252,7 +252,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+          if gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "A GitHub release already exists for $RELEASE_TAG" >&2
             exit 1
           fi
@@ -312,6 +313,7 @@ jobs:
         run: |
           set -euo pipefail
           gh release create "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
             --draft \
             --latest=false \
             --notes-file "$RUNNER_TEMP/release-assets/RELEASE-NOTES.md" \
@@ -321,6 +323,7 @@ jobs:
             "$RUNNER_TEMP/release-assets"/*
           draft_state="$(
             gh release view "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
               --json isDraft,isPrerelease \
               --jq '[.isDraft, .isPrerelease] | @tsv'
           )"
@@ -421,6 +424,7 @@ jobs:
           api_version=2026-03-10
           release_id="$(
             gh release view "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
               --json databaseId --jq .databaseId
           )"
           if [[ ! "$release_id" =~ ^[1-9][0-9]*$ ]]; then
