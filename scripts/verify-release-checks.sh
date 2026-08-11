@@ -155,20 +155,10 @@ for specification in "${check_specs[@]}"; do
 done
 required_checks_json="$(printf '%s\n' "${required_checks[@]}" | jq -s 'sort_by(.name)')"
 
-pull_requests="$(
-  api_pages "repos/$repository/commits/$commit/pulls?per_page=100" |
-    jq '[.[][]? | select(.merged_at != null and .base.ref == "main")] |
-        sort_by(.number) | reverse'
-)"
 pull_request="$(
-  jq -c --arg commit "$commit" \
-    'first(.[] | select(.merge_commit_sha == $commit)) // empty' \
-    <<< "$pull_requests"
+  "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/select-release-pull-request.sh" \
+    "$repository" "$commit"
 )"
-if [[ -z "$pull_request" ]]; then
-  echo "Release commit is not the exact merge commit of a merged main PR" >&2
-  exit 1
-fi
 
 pull_head_sha="$(jq -r .head.sha <<< "$pull_request")"
 pull_head_commit_json="$(api "repos/$repository/commits/$pull_head_sha")"

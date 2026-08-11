@@ -54,5 +54,6 @@ done
 "$tool_root/scripts/verify-release-workflow.sh"
 "$tool_root/scripts/test-release-tag-verifier.sh"
 "$tool_root/scripts/test-release-assets-verifier.sh"
+"$tool_root/scripts/test-release-pr-binding.sh"
 
 echo "All external workflow actions use immutable commit SHAs"
