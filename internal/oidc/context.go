@@ -12,16 +12,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dev-null-GmbH/go-oidc/internal/joseutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/strutil"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/go-jose/go-jose/v4"
-	"github.com/luikyv/go-oidc/internal/joseutil"
-	"github.com/luikyv/go-oidc/internal/strutil"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 type Context struct {
-	Response http.ResponseWriter
-	Request  *http.Request
-	context  context.Context
+	Response              http.ResponseWriter
+	Request               *http.Request
+	context               context.Context
+	tokenEndpointEvidence *tokenEndpointEvidenceState
 	*Configuration
 }
 
@@ -105,6 +106,10 @@ func (ctx Context) DCRDeleteClient(id string) error {
 	return ctx.DCRManager.DeleteClient(ctx, id)
 }
 
+func (ctx Context) ResolveClient(id string) (*goidc.Client, error) {
+	return ctx.ResolveClientFunc(ctx, id)
+}
+
 func (ctx Context) ValidateInitalAccessToken(token string) error {
 	return ctx.DCRValidateInitialTokenFunc(ctx, token)
 }
@@ -119,6 +124,81 @@ func (ctx Context) ClientID() string {
 
 func (ctx Context) ConsumeJTI(jti string) error {
 	return ctx.ConsumeJTIFunc(ctx, jti)
+}
+
+func (ctx Context) ConsumeJTIUse(use goidc.JTIUse) error {
+	if ctx.ConsumeJTIUseFunc != nil {
+		return ctx.ConsumeJTIUseFunc(ctx, use)
+	}
+	return ctx.ConsumeJTIFunc(ctx, use.ID)
+}
+
+func (ctx Context) UsesTypedJTIConsumer() bool {
+	return ctx.ConsumeJTIUseFunc != nil
+}
+
+// ReserveJTI atomically reserves a validated JTI and maps typed-consumer
+// invalid-use, replay, and operational failures to their appropriate protocol
+// errors. Legacy consumers retain their historical behavior, where every
+// callback error is a protocol rejection.
+func (ctx Context) ReserveJTI(use goidc.JTIUse, replayCode goidc.ErrorCode, replayDescription string) error {
+	err := ctx.ConsumeJTIUse(use)
+	if err == nil {
+		return nil
+	}
+	if ctx.UsesTypedJTIConsumer() {
+		if errors.Is(err, goidc.ErrInvalidJTIUse) || errors.Is(err, goidc.ErrJTIReplay) {
+			return goidc.WrapError(replayCode, replayDescription, err)
+		}
+		return goidc.WrapError(
+			goidc.ErrorCodeServerError,
+			"server error",
+			jtiConsumerInternalError{cause: err},
+		)
+	}
+	if errors.Is(err, goidc.ErrNotFound) {
+		return nil
+	}
+	return goidc.WrapError(replayCode, replayDescription, err)
+}
+
+type jtiConsumerInternalError struct {
+	cause error
+}
+
+func (jtiConsumerInternalError) Error() string { return "JTI reservation failed" }
+
+func (err jtiConsumerInternalError) Unwrap() error { return err.cause }
+
+func (ctx Context) ApplyPrivateKeyJWTAssertionPolicy(assertion goidc.VerifiedClientAssertion) (err error) {
+	if ctx.PrivateKeyJWTAssertionPolicyFunc == nil {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return privateKeyJWTAssertionPolicyServerError(err)
+	}
+	defer func() {
+		if recover() != nil {
+			err = privateKeyJWTAssertionPolicyServerError(errors.New("private key JWT assertion policy panicked"))
+		}
+	}()
+	callbackErr := ctx.PrivateKeyJWTAssertionPolicyFunc(ctx, assertion)
+	if err := ctx.Err(); err != nil {
+		return privateKeyJWTAssertionPolicyServerError(err)
+	}
+	return callbackErr
+}
+
+func privateKeyJWTAssertionPolicyServerError(cause error) error {
+	return goidc.WrapError(goidc.ErrorCodeServerError, "server error", cause)
+}
+
+func (ctx Context) IssueDPoPNonce(scope goidc.DPoPNonceScope) (string, error) {
+	return ctx.DPoPNonceManager.IssueNonce(ctx, scope)
+}
+
+func (ctx Context) ValidateDPoPNonce(scope goidc.DPoPNonceScope, nonce string) (goidc.DPoPNonceValidation, error) {
+	return ctx.DPoPNonceManager.ValidateNonce(ctx, scope, nonce)
 }
 
 func (ctx Context) RenderError(err error) error {
@@ -397,7 +477,7 @@ func (ctx Context) Write(obj any, status int) error {
 	// Check if the request was terminated before writing anything.
 	select {
 	case <-ctx.Done():
-		return nil
+		return ctx.Err()
 	default:
 	}
 
@@ -433,6 +513,17 @@ func (ctx Context) WriteJWTWithType(token string, status int, contentType string
 }
 
 func (ctx Context) WriteError(err error) {
+	_ = ctx.writeError(err)
+}
+
+// WriteErrorResult writes an OAuth error and reports whether rendering failed.
+// Token endpoint evidence uses this to avoid reporting a protocol denial when
+// the selected response could not be written.
+func (ctx Context) WriteErrorResult(err error) error {
+	return ctx.writeError(err)
+}
+
+func (ctx Context) writeError(err error) error {
 	ctx.HandleError(err)
 
 	var oidcErr goidc.Error
@@ -443,7 +534,9 @@ func (ctx Context) WriteError(err error) {
 	oidcErr = oidcErr.WithURI(ctx.ErrorURI)
 	if err := ctx.Write(oidcErr, oidcErr.StatusCode()); err != nil {
 		ctx.Response.WriteHeader(http.StatusInternalServerError)
+		return err
 	}
+	return nil
 }
 
 func (ctx Context) Redirect(redirectURL string) {
@@ -509,6 +602,48 @@ func (ctx Context) UserInfoClaims(grant *goidc.Grant) map[string]any {
 
 func (ctx Context) TokenClaims(tkn *goidc.Token, grant *goidc.Grant) map[string]any {
 	return ctx.TokenClaimsFunc(ctx, tkn, grant)
+}
+
+func (ctx Context) UsesAccessTokenClaims() bool {
+	return ctx.AccessTokenClaimsFunc != nil
+}
+
+func (ctx Context) AccessTokenClaims(input goidc.AccessTokenClaimsInput) (claims map[string]any, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, accessTokenClaimsInternalError(err)
+	}
+
+	defer func() {
+		if recover() != nil {
+			claims = nil
+			err = accessTokenClaimsInternalError(errors.New("access token claims callback panicked"))
+		}
+	}()
+
+	claims, err = ctx.AccessTokenClaimsFunc(ctx, input)
+	if err != nil {
+		return nil, accessTokenClaimsInternalError(err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, accessTokenClaimsInternalError(err)
+	}
+	return claims, nil
+}
+
+type accessTokenClaimsError struct {
+	cause error
+}
+
+func (accessTokenClaimsError) Error() string { return "access token claims unavailable" }
+
+func (err accessTokenClaimsError) Unwrap() error { return err.cause }
+
+func accessTokenClaimsInternalError(cause error) error {
+	return goidc.WrapError(
+		goidc.ErrorCodeServerError,
+		"server error",
+		accessTokenClaimsError{cause: cause},
+	)
 }
 
 func (ctx Context) JWTBearerHandleAssertion(assertion string) (goidc.JWTBearerResult, error) {

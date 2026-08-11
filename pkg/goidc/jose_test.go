@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 func TestJSONWebKeySetKey(t *testing.T) {

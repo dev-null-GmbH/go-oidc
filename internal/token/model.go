@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/timeutil"
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 type GrantOptions struct {
@@ -35,6 +35,17 @@ type GrantOptions struct {
 }
 
 func NewGrant(ctx oidc.Context, c *goidc.Client, opts GrantOptions) (*goidc.Grant, error) {
+	grant, err := newGrant(ctx, c, opts)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.SaveGrant(grant); err != nil {
+		return nil, err
+	}
+	return grant, nil
+}
+
+func newGrant(ctx oidc.Context, c *goidc.Client, opts GrantOptions) (*goidc.Grant, error) {
 	grant := &goidc.Grant{
 		ID:                  ctx.GrantID(),
 		AuthCode:            opts.AuthCode,
@@ -72,10 +83,6 @@ func NewGrant(ctx oidc.Context, c *goidc.Client, opts GrantOptions) (*goidc.Gran
 		if ctx.RefreshTokenLifetimeSecs != 0 {
 			grant.RefreshTokenExpiresAt = timeutil.TimestampNow() + ctx.RefreshTokenLifetimeSecs
 		}
-	}
-
-	if err := ctx.SaveGrant(grant); err != nil {
-		return nil, err
 	}
 
 	return grant, nil

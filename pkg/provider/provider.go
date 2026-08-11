@@ -15,21 +15,21 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dev-null-GmbH/go-oidc/internal/authorize"
+	"github.com/dev-null-GmbH/go-oidc/internal/client"
+	"github.com/dev-null-GmbH/go-oidc/internal/dcr"
+	"github.com/dev-null-GmbH/go-oidc/internal/discovery"
+	"github.com/dev-null-GmbH/go-oidc/internal/federation"
+	"github.com/dev-null-GmbH/go-oidc/internal/logout"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/storage"
+	"github.com/dev-null-GmbH/go-oidc/internal/strutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/token"
+	"github.com/dev-null-GmbH/go-oidc/internal/userinfo"
+	"github.com/dev-null-GmbH/go-oidc/internal/vc"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/google/uuid"
-	"github.com/luikyv/go-oidc/internal/authorize"
-	"github.com/luikyv/go-oidc/internal/client"
-	"github.com/luikyv/go-oidc/internal/dcr"
-	"github.com/luikyv/go-oidc/internal/discovery"
-	"github.com/luikyv/go-oidc/internal/federation"
-	"github.com/luikyv/go-oidc/internal/logout"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/storage"
-	"github.com/luikyv/go-oidc/internal/strutil"
-	"github.com/luikyv/go-oidc/internal/timeutil"
-	"github.com/luikyv/go-oidc/internal/token"
-	"github.com/luikyv/go-oidc/internal/userinfo"
-	"github.com/luikyv/go-oidc/internal/vc"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 type Provider struct {
@@ -92,6 +92,14 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 		}
 	}
 
+	if op.config.ResolveClientFunc != nil && op.config.DCREnabled {
+		return nil, errors.New("client resolver cannot be combined with dynamic client registration")
+	}
+
+	if op.config.ResolveClientFunc != nil && op.config.OpenIDFedEnabled {
+		return nil, errors.New("client resolver cannot be combined with OpenID Federation")
+	}
+
 	if op.config.AuthnMethodDefault != "" && !slices.Contains(op.config.AuthnMethods, op.config.AuthnMethodDefault) {
 		return nil, fmt.Errorf("default authn method %q is not among the enabled authn methods", op.config.AuthnMethodDefault)
 	}
@@ -130,8 +138,30 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 		return nil, errors.New("dcr secret rotation requires a secret-based token authentication method")
 	}
 
-	if op.config.ConsumeJTIFunc == nil {
-		slog.Warn("ConsumeJTIFunc is not configured; JTI replay protection is disabled. Configure provider.WithJTIConsumer for production use.")
+	if op.config.ConsumeJTIFunc != nil && op.config.ConsumeJTIUseFunc != nil {
+		return nil, errors.New("legacy and typed JTI consumers are mutually exclusive")
+	}
+	if op.config.TokenClaimsFunc != nil && op.config.AccessTokenClaimsFunc != nil {
+		return nil, errors.New("legacy and fallible access token claims functions are mutually exclusive")
+	}
+	if op.config.AccessTokenClaimsFunc != nil && op.config.OpaqueTokenEnabled {
+		return nil, errors.New("fallible access token claims cannot be combined with opaque tokens")
+	}
+	if op.config.AccessTokenClaimsFunc != nil &&
+		(len(op.config.GrantTypes) != 1 || op.config.GrantTypes[0] != goidc.GrantClientCredentials) {
+		return nil, errors.New("fallible access token claims require a client_credentials-only provider")
+	}
+	if op.config.OAuthScopesOnly && !op.config.OpenIDConfigurationDisabled {
+		return nil, errors.New("oauth-only scopes require OpenID configuration discovery to be disabled")
+	}
+	if op.config.AccessTokenGrantIDClaimDisabled &&
+		(!op.config.UserInfoDisabled || op.config.TokenIntrospectionEnabled || op.config.TokenRevocationEnabled ||
+			op.config.VCIEnabled) {
+		return nil, errors.New("grant_id cannot be omitted while a grant-dependent token endpoint is enabled")
+	}
+
+	if op.config.ConsumeJTIFunc == nil && op.config.ConsumeJTIUseFunc == nil {
+		slog.Warn("JTI consumer is not configured; JTI replay protection is disabled. Configure provider.WithJTIUseConsumer for production use.")
 	}
 
 	inmemoryManager := storage.NewManager(defaultStorageMaxSize)
@@ -150,7 +180,9 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 	op.config.TokenOptionsFunc = nonZeroOrDefault(op.config.TokenOptionsFunc, defaultTokenOptionsFunc(op.config.IDTokenDefaultSigAlg))
 
 	op.config.VerifyClientSecretFunc = nonZeroOrDefault(op.config.VerifyClientSecretFunc, goidc.VerifyClientSecretFunc(defaultVerifyClientSecretFunc))
-	op.config.ConsumeJTIFunc = nonZeroOrDefault(op.config.ConsumeJTIFunc, goidc.ConsumeJTIFunc(defaultConsumeJTIFunc))
+	if op.config.ConsumeJTIFunc == nil && op.config.ConsumeJTIUseFunc == nil {
+		op.config.ConsumeJTIFunc = defaultConsumeJTIFunc
+	}
 	op.config.HandleErrorFunc = nonZeroOrDefault(op.config.HandleErrorFunc, goidc.HandleErrorFunc(defaultHandleErrorFunc))
 	op.config.HandleGrantFunc = nonZeroOrDefault(op.config.HandleGrantFunc, goidc.HandleGrantFunc(defaultHandleGrantFunc))
 	op.config.HandleTokenFunc = nonZeroOrDefault(op.config.HandleTokenFunc, goidc.HandleTokenFunc(defaultHandleTokenFunc))
@@ -412,34 +444,38 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 			}
 		}
 
-		if op.config.AuthCodeLifetimeSecs > 60 {
-			return nil, errors.New("[FAPI 2.0 5.3.1] authorization code lifetime must be less than 60 seconds")
-		}
+		if slices.Contains(op.config.GrantTypes, goidc.GrantAuthorizationCode) {
+			if slices.ContainsFunc(op.config.ResponseTypes, func(responseType goidc.ResponseType) bool {
+				return responseType != goidc.ResponseTypeCode
+			}) {
+				return nil, errors.New("[FAPI 2.0 5.3.2.2] only the code response type may be enabled")
+			}
 
-		if !slices.Contains(op.config.GrantTypes, goidc.GrantAuthorizationCode) {
-			return nil, errors.New("[FAPI 2.0 5.3.1] authorization_code grant must be required")
-		}
+			if op.config.AuthCodeLifetimeSecs > 60 {
+				return nil, errors.New("[FAPI 2.0 5.3.1] authorization code lifetime must be less than 60 seconds")
+			}
 
-		if !op.config.PARRequired {
-			return nil, errors.New("[FAPI 2.0 5.3.1] pushed authorization request must be required")
-		}
+			if !op.config.PARRequired {
+				return nil, errors.New("[FAPI 2.0 5.3.1] pushed authorization request must be required")
+			}
 
-		if !op.config.PKCERequired {
-			return nil, errors.New("[FAPI 2.0 5.3.1] pkce must be required")
-		}
+			if !op.config.PKCERequired {
+				return nil, errors.New("[FAPI 2.0 5.3.1] pkce must be required")
+			}
 
-		if slices.ContainsFunc(op.config.PKCEChallengeMethods, func(method goidc.CodeChallengeMethod) bool {
-			return method != goidc.CodeChallengeMethodSHA256
-		}) {
-			return nil, errors.New("[FAPI 2.0 5.3.1] only pkce S256 code challenge method must be available")
-		}
+			if slices.ContainsFunc(op.config.PKCEChallengeMethods, func(method goidc.CodeChallengeMethod) bool {
+				return method != goidc.CodeChallengeMethodSHA256
+			}) {
+				return nil, errors.New("[FAPI 2.0 5.3.1] only pkce S256 code challenge method must be available")
+			}
 
-		if !op.config.IssuerRespParamEnabled {
-			return nil, errors.New("[FAPI 2.0 5.3.1] pkce must be enabled")
-		}
+			if !op.config.IssuerRespParamEnabled {
+				return nil, errors.New("[FAPI 2.0 5.3.1] issuer response parameter must be enabled")
+			}
 
-		if op.config.PARLifetimeSecs > 600 {
-			return nil, errors.New("[FAPI 2.0 5.3.1] par request_uri lifetime must be less than 600 seconds")
+			if op.config.PARLifetimeSecs >= 600 {
+				return nil, errors.New("[FAPI 2.0 5.3.1] par request_uri lifetime must be less than 600 seconds")
+			}
 		}
 	}
 
@@ -466,7 +502,9 @@ func (op Provider) RegisterRoutes(mux *http.ServeMux, middlewares ...goidc.Middl
 	discovery.RegisterHandlers(mux, &op.config, middlewares...)
 	token.RegisterHandlers(mux, &op.config, middlewares...)
 	authorize.RegisterHandlers(mux, &op.config, middlewares...)
-	userinfo.RegisterHandlers(mux, &op.config, middlewares...)
+	if !op.config.UserInfoDisabled {
+		userinfo.RegisterHandlers(mux, &op.config, middlewares...)
+	}
 	dcr.RegisterHandlers(mux, &op.config, middlewares...)
 	federation.RegisterHandlers(mux, &op.config, middlewares...)
 	logout.RegisterHandlers(mux, &op.config, middlewares...)
@@ -563,6 +601,12 @@ func (op *Provider) CreatePreAuthCodeGrant(ctx context.Context, grant *goidc.Gra
 // MakeToken generates a new access token based on the provided grant
 // and stores the corresponding grant session and token.
 func (op *Provider) MakeToken(ctx context.Context, grant *goidc.Grant) (string, error) {
+	if grant == nil {
+		return "", errors.New("grant is required")
+	}
+	if op.config.AccessTokenClaimsFunc != nil {
+		return "", errors.New("MakeToken is unavailable with fallible access token claims")
+	}
 	oidcCtx := oidc.NewContext(ctx, &op.config)
 	c := &goidc.Client{ID: grant.ClientID}
 

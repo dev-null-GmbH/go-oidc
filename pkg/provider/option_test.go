@@ -8,12 +8,12 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidctest"
+	"github.com/dev-null-GmbH/go-oidc/internal/storage"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/oidctest"
-	"github.com/luikyv/go-oidc/internal/storage"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 func TestWithPathPrefix(t *testing.T) {
@@ -1533,6 +1533,62 @@ func TestWithDPoPRequired(t *testing.T) {
 	}
 }
 
+func TestWithDPoPStrictHTU(t *testing.T) {
+	// Given.
+	p := &Provider{
+		config: oidc.Configuration{},
+	}
+
+	// When.
+	err := WithDPoP([]goidc.SignatureAlgorithm{goidc.SigAlgPS256}, WithDPoPStrictHTU())(p)
+
+	// Then.
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := &Provider{
+		config: oidc.Configuration{
+			DPoPEnabled:   true,
+			DPoPStrictHTU: true,
+			DPoPSigAlgs:   []goidc.SignatureAlgorithm{goidc.SigAlgPS256},
+		},
+	}
+	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
+		t.Error(diff)
+	}
+}
+
+func TestWithDPoPNonce(t *testing.T) {
+	manager := &dpopNonceManagerStub{}
+	p := &Provider{config: oidc.Configuration{}}
+
+	err := WithDPoP(
+		[]goidc.SignatureAlgorithm{goidc.SigAlgPS256},
+		WithDPoPNonce(manager),
+	)(p)
+
+	if err != nil {
+		t.Fatalf("WithDPoP() error = %v", err)
+	}
+	if p.config.DPoPNonceManager != manager {
+		t.Fatal("DPoPNonceManager was not configured")
+	}
+}
+
+func TestWithDPoPNonceRejectsNilManager(t *testing.T) {
+	p := &Provider{config: oidc.Configuration{}}
+
+	err := WithDPoP(
+		[]goidc.SignatureAlgorithm{goidc.SigAlgPS256},
+		WithDPoPNonce(nil),
+	)(p)
+
+	if err == nil {
+		t.Fatal("WithDPoP() error = nil, want an error")
+	}
+}
+
 func TestWithTokenBindingRequired(t *testing.T) {
 	// Given.
 	p := &Provider{
@@ -1807,6 +1863,35 @@ func TestWithStaticClients(t *testing.T) {
 	}
 }
 
+func TestWithClientResolver(t *testing.T) {
+	p := &Provider{config: oidc.Configuration{}}
+	resolver := func(context.Context, string) (*goidc.Client, error) {
+		return nil, goidc.ErrNotFound
+	}
+
+	err := WithClientResolver(resolver)(p)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if p.config.ResolveClientFunc == nil {
+		t.Fatal("ResolveClientFunc must be set")
+	}
+	if p.config.DCREnabled {
+		t.Fatal("client resolver must not enable DCR")
+	}
+}
+
+func TestWithClientResolver_Nil(t *testing.T) {
+	p := &Provider{config: oidc.Configuration{}}
+
+	err := WithClientResolver(nil)(p)
+
+	if err == nil {
+		t.Fatal("WithClientResolver(nil) error = nil, want non-nil")
+	}
+}
+
 func TestWithAuthPolicies(t *testing.T) {
 	p := &Provider{}
 	policy := goidc.AuthnPolicy{
@@ -1909,6 +1994,92 @@ func TestWithJTIConsumer(t *testing.T) {
 	}
 }
 
+func TestWithJTIUseConsumer(t *testing.T) {
+	p := &Provider{config: oidc.Configuration{}}
+	consumer := func(context.Context, goidc.JTIUse) error { return nil }
+
+	if err := WithJTIUseConsumer(consumer)(p); err != nil {
+		t.Fatalf("WithJTIUseConsumer() error = %v", err)
+	}
+	if p.config.ConsumeJTIUseFunc == nil {
+		t.Fatal("ConsumeJTIUseFunc cannot be nil")
+	}
+	if err := WithJTIUseConsumer(nil)(p); err == nil {
+		t.Fatal("WithJTIUseConsumer(nil) error = nil")
+	}
+}
+
+func TestWithPrivateKeyJWTAssertionPolicy(t *testing.T) {
+	p := &Provider{config: oidc.Configuration{}}
+	policy := func(context.Context, goidc.VerifiedClientAssertion) error { return nil }
+
+	if err := WithPrivateKeyJWTAssertionPolicy(policy)(p); err != nil {
+		t.Fatalf("WithPrivateKeyJWTAssertionPolicy() error = %v", err)
+	}
+	if p.config.PrivateKeyJWTAssertionPolicyFunc == nil {
+		t.Fatal("PrivateKeyJWTAssertionPolicyFunc cannot be nil")
+	}
+	if err := WithPrivateKeyJWTAssertionPolicy(nil)(p); err == nil {
+		t.Fatal("WithPrivateKeyJWTAssertionPolicy(nil) error = nil")
+	}
+}
+
+func TestWithTokenEndpointEvidence(t *testing.T) {
+	p := &Provider{config: oidc.Configuration{}}
+	callback := func(context.Context, goidc.TokenEndpointEvidence) {}
+
+	if err := WithTokenEndpointEvidence(callback)(p); err != nil {
+		t.Fatalf("WithTokenEndpointEvidence() error = %v", err)
+	}
+	if p.config.TokenEndpointEvidenceFunc == nil {
+		t.Fatal("TokenEndpointEvidenceFunc cannot be nil")
+	}
+	if err := WithTokenEndpointEvidence(nil)(p); err == nil {
+		t.Fatal("WithTokenEndpointEvidence(nil) error = nil")
+	}
+}
+
+func TestWithAccessTokenClaims(t *testing.T) {
+	p := &Provider{config: oidc.Configuration{}}
+	claims := func(context.Context, goidc.AccessTokenClaimsInput) (map[string]any, error) {
+		return nil, nil
+	}
+
+	if err := WithAccessTokenClaims(claims)(p); err != nil {
+		t.Fatalf("WithAccessTokenClaims() error = %v", err)
+	}
+	if p.config.AccessTokenClaimsFunc == nil {
+		t.Fatal("AccessTokenClaimsFunc cannot be nil")
+	}
+}
+
+func TestWithAccessTokenGrantIDClaim(t *testing.T) {
+	p := &Provider{config: oidc.Configuration{}}
+
+	if err := WithAccessTokenGrantIDClaim(false)(p); err != nil {
+		t.Fatalf("WithAccessTokenGrantIDClaim() error = %v", err)
+	}
+	if !p.config.AccessTokenGrantIDClaimDisabled {
+		t.Fatal("AccessTokenGrantIDClaimDisabled = false, want true")
+	}
+	if err := WithAccessTokenGrantIDClaim(true)(p); err != nil {
+		t.Fatalf("WithAccessTokenGrantIDClaim() error = %v", err)
+	}
+	if p.config.AccessTokenGrantIDClaimDisabled {
+		t.Fatal("AccessTokenGrantIDClaimDisabled = true, want false")
+	}
+}
+
+func TestWithoutUserInfo(t *testing.T) {
+	p := &Provider{config: oidc.Configuration{}}
+	if err := WithoutUserInfo()(p); err != nil {
+		t.Fatalf("WithoutUserInfo() error = %v", err)
+	}
+	if !p.config.UserInfoDisabled {
+		t.Fatal("UserInfoDisabled = false, want true")
+	}
+}
+
 func TestWithResourceIndicators(t *testing.T) {
 	// Given.
 	p := &Provider{
@@ -1931,6 +2102,17 @@ func TestWithResourceIndicators(t *testing.T) {
 	}
 	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
 		t.Error(diff)
+	}
+}
+
+func TestWithResourceIndicatorsRejectsInvalidAbsoluteURIs(t *testing.T) {
+	for _, resource := range []string{"", "/relative", "https://resource.com/path#fragment"} {
+		t.Run(resource, func(t *testing.T) {
+			p := &Provider{config: oidc.Configuration{}}
+			if err := WithResourceIndicators([]string{resource})(p); err == nil {
+				t.Fatalf("WithResourceIndicators(%q) error = nil, want invalid resource", resource)
+			}
+		})
 	}
 }
 
@@ -3268,4 +3450,14 @@ func TestWithScopes_OpenIDScopeAlreadyPresent(t *testing.T) {
 	if openIDCount != 1 {
 		t.Errorf("expected 1 openid scope, got %d", openIDCount)
 	}
+}
+
+type dpopNonceManagerStub struct{}
+
+func (*dpopNonceManagerStub) IssueNonce(context.Context, goidc.DPoPNonceScope) (string, error) {
+	return "nonce", nil
+}
+
+func (*dpopNonceManagerStub) ValidateNonce(context.Context, goidc.DPoPNonceScope, string) (goidc.DPoPNonceValidation, error) {
+	return goidc.DPoPNonceValidation{}, nil
 }

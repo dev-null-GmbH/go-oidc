@@ -15,12 +15,12 @@ import (
 	"slices"
 	"time"
 
+	"github.com/dev-null-GmbH/go-oidc/internal/dpop"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
-	"github.com/luikyv/go-oidc/internal/dpop"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/timeutil"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 const (
@@ -145,14 +145,51 @@ func Authenticated(ctx oidc.Context, authnCtx AuthnContext) (*goidc.Client, erro
 		if errors.Is(err, goidc.ErrNotFound) {
 			return nil, goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client", err)
 		}
-		return nil, fmt.Errorf("could not load the client: %w", err)
+		return nil, clientResolutionServerError(err)
 	}
 
 	if err := Authenticate(ctx, c, authnCtx); err != nil {
+		if isClientAuthenticationServerError(err) {
+			return nil, err
+		}
 		return nil, goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client", err)
+	}
+	if authnCtx == AuthnContextToken && c.TokenAuthnMethod != goidc.AuthnMethodNone &&
+		!UsesAttestationDPoP(ctx, c) {
+		ctx.MarkTokenEndpointClientAuthenticated(c.ID)
 	}
 
 	return c, nil
+}
+
+// UsesAttestationDPoP reports whether the request uses a DPoP proof in place
+// of the dedicated attestation PoP JWT. Callers must only rely on this after
+// attestation authentication has otherwise succeeded.
+func UsesAttestationDPoP(ctx oidc.Context, c *goidc.Client) bool {
+	if c == nil || c.TokenAuthnMethod != goidc.AuthnMethodAttestationJWT {
+		return false
+	}
+	if len(ctx.Request.Header[http.CanonicalHeaderKey(headerAttestionPoP)]) != 0 {
+		return false
+	}
+	_, ok := dpop.JWT(ctx)
+	return ok
+}
+
+type clientResolutionError struct {
+	cause error
+}
+
+func (clientResolutionError) Error() string { return "client resolution failed" }
+
+func (err clientResolutionError) Unwrap() error { return err.cause }
+
+func clientResolutionServerError(cause error) error {
+	return goidc.WrapError(
+		goidc.ErrorCodeServerError,
+		"server error",
+		clientResolutionError{cause: cause},
+	)
 }
 
 func Authenticate(ctx oidc.Context, c *goidc.Client, authnCtx AuthnContext) error {
@@ -258,11 +295,39 @@ func authenticatePrivateKeyJWT(ctx oidc.Context, c *goidc.Client, authnCtx Authn
 	}
 
 	claims := jwt.Claims{}
-	if err := parsedAssertion.Claims(jwk.Key, &claims); err != nil {
+	var rawClaims json.RawMessage
+	if err := parsedAssertion.Claims(jwk.Key, &claims, &rawClaims); err != nil {
 		return goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client", err)
 	}
 
-	return areClaimsValid(ctx, claims, c, authnCtx)
+	if err := areClaimsValid(ctx, claims, c, authnCtx); err != nil {
+		return err
+	}
+
+	header := parsedAssertion.Headers[0]
+	typ, _ := header.ExtraHeaders[jose.HeaderType].(string)
+	if err := ctx.ApplyPrivateKeyJWTAssertionPolicy(goidc.VerifiedClientAssertion{
+		AuthenticatedClientID: c.ID,
+		Header: goidc.VerifiedClientAssertionHeader{
+			Algorithm: goidc.SignatureAlgorithm(header.Algorithm),
+			KeyID:     header.KeyID,
+			Type:      typ,
+		},
+		Claims: rawClaims,
+	}); err != nil {
+		if isClientAuthenticationServerError(err) {
+			return err
+		}
+		return goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client", err)
+	}
+
+	return consumeClientAssertionJTI(ctx, c, claims, authnCtx)
+}
+
+func isClientAuthenticationServerError(err error) bool {
+	var oidcErr goidc.Error
+	return errors.As(err, &oidcErr) &&
+		(oidcErr.Code == goidc.ErrorCodeServerError || oidcErr.Code == goidc.ErrorCodeInternalError)
 }
 
 func JWKMatchingHeader(ctx oidc.Context, c *goidc.Client, header jose.Header) (goidc.JSONWebKey, error) {
@@ -306,7 +371,7 @@ func authenticateSecretJWT(ctx oidc.Context, c *goidc.Client, authnCtx AuthnCont
 		return err
 	}
 
-	return nil
+	return consumeClientAssertionJTI(ctx, c, claims, authnCtx)
 }
 
 func authnSigAlgs(c *goidc.Client, authnCtx AuthnContext, algs []goidc.SignatureAlgorithm) []goidc.SignatureAlgorithm {
@@ -357,10 +422,6 @@ func areClaimsValid(ctx oidc.Context, claims jwt.Claims, client *goidc.Client, _
 			errors.New("the audience claim is invalid"))
 	}
 
-	if err := ctx.ConsumeJTI(claims.ID); err != nil && !errors.Is(err, goidc.ErrNotFound) {
-		return goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client", err)
-	}
-
 	secsToExpiry := int(claims.Expiry.Time().Sub(timeutil.Now()).Seconds())
 	if secsToExpiry > ctx.JWTLifetimeSecs {
 		return goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client",
@@ -384,6 +445,23 @@ func areClaimsValid(ctx oidc.Context, claims jwt.Claims, client *goidc.Client, _
 		return goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client", err)
 	}
 	return nil
+}
+
+func consumeClientAssertionJTI(
+	ctx oidc.Context,
+	c *goidc.Client,
+	claims jwt.Claims,
+	authnCtx AuthnContext,
+) error {
+	if authnCtx == AuthnContextToken {
+		ctx.MarkTokenEndpointClientAuthenticated(c.ID)
+	}
+	return ctx.ReserveJTI(goidc.JTIUse{
+		ID:        claims.ID,
+		Issuer:    claims.Issuer,
+		Purpose:   goidc.JTIUsePurposeClientAssertion,
+		ExpiresAt: claims.Expiry.Time().Add(time.Duration(ctx.JWTLeewayTimeSecs) * time.Second),
+	}, goidc.ErrorCodeInvalidClient, "invalid client")
 }
 
 func authenticateSelfSignedTLSCert(ctx oidc.Context, c *goidc.Client) error {
@@ -703,10 +781,6 @@ func authenticateAttestationJWT(ctx oidc.Context, c *goidc.Client, authnCtx Auth
 			errors.New("the jti claim is required in the attestation PoP"))
 	}
 
-	if err := ctx.ConsumeJTI(popClaims.ID); err != nil && !errors.Is(err, goidc.ErrNotFound) {
-		return goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client", err)
-	}
-
 	if err := popClaims.ValidateWithLeeway(jwt.Expected{
 		Issuer:      c.ID,
 		AnyAudience: []string{ctx.Issuer()},
@@ -714,7 +788,15 @@ func authenticateAttestationJWT(ctx oidc.Context, c *goidc.Client, authnCtx Auth
 		return goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client", err)
 	}
 
-	return nil
+	if authnCtx == AuthnContextToken {
+		ctx.MarkTokenEndpointClientAuthenticated(c.ID)
+	}
+	return ctx.ReserveJTI(goidc.JTIUse{
+		ID:        popClaims.ID,
+		Issuer:    popClaims.Issuer,
+		Purpose:   goidc.JTIUsePurposeClientAttestationPoP,
+		ExpiresAt: popClaims.Expiry.Time().Add(time.Duration(ctx.JWTLeewayTimeSecs) * time.Second),
+	}, goidc.ErrorCodeInvalidClient, "invalid client")
 }
 
 func comparePublicKeys(k1 any, k2 any) bool {

@@ -1,126 +1,340 @@
 name: Conformance Suite Tests
+
 on:
-    push:
-      branches: [main]
-    pull_request:
-      branches: [main]
-    workflow_dispatch:  # Allow manual triggering of this workflow.
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CS_VERSION: release-v5.2.2
+  CS_COMMIT: 321bc5bc53601b9690b54c023c0cbfac0f0230f2
+  CS_CACHE_SCHEMA: v3-dependencies-only
+  CS_MAVEN_IMAGE: maven:3.9.16-eclipse-temurin-21@sha256:c07f7ccfb8ca6c9fa29ee523f00afa7d2ca6132c92f8652c4aebb5ee3491f502
+  PYTHON_VERSION: "3.14.6"
 
 jobs:
+  prepare-suite:
+    name: Prime conformance dependency cache
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Verify immutable conformance inputs
+        run: |
+          ./scripts/verify-action-pins.sh
+          ./scripts/verify-conformance-pin.sh
+
+      - name: Initialize dependency cache paths
+        shell: bash
+        run: |
+          printf 'MAVEN_CACHE_DIR=%s\n' \
+            "$RUNNER_TEMP/conformance-maven-repository" >> "$GITHUB_ENV"
+          printf 'PIP_CACHE_DIR=%s\n' \
+            "$RUNNER_TEMP/conformance-pip-cache" >> "$GITHUB_ENV"
+
+      - name: Cache immutable dependency downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.MAVEN_CACHE_DIR }}
+            ${{ env.PIP_CACHE_DIR }}
+          key: ${{ runner.os }}-conformance-${{ env.CS_CACHE_SCHEMA }}-${{ env.CS_COMMIT }}-python-${{ env.PYTHON_VERSION }}-${{ hashFiles('scripts/conformance-requirements.lock', 'scripts/prepare-conformance-suite.sh', 'docker-compose.yml', 'Makefile') }}
+
+      - name: Pull pinned Maven image with bounded retry
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4; do
+            if timeout --kill-after=10s 120s docker pull "$CS_MAVEN_IMAGE"; then
+              break
+            fi
+            if (( attempt == 4 )); then
+              echo "Unable to pull the pinned Maven image after 4 attempts" >&2
+              exit 1
+            fi
+            retry_delay=$((attempt * 5 + RANDOM % 5))
+            printf 'Pinned Maven image pull failed; retrying in %s seconds\n' \
+              "$retry_delay" >&2
+            sleep "$retry_delay"
+          done
+
+      - name: Build from a fresh exact conformance checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -e conformance-suite ]]; then
+            echo "conformance-suite must not be restored from cache" >&2
+            exit 1
+          fi
+          git init --quiet conformance-suite
+          git -C conformance-suite remote add origin \
+            https://gitlab.com/openid/conformance-suite.git
+          git -C conformance-suite fetch --quiet --depth=1 origin "$CS_COMMIT"
+          git -C conformance-suite checkout --quiet --detach "$CS_COMMIT"
+
+          ./scripts/prepare-conformance-suite.sh conformance-suite
+
+          mkdir -p "$MAVEN_CACHE_DIR"
+          docker run --rm --pull=never \
+            --mount "type=bind,src=$PWD/conformance-suite,dst=/usr/src/mymaven" \
+            --mount "type=bind,src=$MAVEN_CACHE_DIR,dst=/root/.m2/repository" \
+            --workdir /usr/src/mymaven \
+            "$CS_MAVEN_IMAGE" \
+            mvn -B clean package -DskipTests=true
+
+      - name: Verify prepared conformance suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_commit="$(git -C conformance-suite rev-parse HEAD)"
+          if [[ "$actual_commit" != "$CS_COMMIT" ]]; then
+            printf 'Expected conformance suite %s (%s), got %s\n' \
+              "$CS_VERSION" "$CS_COMMIT" "$actual_commit" >&2
+            exit 1
+          fi
+          ./scripts/prepare-conformance-suite.sh conformance-suite
+          test -s conformance-suite/target/fapi-test-suite.jar
 
   run-tests:
-    runs-on: ubuntu-latest
-    env:
-      CS_VERSION: "v5.1.45"
+    name: ${{ matrix.profile }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    needs: prepare-suite
 
     strategy:
       fail-fast: false
       matrix:
-        profile: [
-          oidc,
-          fapi2-sp-op-mtls-mtls,
-          fapi2-sp-op-mtls-dpop,
-          fapi2-sp-op-private-key-mtls,
-          fapi2-ms-op-jar,
-          fapi2-ms-op-jarm,
-          fapi2-sp-op-private-key-dpop,
-          fapi1-op-mtls,
-          fapi1-op-mtls-jarm,
-          fapi1-op-mtls-par,
-          fapi1-op-mtls-par-jarm,
-          fapi1-op-private-key,
-          fapi1-op-private-key-jarm,
-          fapi1-op-private-key-par,
-          fapi1-op-private-key-par-jarm,
-          fapiciba,
-          federation,
-        ]
+        profile:
+          - oidc
+          - fapi2-sp-op-mtls-mtls
+          - fapi2-sp-op-mtls-dpop
+          - fapi2-sp-op-private-key-mtls
+          - fapi2-ms-op-jar
+          - fapi2-ms-op-jarm
+          - fapi2-sp-op-private-key-dpop
+          - fapi1-op-mtls
+          - fapi1-op-mtls-jarm
+          - fapi1-op-mtls-par
+          - fapi1-op-mtls-par-jarm
+          - fapi1-op-private-key
+          - fapi1-op-private-key-jarm
+          - fapi1-op-private-key-par
+          - fapi1-op-private-key-par-jarm
+          - fapiciba
+          - federation
 
     steps:
-        - uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-        - uses: actions/setup-go@v4
-          with:
-            go-version: '1.24.x'
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
 
-        - uses: actions/setup-python@v4
-          with:
-            python-version: '3.x'
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
 
-        - name: Set Up Dependencies
-          run: |
-            echo "Downloading Go dependencies"
-            go mod download
+      - name: Initialize dependency cache paths
+        shell: bash
+        run: |
+          printf 'MAVEN_CACHE_DIR=%s\n' \
+            "$RUNNER_TEMP/conformance-maven-repository" >> "$GITHUB_ENV"
+          printf 'PIP_CACHE_DIR=%s\n' \
+            "$RUNNER_TEMP/conformance-pip-cache" >> "$GITHUB_ENV"
 
-            profile="${{ matrix.profile }}"
-            profile="${profile//-/_}"
-            echo "PROFILE_FOLDER=$profile" >> $GITHUB_ENV
+      - name: Prepare Go dependencies
+        env:
+          PROFILE: ${{ matrix.profile }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod download
+          profile_folder="${PROFILE//-/_}"
+          printf 'PROFILE_FOLDER=%s\n' "$profile_folder" >> "$GITHUB_ENV"
 
-        - name: Cache Conformance Suite Repository
-          uses: actions/cache@v3
-          id: cache-cs
-          with:
-            path: ./conformance-suite
-            key: cs-${{ env.CS_VERSION }}
+      - name: Restore immutable dependency downloads
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.MAVEN_CACHE_DIR }}
+            ${{ env.PIP_CACHE_DIR }}
+          key: ${{ runner.os }}-conformance-${{ env.CS_CACHE_SCHEMA }}-${{ env.CS_COMMIT }}-python-${{ env.PYTHON_VERSION }}-${{ hashFiles('scripts/conformance-requirements.lock', 'scripts/prepare-conformance-suite.sh', 'docker-compose.yml', 'Makefile') }}
+          fail-on-cache-miss: true
 
-        - name: Set Up Conformance Suite
-          if: steps.cache-cs.outputs.cache-hit != 'true'
-          run: |
-            git clone --branch "release-$CS_VERSION" --single-branch --depth=1 https://gitlab.com/openid/conformance-suite.git
-            docker run --rm -v ./conformance-suite:/usr/src/mymaven -w /usr/src/mymaven maven:3-eclipse-temurin-21 mvn -B clean package -DskipTests=true
+      - name: Pull pinned Maven image with bounded retry
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4; do
+            if timeout --kill-after=10s 120s docker pull "$CS_MAVEN_IMAGE"; then
+              break
+            fi
+            if (( attempt == 4 )); then
+              echo "Unable to pull the pinned Maven image after 4 attempts" >&2
+              exit 1
+            fi
+            retry_delay=$((attempt * 5 + RANDOM % 5))
+            printf 'Pinned Maven image pull failed; retrying in %s seconds\n' \
+              "$retry_delay" >&2
+            sleep "$retry_delay"
+          done
 
-            python3 -m venv conformance-suite/venv
-            conformance-suite/venv/bin/pip install -r conformance-suite/scripts/requirements.txt
+      - name: Build from a fresh exact conformance checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -e conformance-suite ]]; then
+            echo "conformance-suite must not be restored from cache" >&2
+            exit 1
+          fi
+          git init --quiet conformance-suite
+          git -C conformance-suite remote add origin \
+            https://gitlab.com/openid/conformance-suite.git
+          git -C conformance-suite fetch --quiet --depth=1 origin "$CS_COMMIT"
+          git -C conformance-suite checkout --quiet --detach "$CS_COMMIT"
 
-        - name: Run Conformance Suite
-          id: cs-server
-          run: |
-            docker compose up -d
-            echo "Wait for the conformance suite to be ready"
-            timeout 60 bash -c '
-            while [ "$(curl -skf -o /dev/null -w ''%{http_code}'' https://localhost:8443/api/runner/available)" != "200" ]; do
-              echo "Conformance suite not ready, sleeping for 2 seconds"
+          actual_commit="$(git -C conformance-suite rev-parse HEAD)"
+          if [[ "$actual_commit" != "$CS_COMMIT" ]]; then
+            printf 'Expected conformance suite %s (%s), got %s\n' \
+              "$CS_VERSION" "$CS_COMMIT" "$actual_commit" >&2
+            exit 1
+          fi
+          ./scripts/prepare-conformance-suite.sh conformance-suite
+
+          mkdir -p "$MAVEN_CACHE_DIR"
+          docker run --rm --pull=never \
+            --mount "type=bind,src=$PWD/conformance-suite,dst=/usr/src/mymaven" \
+            --mount "type=bind,src=$MAVEN_CACHE_DIR,dst=/root/.m2/repository" \
+            --workdir /usr/src/mymaven \
+            "$CS_MAVEN_IMAGE" \
+            mvn -B clean package -DskipTests=true
+          test -s conformance-suite/target/fapi-test-suite.jar
+
+      - name: Generate ephemeral conformance TLS fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/generate-conformance-certificates.sh
+
+      - name: Start conformance suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose up --build --detach
+
+          if ! timeout 120 bash -c '
+            until curl --silent --show-error --fail --insecure \
+              --output /dev/null \
+              https://localhost:8443/api/runner/available; do
               sleep 2
             done
-            echo "Conformance suite is ready"
-            ' || {
-              echo "Timeout reached before the conformance suite is ready"
-              exit 1
-            }
+          '; then
+            echo "Conformance suite did not become ready" >&2
+            docker compose logs
+            exit 1
+          fi
 
-        - name: Start Auth Server
-          run: |
-            echo "Run the server on background"
+      - name: Start authorization server
+        shell: bash
+        run: |
+          set -euo pipefail
+          go_binary="$(go env GOROOT)/bin/go"
+          sudo "$go_binary" run \
+            "examples/${PROFILE_FOLDER}/main.go" \
+            > "$RUNNER_TEMP/auth-server.log" 2>&1 &
+          printf '%s\n' "$!" > "$RUNNER_TEMP/auth-server.pid"
 
-            sudo go run examples/${{ env.PROFILE_FOLDER }}/main.go &
+          if ! timeout 120 bash -c '
+            until curl --silent --show-error --fail --insecure \
+              --output /dev/null \
+              https://auth.localhost/.well-known/openid-configuration; do
+              sleep 2
+            done
+          '; then
+            echo "Authorization server did not become ready" >&2
+            sed -n '1,240p' "$RUNNER_TEMP/auth-server.log"
+            exit 1
+          fi
 
-            echo "Waiting for the auth server to be ready"
-            timeout 60 bash -c '
-              while [ "$(curl -skf -o /dev/null -w "%{http_code}" https://auth.localhost/.well-known/openid-configuration)" != "200" ]; do
-                echo "Auth server not ready, sleeping for 2 seconds"
-                sleep 2
-              done
-              echo "Auth server is ready"
-            ' || {
-                echo "Timeout reached before the auth server was ready"
-                exit 1
-            }
+      - name: Run tests
+        run: make "cs-${{ matrix.profile }}-tests"
 
-        - name: Run Tests
-          run: |
-            make cs-${{ matrix.profile }}-tests
+      - name: Verify retained conformance outputs
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          exports=("examples/${PROFILE_FOLDER}"/*.zip)
+          if (( ${#exports[@]} == 0 )); then
+            echo "Conformance run produced no signed export archives" >&2
+            exit 1
+          fi
+          for export_archive in "${exports[@]}"; do
+            unzip -tq "$export_archive" >/dev/null
+          done
+          test -s "$RUNNER_TEMP/auth-server.log"
 
-        - name: Upload Test Logs
-          uses: actions/upload-artifact@v4
-          if: always()
-          with:
-            name: ${{ matrix.profile }}
-            path: examples/${{ env.PROFILE_FOLDER }}/*.zip
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: conformance-${{ matrix.profile }}-${{ github.run_id }}
+          path: |
+            examples/${{ env.PROFILE_FOLDER }}/*.zip
+            ${{ runner.temp }}/auth-server.log
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Stop test services
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/auth-server.pid" ]]; then
+            IFS= read -r auth_server_pid < "$RUNNER_TEMP/auth-server.pid"
+            sudo kill "$auth_server_pid" 2>/dev/null || true
+          fi
+          docker compose down --volumes --remove-orphans
 
   all-tests-succeeded:
-    runs-on: ubuntu-latest
+    name: All conformance profiles passed
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     needs: run-tests
-    if: success()
+    if: always()
     steps:
-      - name: Test plans passed
-        run: echo "All test plans passed successfully!"
+      - name: Check matrix result
+        env:
+          MATRIX_RESULT: ${{ needs.run-tests.result }}
+        shell: bash
+        run: |
+          if [[ "$MATRIX_RESULT" != "success" ]]; then
+            echo "At least one conformance profile failed" >&2
+            exit 1
+          fi
+          echo "All conformance profiles passed"

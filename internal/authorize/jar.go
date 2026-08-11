@@ -8,12 +8,12 @@ import (
 	"slices"
 	"time"
 
+	"github.com/dev-null-GmbH/go-oidc/internal/client"
+	"github.com/dev-null-GmbH/go-oidc/internal/joseutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/go-jose/go-jose/v4/jwt"
-	"github.com/luikyv/go-oidc/internal/client"
-	"github.com/luikyv/go-oidc/internal/joseutil"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/timeutil"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 const (
@@ -157,13 +157,6 @@ func jarFromRequestObject(ctx oidc.Context, reqObject string, c *goidc.Client, o
 		}
 	}
 
-	if claims.ID != "" {
-		if err := ctx.ConsumeJTI(claims.ID); err != nil && !errors.Is(err, goidc.ErrNotFound) {
-			return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequestObject, "invalid request object",
-				fmt.Errorf("could not validate the request object jti: %w", err))
-		}
-	}
-
 	if claims.Subject != "" {
 		return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequestObject, "invalid request object",
 			errors.New("claim 'sub' is not allowed in the request object"))
@@ -174,6 +167,21 @@ func jarFromRequestObject(ctx oidc.Context, reqObject string, c *goidc.Client, o
 		AnyAudience: []string{ctx.Issuer()},
 	}, time.Duration(ctx.JWTLeewayTimeSecs)*time.Second); err != nil {
 		return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequestObject, "the request object contains invalid claims", err)
+	}
+
+	if claims.ID != "" {
+		var expiresAt time.Time
+		if claims.Expiry != nil {
+			expiresAt = claims.Expiry.Time().Add(time.Duration(ctx.JWTLeewayTimeSecs) * time.Second)
+		}
+		if err := ctx.ReserveJTI(goidc.JTIUse{
+			ID:        claims.ID,
+			Issuer:    claims.Issuer,
+			Purpose:   goidc.JTIUsePurposeRequestObject,
+			ExpiresAt: expiresAt,
+		}, goidc.ErrorCodeInvalidRequestObject, "invalid request object"); err != nil {
+			return request{}, err
+		}
 	}
 
 	return jarReq, nil

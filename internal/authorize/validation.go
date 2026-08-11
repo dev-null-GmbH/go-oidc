@@ -8,13 +8,13 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/luikyv/go-oidc/internal/dpop"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/strutil"
-	"github.com/luikyv/go-oidc/internal/timeutil"
-	"github.com/luikyv/go-oidc/internal/token"
-	vcutil "github.com/luikyv/go-oidc/internal/vc/util"
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/dpop"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/strutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/token"
+	vcutil "github.com/dev-null-GmbH/go-oidc/internal/vc/util"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 // validateRequest validates the parameters sent in an authorization request.
@@ -563,6 +563,7 @@ func validateCodeBindingDPoP(ctx oidc.Context, params goidc.AuthorizationParamet
 	return dpop.ValidateJWT(ctx, dpopJWT, dpop.ValidationOptions{
 		// "dpop_jkt" is optional, but it must match the DPoP JWT if present.
 		JWKThumbprint: params.DPoPJKT,
+		NonceScope:    goidc.DPoPNonceScopeAuthorizationServer,
 	})
 }
 

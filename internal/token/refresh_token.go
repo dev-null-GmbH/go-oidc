@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/luikyv/go-oidc/internal/client"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/strutil"
-	"github.com/luikyv/go-oidc/internal/timeutil"
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/client"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/strutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 func generateRefreshToken(ctx oidc.Context, req request) (response, error) {
@@ -137,10 +137,11 @@ func validateRefreshTokenBinding(ctx oidc.Context, c *goidc.Client, cnf goidc.To
 	}
 
 	// If the refresh token was issued with DPoP, make sure the following token is bound with DPoP as well.
-	if cnf.JWKThumbprint != "" {
+	// Combined attestation authentication must also validate its DPoP proof even
+	// when the existing grant is unbound.
+	if cnf.JWKThumbprint != "" || client.UsesAttestationDPoP(ctx, c) {
 		// Note that a DPoP JWT for a different key can be used to bind the token.
-		opts := bindindValidationOptions{}
-		opts.dpopRequired = true
+		opts := bindindValidationOptions{dpopRequired: true}
 		if err := validateBindingDPoP(ctx, c, opts); err != nil {
 			return err
 		}
@@ -168,5 +169,5 @@ func validateRefreshTokenPoP(ctx oidc.Context, c *goidc.Client, cnf goidc.TokenC
 		return nil
 	}
 
-	return ValidatePoP(ctx, "", cnf)
+	return validatePoP(ctx, "", cnf, goidc.DPoPNonceScopeAuthorizationServer)
 }

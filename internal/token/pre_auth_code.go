@@ -6,11 +6,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/luikyv/go-oidc/internal/client"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/timeutil"
-	vcutil "github.com/luikyv/go-oidc/internal/vc/util"
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/client"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
+	vcutil "github.com/dev-null-GmbH/go-oidc/internal/vc/util"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 func generatePreAuthCodeToken(ctx oidc.Context, req request) (response, error) {
@@ -48,10 +48,6 @@ func generatePreAuthCodeToken(ctx oidc.Context, req request) (response, error) {
 
 	if !slices.Contains(c.GrantTypes, goidc.GrantPreAuthorizedCode) {
 		return response{}, goidc.WrapError(goidc.ErrorCodeUnauthorizedClient, "unauthorized client", errors.New("the client is not allowed to use the urn:ietf:params:oauth:grant-type:pre-authorized_code grant type"))
-	}
-
-	if err := ValidateBinding(ctx, c, nil); err != nil {
-		return response{}, err
 	}
 
 	if err := validateScopes(ctx, req, c, nil); err != nil {
@@ -135,6 +131,9 @@ func generatePreAuthCodeToken(ctx oidc.Context, req request) (response, error) {
 		if !ctx.VCIExternalPreAuthCodeGrantEnabled {
 			return response{}, goidc.WrapError(goidc.ErrorCodeInvalidGrant, "invalid grant",
 				errors.New("external credential issuers do not support the pre-authorized code grant"))
+		}
+		if err := ValidateBinding(ctx, c, nil); err != nil {
+			return response{}, err
 		}
 
 		opts := goidc.VCPreAuthCodeOptions{

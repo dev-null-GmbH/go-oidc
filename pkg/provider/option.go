@@ -3,10 +3,11 @@ package provider
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"slices"
 	"strings"
 
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 type Option func(p *Provider) error
@@ -100,6 +101,16 @@ func WithUserInfoEndpoint(endpoint string) Option {
 	}
 }
 
+// WithoutUserInfo disables registration and metadata advertisement of the
+// UserInfo endpoint. This is intended for OAuth-only deployments that do not
+// issue OpenID ID tokens.
+func WithoutUserInfo() Option {
+	return func(p *Provider) error {
+		p.config.UserInfoDisabled = true
+		return nil
+	}
+}
+
 // WithTokenIntrospectionEndpoint overrides the default value for the introspection
 // endpoint which is [defaultEndpointTokenIntrospection].
 // To enable token introspection, see [WithTokenIntrospection].
@@ -142,6 +153,20 @@ func WithErrorHandler(f goidc.HandleErrorFunc) Option {
 	}
 }
 
+// WithTokenEndpointEvidence configures a bounded observer invoked exactly once
+// after each token endpoint response is selected. It receives only a closed
+// result and a snapshotted authenticated client ID. Callback panics are
+// contained and cannot alter protocol behavior.
+func WithTokenEndpointEvidence(f goidc.TokenEndpointEvidenceFunc) Option {
+	return func(p *Provider) error {
+		if f == nil {
+			return errors.New("token endpoint evidence function cannot be nil")
+		}
+		p.config.TokenEndpointEvidenceFunc = f
+		return nil
+	}
+}
+
 // WithErrorURI sets the URI that will be included in error responses to
 // provide additional information about the error.
 func WithErrorURI(uri string) Option {
@@ -168,13 +193,26 @@ func WithJWTLeewayTime(secs int) Option {
 	}
 }
 
-// WithJTIConsumer registers a function to validate JWT IDs (JTI) during JWT
-// processing.
+// WithJTIConsumer registers the legacy function to validate JWT IDs (JTI)
+// during JWT processing. It cannot be combined with WithJTIUseConsumer.
 // This function is used to prevent replay attacks by ensuring that each JTI is
 // unique and not reused.
 func WithJTIConsumer(f goidc.ConsumeJTIFunc) Option {
 	return func(p *Provider) error {
 		p.config.ConsumeJTIFunc = f
+		return nil
+	}
+}
+
+// WithJTIUseConsumer registers a typed, atomic JWT ID consumer. Unlike the
+// legacy JTI consumer, operational errors are distinguished from ErrJTIReplay.
+// It cannot be combined with WithJTIConsumer.
+func WithJTIUseConsumer(f goidc.ConsumeJTIUseFunc) Option {
+	return func(p *Provider) error {
+		if f == nil {
+			return errors.New("typed JTI consumer cannot be nil")
+		}
+		p.config.ConsumeJTIUseFunc = f
 		return nil
 	}
 }
@@ -300,6 +338,32 @@ func WithTokenClaims(f goidc.TokenClaimsFunc) Option {
 	}
 }
 
+// WithAccessTokenClaims configures a fallible, client-aware additional-claims
+// projection for JWT access tokens. For newly created client_credentials
+// grants it runs after grant validation and before grant persistence and
+// signing. Engine-owned claims cannot be returned by the callback.
+//
+// This option and [WithTokenClaims] are mutually exclusive.
+func WithAccessTokenClaims(f goidc.AccessTokenClaimsFunc) Option {
+	return func(p *Provider) error {
+		if f == nil {
+			return errors.New("access token claims function cannot be nil")
+		}
+		p.config.AccessTokenClaimsFunc = f
+		return nil
+	}
+}
+
+// WithAccessTokenGrantIDClaim controls whether grant_id is serialized in JWT
+// access tokens. The default is true for compatibility. Disabling the claim
+// does not remove the provider's internal token-to-grant association.
+func WithAccessTokenGrantIDClaim(enabled bool) Option {
+	return func(p *Provider) error {
+		p.config.AccessTokenGrantIDClaimDisabled = !enabled
+		return nil
+	}
+}
+
 // ── Subject Identifiers ───────────────────────────────────────────────────────
 
 // SubjectIdentifierOption is an option for [WithSubjectIdentifiers].
@@ -389,6 +453,19 @@ func WithPrivateKeyJWTAuthn(algs ...goidc.SignatureAlgorithm) Option {
 		}
 		p.config.AuthnMethods = append(p.config.AuthnMethods, goidc.AuthnMethodPrivateKeyJWT)
 		p.config.AuthnMethodPrivateKeyJWTSigAlgs = algs
+		return nil
+	}
+}
+
+// WithPrivateKeyJWTAssertionPolicy registers deployment-specific validation
+// that runs after a private_key_jwt assertion signature is verified and before
+// its JTI is consumed.
+func WithPrivateKeyJWTAssertionPolicy(f goidc.PrivateKeyJWTAssertionPolicyFunc) Option {
+	return func(p *Provider) error {
+		if f == nil {
+			return errors.New("private_key_jwt assertion policy cannot be nil")
+		}
+		p.config.PrivateKeyJWTAssertionPolicyFunc = f
 		return nil
 	}
 }
@@ -1569,6 +1646,29 @@ func WithDPoPRequired() DPoPOption {
 	}
 }
 
+// WithDPoPStrictHTU rejects a signed htu claim containing any query or
+// fragment delimiter. By default, queries and fragments are excluded before
+// comparing the proof target URI as required by RFC 9449 Section 4.3.
+func WithDPoPStrictHTU() DPoPOption {
+	return func(p *Provider) error {
+		p.config.DPoPStrictHTU = true
+		return nil
+	}
+}
+
+// WithDPoPNonce enables server-provided DPoP nonces.
+// The manager must use shared state when the provider has multiple
+// instances. See [goidc.DPoPNonceManager] for its atomicity requirements.
+func WithDPoPNonce(manager goidc.DPoPNonceManager) DPoPOption {
+	return func(p *Provider) error {
+		if manager == nil {
+			return errors.New("a DPoP nonce manager is required")
+		}
+		p.config.DPoPNonceManager = manager
+		return nil
+	}
+}
+
 // WithTokenBindingRequired makes at least one sender constraining mechanism
 // (TLS or DPoP) be required in order to issue an access token to a client.
 // For more info, see [WithMTLSTokenBinding] and [WithDPoP].
@@ -1589,8 +1689,19 @@ type ResourceIndicatorOption Option
 // to access.
 func WithResourceIndicators(resources []goidc.ResourceIndicator, opts ...ResourceIndicatorOption) Option {
 	return func(p *Provider) error {
+		seen := make(map[string]struct{}, len(resources))
+		for _, resource := range resources {
+			parsed, err := url.Parse(resource)
+			if err != nil || !parsed.IsAbs() || parsed.Fragment != "" {
+				return fmt.Errorf("resource indicator %q must be an absolute URI without a fragment", resource)
+			}
+			if _, exists := seen[resource]; exists {
+				return fmt.Errorf("resource indicator %q is configured more than once", resource)
+			}
+			seen[resource] = struct{}{}
+		}
 		p.config.ResourceIndicatorsEnabled = true
-		p.config.ResourceIndicators = resources
+		p.config.ResourceIndicators = slices.Clone(resources)
 		for _, opt := range opts {
 			if err := opt(p); err != nil {
 				return err
@@ -1600,7 +1711,8 @@ func WithResourceIndicators(resources []goidc.ResourceIndicator, opts ...Resourc
 	}
 }
 
-// WithResourceIndicatorsRequired makes resource indicators required.
+// WithResourceIndicatorsRequired makes resource indicators required for
+// authorization requests and client credentials token requests.
 func WithResourceIndicatorsRequired() ResourceIndicatorOption {
 	return func(p *Provider) error {
 		p.config.ResourceIndicatorsRequired = true
@@ -1695,6 +1807,24 @@ func WithStaticClients(cs ...*goidc.Client) Option {
 			return errors.New("at least one client is required")
 		}
 		p.config.StaticClients = cs
+		return nil
+	}
+}
+
+// WithClientResolver configures a dynamic source of client metadata without
+// enabling Dynamic Client Registration. The resolver is invoked for every
+// client lookup, after static clients are checked, and its results are not
+// cached by the provider.
+//
+// A client resolver cannot be combined with Dynamic Client Registration or
+// OpenID Federation because those features provide their own dynamic client
+// sources. Static clients may be combined with a resolver and take precedence.
+func WithClientResolver(f goidc.ResolveClientFunc) Option {
+	return func(p *Provider) error {
+		if f == nil {
+			return errors.New("client resolver cannot be nil")
+		}
+		p.config.ResolveClientFunc = f
 		return nil
 	}
 }

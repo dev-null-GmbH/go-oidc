@@ -9,12 +9,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/dev-null-GmbH/go-oidc/examples/authutil"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/pkg/provider"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/google/uuid"
-	"github.com/luikyv/go-oidc/examples/authutil"
-	"github.com/luikyv/go-oidc/pkg/goidc"
-	"github.com/luikyv/go-oidc/pkg/provider"
 	"github.com/luikyv/go-sdjwt/sdjwt"
 )
 
@@ -83,12 +83,12 @@ func main() {
 	op, err := provider.New(
 		provider.Config{
 			Issuer:      authutil.Issuer,
-			JWKSFunc:    authutil.PrivateJWKSFunc(),
-			IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.RS256},
+			JWKS:        authutil.PrivateJWKSFunc(),
+			IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
 		},
 		provider.WithStaticClients(clientOne, clientTwo),
 		provider.WithScopes(goidc.ScopeOpenID, ScopeIdentityCredential),
-		provider.WithPrivateKeyJWTAuthn(goidc.RS256, goidc.PS256),
+		provider.WithPrivateKeyJWTAuthn(goidc.SigAlgRS256, goidc.SigAlgPS256),
 		provider.WithAttestationJWTAuthn([]goidc.AttestationIssuer{{
 			Issuer: AttestationIssuer,
 			JWKSFunc: func(ctx context.Context) (goidc.JSONWebKeySet, error) {
@@ -136,7 +136,7 @@ func main() {
 					BindingMethods: []goidc.VCBindingMethod{goidc.VCBindingMethodJWK},
 					ProofTypes: map[goidc.VCProofType]goidc.VCProofConfiguration{
 						goidc.VCProofTypeJWT: {
-							SigAlgs: []goidc.SignatureAlgorithm{goidc.RS256, goidc.PS256},
+							SigAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256, goidc.SigAlgPS256},
 						},
 					},
 					Issue: func(ctx context.Context, grant *goidc.Grant, opts goidc.VCIssuanceOptions) (string, error) {
@@ -183,7 +183,7 @@ func main() {
 				provider.WithVCISelfPreAuthCodeGrant(nil)),
 		),
 		provider.WithRAR([]goidc.AuthDetailType{goidc.AuthDetailTypeOpenIDCredential}),
-		provider.WithTokenOptions(authutil.TokenOptionsFunc(goidc.RS256)),
+		provider.WithTokenOptions(authutil.TokenOptionsFunc(goidc.SigAlgRS256)),
 		provider.WithHTTPClientFunc(authutil.HTTPClient),
 		provider.WithErrorHandler(authutil.HandleError),
 	)

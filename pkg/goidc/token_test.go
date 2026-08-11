@@ -3,7 +3,7 @@ package goidc_test
 import (
 	"testing"
 
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 func TestTokenLifetimeSecs(t *testing.T) {

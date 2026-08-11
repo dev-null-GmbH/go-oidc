@@ -3,7 +3,7 @@ package oidc
 import (
 	"context"
 
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 type Configuration struct {
@@ -30,21 +30,24 @@ type Configuration struct {
 	SignerFunc    goidc.SignerFunc
 	DecrypterFunc goidc.DecrypterFunc
 
-	HandleGrantFunc    goidc.HandleGrantFunc
-	HandleTokenFunc    goidc.HandleTokenFunc
-	IDTokenClaimsFunc  goidc.IDTokenClaimsFunc
-	UserInfoClaimsFunc goidc.UserInfoClaimsFunc
-	TokenClaimsFunc    goidc.TokenClaimsFunc
-	AuthPolicies       []goidc.AuthnPolicy
-	DevicePolicies     []goidc.AuthnPolicy
-	Scopes             []goidc.Scope
-	OpenIDRequired     bool
-	GrantTypes         []goidc.GrantType
-	ResponseTypes      []goidc.ResponseType
-	ResponseModes      []goidc.ResponseMode
-	GrantIDFunc        goidc.RandomFunc
-	ACRs               []goidc.ACR
-	DisplayValues      []goidc.DisplayValue
+	HandleGrantFunc                 goidc.HandleGrantFunc
+	HandleTokenFunc                 goidc.HandleTokenFunc
+	IDTokenClaimsFunc               goidc.IDTokenClaimsFunc
+	UserInfoClaimsFunc              goidc.UserInfoClaimsFunc
+	TokenClaimsFunc                 goidc.TokenClaimsFunc
+	AccessTokenClaimsFunc           goidc.AccessTokenClaimsFunc
+	AccessTokenGrantIDClaimDisabled bool
+	TokenEndpointEvidenceFunc       goidc.TokenEndpointEvidenceFunc
+	AuthPolicies                    []goidc.AuthnPolicy
+	DevicePolicies                  []goidc.AuthnPolicy
+	Scopes                          []goidc.Scope
+	OpenIDRequired                  bool
+	GrantTypes                      []goidc.GrantType
+	ResponseTypes                   []goidc.ResponseType
+	ResponseModes                   []goidc.ResponseMode
+	GrantIDFunc                     goidc.RandomFunc
+	ACRs                            []goidc.ACR
+	DisplayValues                   []goidc.DisplayValue
 	// Claims defines the user claims that can be returned in the userinfo endpoint or in ID tokens.
 	// This will be published in the /.well-known/openid-configuration endpoint.
 	Claims                   []string
@@ -53,6 +56,7 @@ type Configuration struct {
 	SubIdentifierTypes       []goidc.SubIdentifierType
 	PairwiseSubjectFunc      goidc.PairwiseSubjectFunc
 	StaticClients            []*goidc.Client
+	ResolveClientFunc        goidc.ResolveClientFunc
 	// IssuerRespParamEnabled indicates if the "iss" parameter will be
 	// returned when redirecting the user back to the client application.
 	IssuerRespParamEnabled bool
@@ -81,8 +85,18 @@ type Configuration struct {
 	JWKSEndpoint          string
 	AuthorizationEndpoint string
 	EndpointPrefix        string
+	// OpenIDConfigurationDisabled suppresses the OpenID Connect Discovery
+	// endpoint while leaving RFC 8414 authorization server metadata available.
+	OpenIDConfigurationDisabled bool
+	// AuthorizationServerMetadataDisabled suppresses the RFC 8414 endpoint
+	// while leaving OpenID Connect Discovery available.
+	AuthorizationServerMetadataDisabled bool
+	// OAuthScopesOnly records that the configured scopes deliberately exclude
+	// openid and therefore require OpenID discovery to be disabled.
+	OAuthScopesOnly bool
 
 	UserInfoEndpoint       string
+	UserInfoDisabled       bool
 	UserInfoDefaultSigAlg  goidc.SignatureAlgorithm
 	UserInfoSigAlgs        []goidc.SignatureAlgorithm
 	UserInfoEncEnabled     bool
@@ -187,9 +201,12 @@ type Configuration struct {
 	MTLSTokenBindingRequired bool
 	ClientCertFunc           goidc.ClientCertFunc
 
-	DPoPEnabled  bool
-	DPoPRequired bool
-	DPoPSigAlgs  []goidc.SignatureAlgorithm
+	DPoPEnabled   bool
+	DPoPRequired  bool
+	DPoPStrictHTU bool
+	DPoPSigAlgs   []goidc.SignatureAlgorithm
+	// DPoPNonceManager enables server-provided DPoP nonces.
+	DPoPNonceManager goidc.DPoPNonceManager
 
 	PKCEEnabled                bool
 	PKCERequired               bool
@@ -203,12 +220,16 @@ type Configuration struct {
 
 	ResourceIndicatorsEnabled bool
 	// ResourceIndicatorsRequired indicates that the resource parameter is
-	// required during authorization requests.
+	// required during authorization requests and client credentials token
+	// requests.
 	ResourceIndicatorsRequired bool
 	ResourceIndicators         []goidc.ResourceIndicator
 
-	HTTPClientFunc goidc.HTTPClientFunc
-	ConsumeJTIFunc goidc.ConsumeJTIFunc
+	HTTPClientFunc    goidc.HTTPClientFunc
+	ConsumeJTIFunc    goidc.ConsumeJTIFunc
+	ConsumeJTIUseFunc goidc.ConsumeJTIUseFunc
+
+	PrivateKeyJWTAssertionPolicyFunc goidc.PrivateKeyJWTAssertionPolicyFunc
 
 	JWTBearerClientAuthnRequired bool
 	JWTBearerHandleAssertionFunc goidc.JWTBearerHandleAssertionFunc

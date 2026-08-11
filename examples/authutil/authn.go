@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/dev-null-GmbH/go-oidc/examples/ui"
+	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/google/uuid"
-	"github.com/luikyv/go-oidc/examples/ui"
-	"github.com/luikyv/go-oidc/internal/timeutil"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 func Policy() goidc.AuthnPolicy {

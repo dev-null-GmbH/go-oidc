@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 )
 
 type Configuration struct {
@@ -16,7 +17,7 @@ type Configuration struct {
 	ClientRegistrationEndpoint        string                       `json:"registration_endpoint,omitempty"`
 	AuthorizationEndpoint             string                       `json:"authorization_endpoint"`
 	TokenEndpoint                     string                       `json:"token_endpoint"`
-	UserInfoEndpoint                  string                       `json:"userinfo_endpoint"`
+	UserInfoEndpoint                  string                       `json:"userinfo_endpoint,omitempty"`
 	JWKSEndpoint                      string                       `json:"jwks_uri,omitempty"`
 	PAREndpoint                       string                       `json:"pushed_authorization_request_endpoint,omitempty"`
 	PARRequired                       bool                         `json:"require_pushed_authorization_requests,omitempty"`
@@ -64,7 +65,7 @@ type Configuration struct {
 	MTLSAliases                       *struct {
 		TokenEndpoint              string `json:"token_endpoint"`
 		ParEndpoint                string `json:"pushed_authorization_request_endpoint,omitempty"`
-		UserInfoEndpoint           string `json:"userinfo_endpoint"`
+		UserInfoEndpoint           string `json:"userinfo_endpoint,omitempty"`
 		ClientRegistrationEndpoint string `json:"registration_endpoint,omitempty"`
 		TokenIntrospectionEndpoint string `json:"introspection_endpoint,omitempty"`
 		TokenRevocationEndpoint    string `json:"revocation_endpoint,omitempty"`
@@ -120,6 +121,17 @@ type DCRManager interface {
 	Client(context.Context, string) (*Client, error)
 	DeleteClient(context.Context, string) error
 }
+
+// ResolveClientFunc resolves the current client configuration by identifier.
+// It must return [ErrNotFound] only when the client does not exist. Other
+// errors are treated as operational failures and returned to the caller.
+//
+// The provider invokes this function for every client lookup and does not
+// cache the returned client or its JWKS. Implementations should therefore
+// return the latest client state, including key rotations and disablement.
+// The function may be called concurrently and must return a snapshot that is
+// safe for the provider to read for the duration of the request.
+type ResolveClientFunc func(context.Context, string) (*Client, error)
 
 // OpenIDFedManager stores OpenID Federation clients.
 type OpenIDFedManager interface {
@@ -371,7 +383,8 @@ const (
 )
 
 const (
-	HeaderDPoP string = "DPoP"
+	HeaderDPoP      string = "DPoP"
+	HeaderDPoPNonce string = "DPoP-Nonce"
 )
 
 type Status string
@@ -536,6 +549,59 @@ func NewDynamicScope(scope string, matchingFunc MatchScopeFunc) Scope {
 // ConsumeJTIFunc defines a function to verify when a JTI is safe to use.
 type ConsumeJTIFunc func(context.Context, string) error
 
+// JTIUsePurpose identifies the protocol artifact whose JWT ID is consumed.
+type JTIUsePurpose string
+
+const (
+	JTIUsePurposeClientAssertion      JTIUsePurpose = "client_assertion"
+	JTIUsePurposeDPoPProof            JTIUsePurpose = "dpop_proof"
+	JTIUsePurposeRequestObject        JTIUsePurpose = "request_object"
+	JTIUsePurposeClientAttestationPoP JTIUsePurpose = "client_attestation_pop"
+)
+
+// JTIUse describes a validated JWT ID reservation. ExpiresAt is the time after
+// which the artifact can no longer be accepted by the provider. It is zero when
+// the artifact does not declare an upper acceptance bound.
+type JTIUse struct {
+	ID        string
+	Issuer    string
+	Purpose   JTIUsePurpose
+	ExpiresAt time.Time
+}
+
+// ConsumeJTIUseFunc atomically reserves a validated JWT ID. Implementations
+// must be safe for concurrent calls. They should return ErrJTIReplay when the
+// use was already reserved, ErrInvalidJTIUse when the reservation itself cannot
+// be accepted, and any other error, including ErrNotFound, for an operational
+// failure.
+type ConsumeJTIUseFunc func(context.Context, JTIUse) error
+
+// VerifiedClientAssertionHeader is the bounded subset of a JOSE header exposed
+// to a private_key_jwt assertion policy after signature verification.
+type VerifiedClientAssertionHeader struct {
+	Algorithm SignatureAlgorithm
+	KeyID     string
+	Type      string
+}
+
+// VerifiedClientAssertion contains the authenticated client identity, protected
+// header fields, and claims of a client assertion whose signature and standard
+// claims have been verified. AuthenticatedClientID comes from the resolved
+// client, not from client-controlled claims. Custom headers and claims remain
+// client-controlled: validate them before use, and do not log the raw claims
+// because they may contain sensitive values.
+type VerifiedClientAssertion struct {
+	AuthenticatedClientID string
+	Header                VerifiedClientAssertionHeader
+	Claims                json.RawMessage
+}
+
+// PrivateKeyJWTAssertionPolicyFunc applies deployment-specific policy to a
+// signature-verified private_key_jwt client assertion. Policy rejections are
+// exposed as invalid_client. Return an Error with ErrorCodeInternalError for an
+// operational failure that must fail closed as an internal server error.
+type PrivateKeyJWTAssertionPolicyFunc func(context.Context, VerifiedClientAssertion) error
+
 // HTTPClientFunc defines a function that generates an HTTP client for performing
 // requests.
 // Note: Make sure to not enable automatic redirect-following, as some profiles
@@ -562,6 +628,36 @@ type UserInfoClaimsFunc func(context.Context, *Grant) map[string]any
 // TokenClaimsFunc defines a function that returns additional claims to include
 // in JWT access tokens. It is called at access token issuance time.
 type TokenClaimsFunc func(context.Context, *Token, *Grant) map[string]any
+
+// AccessTokenClaimsInput is the closed, provider-authenticated input to an
+// access-token claim projection. It contains immutable scalar values and a
+// defensive copy of Resources; it never exposes mutable Client, Grant, or Token
+// objects. AuthenticatedClientID is snapshotted immediately after token-endpoint
+// authentication, before any issuance callback can mutate provider objects.
+type AccessTokenClaimsInput struct {
+	GrantType                   GrantType
+	AuthenticatedClientID       string
+	ClientID                    string
+	Subject                     string
+	Scopes                      string
+	Resources                   Resources
+	Format                      TokenFormat
+	Type                        TokenType
+	SignatureAlgorithm          SignatureAlgorithm
+	IssuedAt                    int
+	ExpiresAt                   int
+	DPoPJWKThumbprint           string
+	CertificateThumbprint       string
+	AuthorizationDetailsPresent bool
+	ActorPresent                bool
+}
+
+// AccessTokenClaimsFunc returns additional JWT access-token claims through a
+// fallible, collision-safe issuance boundary. The first qualified version of
+// this boundary is restricted to client_credentials-only providers. The
+// provider calls it after grant validation and final token construction, and
+// before persisting the grant or invoking the signer.
+type AccessTokenClaimsFunc func(context.Context, AccessTokenClaimsInput) (map[string]any, error)
 
 // TokenOptions defines a template for generating access tokens.
 type TokenOptions struct {

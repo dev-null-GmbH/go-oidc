@@ -15,13 +15,13 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidctest"
+	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/oidctest"
-	"github.com/luikyv/go-oidc/internal/timeutil"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 const (
@@ -1309,6 +1309,23 @@ func TestContinueAuthentication(t *testing.T) {
 	}
 	if sessions[0].ID != session.ID {
 		t.Errorf("session ID = %q, want %q", sessions[0].ID, session.ID)
+	}
+}
+
+func TestInitAuthPropagatesClientResolverOperationalFailure(t *testing.T) {
+	resolverFailure := errors.New("client store unavailable")
+	ctx := oidctest.NewContext(t)
+	ctx.ResolveClientFunc = func(context.Context, string) (*goidc.Client, error) {
+		return nil, resolverFailure
+	}
+
+	err := initAuth(ctx, request{ClientID: "client"})
+	if !errors.Is(err, resolverFailure) {
+		t.Fatalf("initAuth() error = %v, want resolver failure", err)
+	}
+	var oidcErr goidc.Error
+	if errors.As(err, &oidcErr) {
+		t.Fatalf("initAuth() mapped operational failure to protocol error %s", oidcErr.Code)
 	}
 }
 

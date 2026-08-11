@@ -6,10 +6,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/luikyv/go-oidc/internal/dpop"
-	"github.com/luikyv/go-oidc/internal/hashutil"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/client"
+	"github.com/dev-null-GmbH/go-oidc/internal/dpop"
+	"github.com/dev-null-GmbH/go-oidc/internal/hashutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 // ValidateBinding checks both DPoP and TLS binding for issuing a token.
@@ -39,20 +40,39 @@ func validateBindingDPoP(ctx oidc.Context, c *goidc.Client, opts bindindValidati
 
 	dpopJWT, ok := dpop.JWT(ctx)
 	if !ok {
+		if dpop.HasJWT(ctx) {
+			return goidc.WrapError(
+				goidc.ErrorCodeInvalidDPoPProof,
+				"invalid DPoP proof",
+				errors.New("the token request must contain at most one DPoP header field value"),
+			)
+		}
 		// Return an error if the DPoP header was not informed and one of the
 		// below applies:
 		// 	* DPoP is required as a general configuration.
 		// 	* The client requires DPoP.
 		// 	* DPoP is required as a validation option.
 		if ctx.DPoPRequired || c.DPoPTokenBindingRequired || opts.dpopRequired {
-			return goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request", errors.New("a DPoP proof is required for this token request"))
+			return goidc.WrapError(
+				goidc.ErrorCodeInvalidDPoPProof,
+				"invalid DPoP proof",
+				errors.New("a DPoP proof is required for this token request"),
+			)
 		}
 		return nil
 	}
 
-	return dpop.ValidateJWT(ctx, dpopJWT, dpop.ValidationOptions{
+	validationOptions := dpop.ValidationOptions{
 		JWKThumbprint: opts.dpopJWKThumbprint,
-	})
+		NonceScope:    goidc.DPoPNonceScopeAuthorizationServer,
+		TokenEndpoint: true,
+	}
+	if client.UsesAttestationDPoP(ctx, c) {
+		validationOptions.OnProofValidated = func() {
+			ctx.MarkTokenEndpointClientAuthenticated(c.ID)
+		}
+	}
+	return dpop.ValidateJWT(ctx, dpopJWT, validationOptions)
 }
 
 func validateBindingTLS(ctx oidc.Context, c *goidc.Client, opts bindindValidationOptions) error {

@@ -3,7 +3,7 @@ package authorize
 import (
 	"encoding/json"
 
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 type redirectionError struct {

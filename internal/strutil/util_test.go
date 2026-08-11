@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/luikyv/go-oidc/internal/strutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/strutil"
 )
 
 func TestContainsOpenID(t *testing.T) {

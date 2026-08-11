@@ -3,7 +3,7 @@ package logout
 import (
 	"net/http"
 
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 type request struct {

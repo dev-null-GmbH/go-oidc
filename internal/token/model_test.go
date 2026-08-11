@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/luikyv/go-oidc/internal/oidctest"
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidctest"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 func TestNewGrant_NonExpiringRefreshToken(t *testing.T) {

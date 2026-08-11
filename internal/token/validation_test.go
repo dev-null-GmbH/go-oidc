@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/luikyv/go-oidc/internal/hashutil"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/oidctest"
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/hashutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidctest"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 func TestValidatePKCE(t *testing.T) {
@@ -175,6 +175,44 @@ func TestValidateBindingRequirement(t *testing.T) {
 				t.Fatalf("Code = %s, want %s", oidcErr.Code, test.wantErr)
 			}
 		})
+	}
+}
+
+func TestValidateBindingDPoPRequiredMissingProofUsesDPoPError(t *testing.T) {
+	ctx := oidctest.NewContext(t)
+	ctx.DPoPEnabled = true
+	ctx.DPoPRequired = true
+	client, _ := oidctest.NewClient(t)
+
+	err := ValidateBinding(ctx, client, nil)
+
+	var oidcErr goidc.Error
+	if !errors.As(err, &oidcErr) {
+		t.Fatalf("error = %v, want goidc.Error", err)
+	}
+	if oidcErr.Code != goidc.ErrorCodeInvalidDPoPProof {
+		t.Fatalf("error code = %q, want %q", oidcErr.Code, goidc.ErrorCodeInvalidDPoPProof)
+	}
+	if oidcErr.StatusCode() != 400 {
+		t.Fatalf("HTTP status = %d, want 400", oidcErr.StatusCode())
+	}
+}
+
+func TestValidateBindingRejectsMultipleDPoPHeadersWhenProofIsOptional(t *testing.T) {
+	ctx := oidctest.NewContext(t)
+	ctx.DPoPEnabled = true
+	ctx.Request.Header.Add(goidc.HeaderDPoP, "proof_one")
+	ctx.Request.Header.Add(goidc.HeaderDPoP, "proof_two")
+	client, _ := oidctest.NewClient(t)
+
+	err := ValidateBinding(ctx, client, nil)
+
+	var oidcErr goidc.Error
+	if !errors.As(err, &oidcErr) {
+		t.Fatalf("error = %v, want goidc.Error", err)
+	}
+	if oidcErr.Code != goidc.ErrorCodeInvalidDPoPProof {
+		t.Fatalf("error code = %q, want %q", oidcErr.Code, goidc.ErrorCodeInvalidDPoPProof)
 	}
 }
 

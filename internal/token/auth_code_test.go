@@ -7,13 +7,13 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/dev-null-GmbH/go-oidc/internal/hashutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidctest"
+	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/luikyv/go-oidc/internal/hashutil"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/oidctest"
-	"github.com/luikyv/go-oidc/internal/timeutil"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 func TestGenerateAuthCodeToken(t *testing.T) {
@@ -490,7 +490,7 @@ func TestGenerateAuthCodeToken(t *testing.T) {
 				}
 				return ctx, req, c, grant
 			},
-			wantErr: goidc.ErrorCodeInvalidRequest,
+			wantErr: goidc.ErrorCodeInvalidDPoPProof,
 		},
 		{
 			name: "dpop binding missing header",
@@ -506,7 +506,7 @@ func TestGenerateAuthCodeToken(t *testing.T) {
 				}
 				return ctx, req, c, grant
 			},
-			wantErr: goidc.ErrorCodeInvalidRequest,
+			wantErr: goidc.ErrorCodeInvalidDPoPProof,
 		},
 		{
 			name: "tls binding",
@@ -641,7 +641,7 @@ func TestGenerateAuthCodeToken(t *testing.T) {
 				ctx.DPoPSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgES256}
 				return ctx, req, c, grant
 			},
-			wantErr: goidc.ErrorCodeInvalidRequest,
+			wantErr: goidc.ErrorCodeInvalidDPoPProof,
 		},
 		{
 			name: "dpop required by client but not sent",
@@ -652,7 +652,7 @@ func TestGenerateAuthCodeToken(t *testing.T) {
 				c.DPoPTokenBindingRequired = true
 				return ctx, req, c, grant
 			},
-			wantErr: goidc.ErrorCodeInvalidRequest,
+			wantErr: goidc.ErrorCodeInvalidDPoPProof,
 		},
 		{
 			name: "mtls binding no grant thumbprint",

@@ -1,0 +1,8 @@
+# Route changes to the named maintainers; required checks, not approval count,
+# enforce the documented solo-maintainer merge model.
+* @greg6775 @Schlauer-Hax
+
+/.github/ @greg6775 @Schlauer-Hax
+/SECURITY.md @greg6775 @Schlauer-Hax
+/CONTRIBUTING.md @greg6775 @Schlauer-Hax
+/NOTICE @greg6775 @Schlauer-Hax

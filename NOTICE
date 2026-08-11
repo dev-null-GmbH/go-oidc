@@ -1,0 +1,26 @@
+go-oidc — d0 governed fork
+============================
+
+This distribution contains software from the upstream go-oidc project:
+
+  Project:   https://github.com/luikyv/go-oidc
+  Base tag:  v0.25.0
+  Base SHA:  6aeac93f370044ca9a59a556b9230cd10bd96868
+  Copyright (c) 2024 Luiky Vasconcelos
+  License: MIT (see LICENSE)
+
+Modifications to the governed fork are Copyright (c) 2026 /dev/null GmbH and
+remain licensed under the MIT License. The fork adds narrowly scoped runtime
+and security integration seams, including dynamic client resolution, typed
+replay consumption, DPoP nonce handling, machine-client profiles, independent
+OAuth authorization-server metadata, and transaction-safe claims projection.
+The Git history is the authoritative record of individual changes.
+
+OpenID certification statements and marks in the upstream documentation refer
+to the upstream project and the versions certified by its author. They do not
+automatically certify modified releases of this fork. Any fork conformance or
+certification claim must identify the exact fork release and its evidence.
+
+The upstream name, author, and certification marks are used for attribution
+and identification only; they do not imply endorsement of /dev/null GmbH or
+this fork.

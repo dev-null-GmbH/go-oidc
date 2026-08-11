@@ -6,15 +6,15 @@ import (
 	"slices"
 	"time"
 
+	"github.com/dev-null-GmbH/go-oidc/internal/client"
+	"github.com/dev-null-GmbH/go-oidc/internal/dpop"
+	"github.com/dev-null-GmbH/go-oidc/internal/hashutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/strutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/token"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/go-jose/go-jose/v4/jwt"
-	"github.com/luikyv/go-oidc/internal/client"
-	"github.com/luikyv/go-oidc/internal/dpop"
-	"github.com/luikyv/go-oidc/internal/hashutil"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/strutil"
-	"github.com/luikyv/go-oidc/internal/timeutil"
-	"github.com/luikyv/go-oidc/internal/token"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 // initBackAuth inits an authentication session for CIBA.
@@ -82,10 +82,6 @@ func initBackAuth(ctx oidc.Context, req request) (cibaResponse, error) {
 				return nil, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request object", errors.New("claim 'jti' is required in the request object"))
 			}
 
-			if err := ctx.ConsumeJTI(claims.ID); err != nil && !errors.Is(err, goidc.ErrNotFound) {
-				return nil, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request object", fmt.Errorf("could not validate the request object jti: %w", err))
-			}
-
 			if err := claims.ValidateWithLeeway(jwt.Expected{
 				Issuer:      c.ID,
 				AnyAudience: []string{ctx.Issuer()},
@@ -94,6 +90,15 @@ func initBackAuth(ctx oidc.Context, req request) (cibaResponse, error) {
 			}
 
 			if err := validateCIBARequest(ctx, requestObject, c); err != nil {
+				return nil, err
+			}
+
+			if err := ctx.ReserveJTI(goidc.JTIUse{
+				ID:        claims.ID,
+				Issuer:    claims.Issuer,
+				Purpose:   goidc.JTIUsePurposeRequestObject,
+				ExpiresAt: claims.Expiry.Time().Add(time.Duration(ctx.JWTLeewayTimeSecs) * time.Second),
+			}, goidc.ErrorCodeInvalidRequest, "invalid request object"); err != nil {
 				return nil, err
 			}
 

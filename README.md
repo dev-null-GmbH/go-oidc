@@ -1,8 +1,18 @@
-# go-oidc
+# go-oidc — d0 governed fork
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/luikyv/go-oidc.svg)](https://pkg.go.dev/github.com/luikyv/go-oidc)
-[![Go Report Card](https://goreportcard.com/badge/github.com/luikyv/go-oidc)](https://goreportcard.com/report/github.com/luikyv/go-oidc)
-[![License](https://img.shields.io/github/license/luikyv/go-oidc)](LICENSE)
+[![CI](https://github.com/dev-null-GmbH/go-oidc/actions/workflows/ci.yml/badge.svg)](https://github.com/dev-null-GmbH/go-oidc/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/dev-null-GmbH/go-oidc.svg)](https://pkg.go.dev/github.com/dev-null-GmbH/go-oidc)
+[![License](https://img.shields.io/github/license/dev-null-GmbH/go-oidc)](LICENSE)
+
+> [!IMPORTANT]
+> This repository is the `/dev/null GmbH` governed fork of
+> [`luikyv/go-oidc`](https://github.com/luikyv/go-oidc), currently based on
+> upstream `v0.25.0` (`6aeac93f370044ca9a59a556b9230cd10bd96868`).
+> It carries reviewed runtime and security seams required by d0 services.
+> Upstream certification statements below describe the upstream project; they
+> do not automatically certify modified fork releases. See [NOTICE](NOTICE),
+> [security reporting](SECURITY.md), [contribution rules](CONTRIBUTING.md), and
+> the [release policy](.github/RELEASE_POLICY.md).
 
 A configurable OpenID Connect Provider for Go.
 
@@ -11,6 +21,7 @@ A configurable OpenID Connect Provider for Go.
 * [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html)
 * [OpenID Connect Discovery 1.0](https://openid.net/specs/openid-connect-discovery-1_0.html)
 * [`RFC 6749` - The OAuth 2.0 Authorization Framework](https://www.rfc-editor.org/rfc/rfc6749.html)
+* [`RFC 8414` - OAuth 2.0 Authorization Server Metadata](https://www.rfc-editor.org/rfc/rfc8414.html)
 * [`RFC 9068` - JSON Web Token (JWT) Profile for OAuth 2.0 Access Tokens](https://www.rfc-editor.org/rfc/rfc9068.html)
 * [OpenID Connect Dynamic Client Registration 1.0](https://openid.net/specs/openid-connect-registration-1_0.html)
 * [`RFC 7591` - OAuth 2.0 Dynamic Client Registration Protocol (DCR)](https://www.rfc-editor.org/rfc/rfc7591.html)
@@ -58,8 +69,13 @@ Luiky Vasconcelos has certified that [go-oidc](https://pkg.go.dev/github.com/lui
 
 Install the module:
 ```
-go get github.com/luikyv/go-oidc@latest
+go get github.com/dev-null-GmbH/go-oidc@v0.25.1-d0.1
 ```
+
+Fork consumers must exact-pin a governed `-d0.N` tag and must not use
+`@latest`. The fork uses a distinct module path, but Go treats `-d0.N` as a
+prerelease and can otherwise select the copied stable upstream `v0.25.0` tag,
+whose `go.mod` still declares the upstream module path.
 
 Create and run a provider:
 ```go
@@ -907,6 +923,51 @@ op, _ := provider.New(
 )
 ```
 
+## Discovery endpoints
+
+By default, the provider exposes both OpenID Provider Configuration and OAuth
+2.0 Authorization Server Metadata at their standards-defined well-known paths.
+The documents are built independently: the RFC 8414 response advertises only
+enabled OAuth endpoints and capabilities and does not copy unrelated OpenID
+Provider fields.
+
+OAuth-only deployments can expose only RFC 8414 metadata:
+
+```go
+op, _ := provider.New(
+  ...,
+  provider.WithDiscoveryEndpoints(
+    provider.DiscoveryEndpointAuthorizationServerMetadata,
+  ),
+  provider.WithOAuthScopes(
+    goidc.NewScope("einvoice.documents:read"),
+    goidc.NewScope("einvoice.documents:write"),
+  ),
+  ...,
+)
+```
+
+## Client resolution
+
+Use `provider.WithClientResolver` when clients live in an external store but
+must not be allowed to register themselves:
+
+```go
+op, _ := provider.New(
+  ...,
+  provider.WithClientResolver(func(ctx context.Context, id string) (*goidc.Client, error) {
+    return clientStore.Client(ctx, id)
+  }),
+)
+```
+
+The resolver is called for every lookup and must return `goidc.ErrNotFound`
+only for unknown clients. Other errors remain operational errors. Resolved
+clients and their referenced JWKS are not cached, so disablement and key
+rotation take effect on the next request. Static clients may be configured as
+well and take precedence. A resolver cannot be combined with DCR or OpenID
+Federation, which provide their own dynamic client sources.
+
 ## [Dynamic Client Registration (DCR)](https://www.rfc-editor.org/rfc/rfc7591.html)
 
 DCR allows clients to register and update themselves dynamically:
@@ -978,12 +1039,12 @@ If the client also provides the singular field, it must be present in the priori
 ## [Demonstrating Proof of Possession (DPoP)](https://www.rfc-editor.org/rfc/rfc9449.html)
 
 DPoP is enabled with `provider.WithDPoP(...)` and can be made mandatory with
-`provider.DPoPRequired()`.
+`provider.WithDPoPRequired()`.
 
 ```go
 op, _ := provider.New(
   ...,
-  provider.WithDPoP([]goidc.SignatureAlgorithm{goidc.ES256}),
+  provider.WithDPoP([]goidc.SignatureAlgorithm{goidc.SigAlgES256}),
   ...,
 )
 ```
@@ -1002,6 +1063,36 @@ enabled:
 - authorization requests, including PAR
 - token issuance
 - token usage and proof-of-possession validation
+
+Server-provided nonces can be enabled with a `goidc.DPoPNonceManager`:
+
+```go
+provider.WithDPoP(
+  []goidc.SignatureAlgorithm{goidc.SigAlgES256},
+  provider.WithDPoPNonce(nonceManager),
+)
+```
+
+The manager issues unpredictable nonces and validates them independently for
+authorization-server and resource-server scopes. In a multi-instance
+deployment, every issued nonce must already validate on every serving replica.
+The manager can provide that guarantee through shared persistence or through
+deterministic authenticated derivation from cluster-shared,
+scope/domain-separated key material, and should retain a window of recent
+nonces for concurrent requests. Reusable recent nonces are supported; a
+manager that chooses single-use nonces must validate and consume them
+atomically. It can optionally return a replacement nonce to rotate it on a
+successful response.
+Unknown or expired nonces produce the RFC 9449 `use_dpop_nonce` challenge;
+storage failures fail closed as internal errors.
+Nonce handling does not replace `provider.WithJTIConsumer`; JTI tracking
+remains the replay-control mechanism for individual DPoP proofs.
+Browser-facing CORS middleware must expose `DPoP-Nonce` and, for protected
+resources, `WWW-Authenticate` to clients.
+
+RFC 9449 does not define separate discovery metadata for nonce support. DPoP
+algorithm support continues to be advertised through
+`dpop_signing_alg_values_supported`.
 
 ## Mutual TLS (mTLS)
 
@@ -1118,8 +1209,9 @@ requests, the client may ask for a subset of the originally granted resources.
 The provider rejects resources that were not granted or that are not part of
 the configured allowed list.
 
-Use `provider.ResourceIndicatorsRequired()` if every authorization
-request must include a `resource` parameter.
+Pass `provider.WithResourceIndicatorsRequired()` to
+`provider.WithResourceIndicators(...)` if every authorization request and
+client credentials token request must include a `resource` parameter.
 
 ## [OpenID Federation](https://openid.net/specs/openid-federation-1_0.html)
 

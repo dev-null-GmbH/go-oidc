@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/luikyv/go-oidc/internal/storage"
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/storage"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 func TestManagerSessions(t *testing.T) {

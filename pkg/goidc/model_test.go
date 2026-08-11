@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 func TestProfileIsFAPI(t *testing.T) {
@@ -517,6 +517,7 @@ func TestErrorCodeStatusCode(t *testing.T) {
 		{goidc.ErrorCodeInvalidToken, http.StatusUnauthorized},
 		{goidc.ErrorCodeUnauthorizedClient, http.StatusUnauthorized},
 		{goidc.ErrorCodeInternalError, http.StatusInternalServerError},
+		{goidc.ErrorCodeUseDPoPNonce, http.StatusBadRequest},
 		{goidc.ErrorCodeInvalidRequest, http.StatusBadRequest},
 		{goidc.ErrorCodeInvalidGrant, http.StatusBadRequest},
 		{goidc.ErrorCodeInvalidScope, http.StatusBadRequest},

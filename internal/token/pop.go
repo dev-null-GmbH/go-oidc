@@ -3,17 +3,21 @@ package token
 import (
 	"errors"
 
-	"github.com/luikyv/go-oidc/internal/dpop"
-	"github.com/luikyv/go-oidc/internal/hashutil"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/dpop"
+	"github.com/dev-null-GmbH/go-oidc/internal/hashutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 // ValidatePoP validates that the context contains the information required to
 // prove the client's possession of the token.
 // If token is omitted, the validation of the claim 'ath' of DPoP JWTs is skipped.
 func ValidatePoP(ctx oidc.Context, token string, cnf goidc.TokenConfirmation) error {
-	if err := validateDPoP(ctx, token, cnf); err != nil {
+	return validatePoP(ctx, token, cnf, goidc.DPoPNonceScopeResourceServer)
+}
+
+func validatePoP(ctx oidc.Context, token string, cnf goidc.TokenConfirmation, nonceScope goidc.DPoPNonceScope) error {
+	if err := validateDPoPWithNonceScope(ctx, token, cnf, nonceScope); err != nil {
 		return err
 	}
 
@@ -24,10 +28,18 @@ func ValidatePoP(ctx oidc.Context, token string, cnf goidc.TokenConfirmation) er
 // prove the client's possession of the access token with DPoP if applicable.
 // If token is omitted, the validation of the claim 'ath' of DPoP JWTs is skipped.
 func validateDPoP(ctx oidc.Context, token string, confirmation goidc.TokenConfirmation) error {
+	return validateDPoPWithNonceScope(ctx, token, confirmation, goidc.DPoPNonceScopeResourceServer)
+}
+
+func validateDPoPWithNonceScope(ctx oidc.Context, token string, confirmation goidc.TokenConfirmation, nonceScope goidc.DPoPNonceScope) error {
 	if confirmation.JWKThumbprint == "" {
 		return nil
 	}
 	if !ctx.DPoPEnabled {
+		if nonceScope == goidc.DPoPNonceScopeAuthorizationServer {
+			return goidc.WrapError(goidc.ErrorCodeInvalidDPoPProof, "invalid DPoP proof",
+				errors.New("the token is bound to DPoP, but DPoP support is disabled"))
+		}
 		return goidc.WrapError(goidc.ErrorCodeUnauthorizedClient, "unauthorized client",
 			errors.New("the token is bound to DPoP, but DPoP support is disabled"))
 	}
@@ -35,6 +47,10 @@ func validateDPoP(ctx oidc.Context, token string, confirmation goidc.TokenConfir
 	dpopJWT, ok := dpop.JWT(ctx)
 	if !ok {
 		// The session was created with DPoP, then the DPoP header must be passed.
+		if nonceScope == goidc.DPoPNonceScopeAuthorizationServer {
+			return goidc.WrapError(goidc.ErrorCodeInvalidDPoPProof, "invalid DPoP proof",
+				errors.New("a DPoP proof is required for this token"))
+		}
 		return goidc.WrapError(goidc.ErrorCodeUnauthorizedClient, "unauthorized client",
 			errors.New("a DPoP proof is required for this token"))
 	}
@@ -42,6 +58,8 @@ func validateDPoP(ctx oidc.Context, token string, confirmation goidc.TokenConfir
 	return dpop.ValidateJWT(ctx, dpopJWT, dpop.ValidationOptions{
 		AccessToken:   token,
 		JWKThumbprint: confirmation.JWKThumbprint,
+		NonceScope:    nonceScope,
+		TokenEndpoint: nonceScope == goidc.DPoPNonceScopeAuthorizationServer,
 	})
 }
 

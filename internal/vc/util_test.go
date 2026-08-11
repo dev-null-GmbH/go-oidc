@@ -6,13 +6,13 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidctest"
+	"github.com/dev-null-GmbH/go-oidc/internal/timeutil"
+	vcutil "github.com/dev-null-GmbH/go-oidc/internal/vc/util"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/google/go-cmp/cmp"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/internal/oidctest"
-	"github.com/luikyv/go-oidc/internal/timeutil"
-	vcutil "github.com/luikyv/go-oidc/internal/vc/util"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 func TestNewMetadata(t *testing.T) {

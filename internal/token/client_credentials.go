@@ -5,9 +5,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/luikyv/go-oidc/internal/client"
-	"github.com/luikyv/go-oidc/internal/oidc"
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/client"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 func generateClientCredentialsToken(ctx oidc.Context, req request) (response, error) {
@@ -15,6 +15,7 @@ func generateClientCredentialsToken(ctx oidc.Context, req request) (response, er
 	if err != nil {
 		return response{}, err
 	}
+	authenticatedClientID := c.ID
 
 	if !slices.Contains(c.GrantTypes, goidc.GrantClientCredentials) {
 		return response{}, goidc.WrapError(goidc.ErrorCodeUnauthorizedClient, "unauthorized client",
@@ -27,6 +28,11 @@ func generateClientCredentialsToken(ctx oidc.Context, req request) (response, er
 
 	if err := validateScopes(ctx, req, c, nil); err != nil {
 		return response{}, err
+	}
+
+	if ctx.ResourceIndicatorsEnabled && ctx.ResourceIndicatorsRequired && req.resources == nil {
+		return response{}, goidc.WrapError(goidc.ErrorCodeInvalidTarget, "invalid target",
+			errors.New("the resource parameter is required"))
 	}
 
 	if err := validateResources(ctx, req, nil); err != nil {
@@ -44,7 +50,7 @@ func generateClientCredentialsToken(ctx oidc.Context, req request) (response, er
 		}
 	}
 
-	grant, err := NewGrant(ctx, c, GrantOptions{
+	grantOptions := GrantOptions{
 		Type:                 goidc.GrantClientCredentials,
 		Subject:              c.ID,
 		ClientID:             c.ID,
@@ -53,12 +59,26 @@ func generateClientCredentialsToken(ctx oidc.Context, req request) (response, er
 		Resources:            req.resources,
 		JWKThumbprint:        dpopThumbprint(ctx),
 		ClientCertThumbprint: tlsThumbprint(ctx),
-	})
+	}
+	var grant *goidc.Grant
+	if ctx.UsesAccessTokenClaims() {
+		grant, err = newGrant(ctx, c, grantOptions)
+	} else {
+		grant, err = NewGrant(ctx, c, grantOptions)
+	}
 	if err != nil {
 		return response{}, err
 	}
 
-	tkn, tokenValue, err := Issue(ctx, grant, c, nil)
+	var issuanceOptions *IssuanceOptions
+	if ctx.UsesAccessTokenClaims() {
+		issuanceOptions = &IssuanceOptions{
+			grantType:                 goidc.GrantClientCredentials,
+			authenticatedClientID:     authenticatedClientID,
+			persistGrantBeforeSigning: true,
+		}
+	}
+	tkn, tokenValue, err := Issue(ctx, grant, c, issuanceOptions)
 	if err != nil {
 		return response{}, err
 	}

@@ -1,0 +1,6 @@
+# Principals authorized to sign governed annotated release tags.
+# Add or rotate keys only through a CODEOWNERS-reviewed pull request.
+g@mgp.sh namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEdtDuQRCAoj5V1111wsuqcepZ18d7Gz2Et2tmfzDCEk
+g@mgp.sh namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICx+poUaPlvzSbvicGI0R9CJJLX50kEMYb5ShFWV5YOo
+hax@bbn.family namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGQuQO5R9rX87uuwm9tHi6lUybFrrEWuhEwHVxZvFgw+
+hax@bbn.family namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC8n5buIlrecDFvXbwCByUOm6721OVdTd8GV/l6L4eDE

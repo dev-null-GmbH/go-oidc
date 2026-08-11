@@ -6,9 +6,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/luikyv/go-oidc/internal/hashutil"
-	"github.com/luikyv/go-oidc/internal/oidctest"
-	"github.com/luikyv/go-oidc/pkg/goidc"
+	"github.com/dev-null-GmbH/go-oidc/internal/hashutil"
+	"github.com/dev-null-GmbH/go-oidc/internal/oidctest"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 func TestValidatePoP_NoConfirmation(t *testing.T) {
@@ -177,6 +177,27 @@ func TestValidateDPoP_MissingHeader(t *testing.T) {
 
 	if oidcErr.Code != goidc.ErrorCodeUnauthorizedClient {
 		t.Errorf("Code = %s, want %s", oidcErr.Code, goidc.ErrorCodeUnauthorizedClient)
+	}
+}
+
+func TestValidateDPoPAuthorizationServerMissingHeaderUsesDPoPError(t *testing.T) {
+	ctx := oidctest.NewContext(t)
+	ctx.DPoPEnabled = true
+	cnf := goidc.TokenConfirmation{JWKThumbprint: "random_thumbprint"}
+
+	err := validateDPoPWithNonceScope(
+		ctx,
+		"random_token",
+		cnf,
+		goidc.DPoPNonceScopeAuthorizationServer,
+	)
+
+	var oidcErr goidc.Error
+	if !errors.As(err, &oidcErr) {
+		t.Fatalf("error = %v, want goidc.Error", err)
+	}
+	if oidcErr.Code != goidc.ErrorCodeInvalidDPoPProof {
+		t.Fatalf("error code = %q, want %q", oidcErr.Code, goidc.ErrorCodeInvalidDPoPProof)
 	}
 }
 

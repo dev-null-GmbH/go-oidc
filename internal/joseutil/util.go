@@ -9,10 +9,10 @@ import (
 	"errors"
 	"regexp"
 
+	"github.com/dev-null-GmbH/go-oidc/internal/hashutil"
+	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
-	"github.com/luikyv/go-oidc/internal/hashutil"
-	"github.com/luikyv/go-oidc/pkg/goidc"
 )
 
 func Sign(claims any, signer jose.SigningKey, opts *jose.SignerOptions) (string, error) {
