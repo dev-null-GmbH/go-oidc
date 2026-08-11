@@ -4,6 +4,7 @@ set -euo pipefail
 
 repository="${GITHUB_REPOSITORY:-dev-null-GmbH/go-oidc}"
 api_version="2026-03-10"
+tool_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ -z "${GH_TOKEN:-}" ]]; then
   echo "GH_TOKEN is required to audit repository settings" >&2
@@ -32,6 +33,9 @@ require_json() {
 }
 
 repository_json="$(api "repos/$repository")"
+merge_settings_json="$(
+  "$tool_root/scripts/select-repository-merge-settings.sh" "$repository"
+)"
 actions_json="$(api "repos/$repository/actions/permissions")"
 workflow_permissions_json="$(api "repos/$repository/actions/permissions/workflow")"
 selected_actions_json="$(
@@ -68,10 +72,10 @@ require_json "issues are enabled for non-sensitive coordination" \
 require_json "the governed default branch is main" \
   '.default_branch == "main"' "$repository_json"
 require_json "merged branches are deleted" \
-  '.delete_branch_on_merge == true' "$repository_json"
+  '.deleteBranchOnMerge == true' "$merge_settings_json"
 require_json "reviewed changes merge as an exact squash commit" \
-  '.allow_squash_merge == true and .allow_merge_commit == false and
-   .allow_rebase_merge == false' "$repository_json"
+  '.squashMergeAllowed == true and .mergeCommitAllowed == false and
+   .rebaseMergeAllowed == false' "$merge_settings_json"
 require_json "Dependabot security updates are enabled" \
   '.security_and_analysis.dependabot_security_updates.status == "enabled"' \
   "$repository_json"
