@@ -269,6 +269,7 @@ type cibaResponse struct {
 func newAuthnSession(ctx oidc.Context, params goidc.AuthorizationParameters, c *goidc.Client) *goidc.AuthnSession {
 	return &goidc.AuthnSession{
 		ID:                      ctx.AuthnSessionID(),
+		PersistenceID:           ctx.AuthnSessionPersistenceID(),
 		Status:                  goidc.StatusPending,
 		ClientID:                c.ID,
 		AuthorizationParameters: params,

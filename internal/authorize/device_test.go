@@ -50,15 +50,16 @@ func TestInitDeviceAuth(t *testing.T) {
 				session := sessions[0]
 
 				wantSession := goidc.AuthnSession{
-					ID:         session.ID,
-					Status:     goidc.StatusPending,
-					ClientID:   client.ID,
-					DeviceCode: "random_device_code",
-					UserCode:   "random_user_code",
-					PolicyID:   ctx.DevicePolicies[0].ID,
-					ExpiresAt:  session.ExpiresAt,
-					CreatedAt:  session.CreatedAt,
-					Store:      session.Store,
+					ID:            session.ID,
+					PersistenceID: "random_authn_session_persistence_id",
+					Status:        goidc.StatusPending,
+					ClientID:      client.ID,
+					DeviceCode:    "random_device_code",
+					UserCode:      "random_user_code",
+					PolicyID:      ctx.DevicePolicies[0].ID,
+					ExpiresAt:     session.ExpiresAt,
+					CreatedAt:     session.CreatedAt,
+					Store:         session.Store,
 					AuthorizationParameters: goidc.AuthorizationParameters{
 						Scopes: client.ScopeIDs,
 					},
@@ -529,6 +530,9 @@ func setUpDevice(t *testing.T) (oidc.Context, *goidc.Client) {
 	ctx.DeviceAuthPollingIntervalSecs = 5
 	ctx.AuthSessionIDFunc = func(context.Context) string {
 		return "random_session_id"
+	}
+	ctx.AuthSessionPersistenceIDFunc = func(context.Context) string {
+		return "random_authn_session_persistence_id"
 	}
 	ctx.GrantIDFunc = func(context.Context) string {
 		return "random_grant_id"

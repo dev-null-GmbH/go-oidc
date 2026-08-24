@@ -333,6 +333,10 @@ func (ctx Context) AuthnSessionID() string {
 	return ctx.AuthSessionIDFunc(ctx)
 }
 
+func (ctx Context) AuthnSessionPersistenceID() string {
+	return ctx.AuthSessionPersistenceIDFunc(ctx)
+}
+
 func (ctx Context) PARID() string {
 	return ctx.PARIDFunc(ctx)
 }

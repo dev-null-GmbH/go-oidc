@@ -2,15 +2,51 @@ package authorize
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
 
+	"github.com/dev-null-GmbH/go-oidc/internal/oidctest"
 	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
+
+func TestNewAuthnSessionAllocatesPersistenceIDExactlyOnce(t *testing.T) {
+	ctx := oidctest.NewContext(t)
+	client, _ := oidctest.NewClient(t)
+
+	var sessionIDCalls int
+	ctx.AuthSessionIDFunc = func(context.Context) string {
+		sessionIDCalls++
+		return "authn_session_id"
+	}
+	var persistenceIDCalls int
+	ctx.AuthSessionPersistenceIDFunc = func(context.Context) string {
+		persistenceIDCalls++
+		return "authn_session_persistence_id"
+	}
+
+	session := newAuthnSession(ctx, goidc.AuthorizationParameters{}, client)
+
+	if session.ID != "authn_session_id" {
+		t.Fatalf("ID = %q, want %q", session.ID, "authn_session_id")
+	}
+	if session.PersistenceID != "authn_session_persistence_id" {
+		t.Fatalf("PersistenceID = %q, want %q", session.PersistenceID, "authn_session_persistence_id")
+	}
+	if session.ID == session.PersistenceID {
+		t.Fatal("authentication session ID and persistence ID must be generated independently")
+	}
+	if sessionIDCalls != 1 {
+		t.Fatalf("AuthSessionIDFunc calls = %d, want 1", sessionIDCalls)
+	}
+	if persistenceIDCalls != 1 {
+		t.Fatalf("AuthSessionPersistenceIDFunc calls = %d, want 1", persistenceIDCalls)
+	}
+}
 
 func TestNewRequest(t *testing.T) {
 	// Given.

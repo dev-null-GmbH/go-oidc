@@ -23,6 +23,9 @@ func TestInitBackAuth(t *testing.T) {
 		ctx.AuthSessionIDFunc = func(_ context.Context) string {
 			return "random_authn_session_id"
 		}
+		ctx.AuthSessionPersistenceIDFunc = func(_ context.Context) string {
+			return "random_authn_session_persistence_id"
+		}
 		ctx.CIBAIDFunc = func(_ context.Context) string {
 			return "random_auth_req_id"
 		}
@@ -83,13 +86,14 @@ func TestInitBackAuth(t *testing.T) {
 				session := sessions[0]
 
 				wantSession := goidc.AuthnSession{
-					ID:        session.ID,
-					Status:    goidc.StatusPending,
-					AuthReqID: session.AuthReqID,
-					ClientID:  client.ID,
-					ExpiresAt: session.ExpiresAt,
-					CreatedAt: session.CreatedAt,
-					Store:     session.Store,
+					ID:            session.ID,
+					PersistenceID: "random_authn_session_persistence_id",
+					Status:        goidc.StatusPending,
+					AuthReqID:     session.AuthReqID,
+					ClientID:      client.ID,
+					ExpiresAt:     session.ExpiresAt,
+					CreatedAt:     session.CreatedAt,
+					Store:         session.Store,
 					AuthorizationParameters: goidc.AuthorizationParameters{
 						LoginHint:               "random_hint",
 						ClientNotificationToken: "random_token",
@@ -130,13 +134,14 @@ func TestInitBackAuth(t *testing.T) {
 				session := sessions[0]
 
 				wantSession := goidc.AuthnSession{
-					ID:        session.ID,
-					Status:    goidc.StatusPending,
-					AuthReqID: session.AuthReqID,
-					ClientID:  client.ID,
-					ExpiresAt: session.ExpiresAt,
-					CreatedAt: session.CreatedAt,
-					Store:     session.Store,
+					ID:            session.ID,
+					PersistenceID: "random_authn_session_persistence_id",
+					Status:        goidc.StatusPending,
+					AuthReqID:     session.AuthReqID,
+					ClientID:      client.ID,
+					ExpiresAt:     session.ExpiresAt,
+					CreatedAt:     session.CreatedAt,
+					Store:         session.Store,
 					AuthorizationParameters: goidc.AuthorizationParameters{
 						LoginHint: "random_hint",
 					},
@@ -177,13 +182,14 @@ func TestInitBackAuth(t *testing.T) {
 				session := sessions[0]
 
 				wantSession := goidc.AuthnSession{
-					ID:        session.ID,
-					Status:    goidc.StatusPending,
-					AuthReqID: session.AuthReqID,
-					ClientID:  client.ID,
-					ExpiresAt: session.ExpiresAt,
-					CreatedAt: session.CreatedAt,
-					Store:     session.Store,
+					ID:            session.ID,
+					PersistenceID: "random_authn_session_persistence_id",
+					Status:        goidc.StatusPending,
+					AuthReqID:     session.AuthReqID,
+					ClientID:      client.ID,
+					ExpiresAt:     session.ExpiresAt,
+					CreatedAt:     session.CreatedAt,
+					Store:         session.Store,
 					AuthorizationParameters: goidc.AuthorizationParameters{
 						LoginHint:               "random_hint",
 						ClientNotificationToken: "random_token",
@@ -263,13 +269,14 @@ func TestInitBackAuth(t *testing.T) {
 				session := sessions[0]
 
 				wantSession := goidc.AuthnSession{
-					ID:        session.ID,
-					Status:    goidc.StatusPending,
-					AuthReqID: session.AuthReqID,
-					ClientID:  client.ID,
-					ExpiresAt: session.ExpiresAt,
-					CreatedAt: session.CreatedAt,
-					Store:     session.Store,
+					ID:            session.ID,
+					PersistenceID: "random_authn_session_persistence_id",
+					Status:        goidc.StatusPending,
+					AuthReqID:     session.AuthReqID,
+					ClientID:      client.ID,
+					ExpiresAt:     session.ExpiresAt,
+					CreatedAt:     session.CreatedAt,
+					Store:         session.Store,
 					AuthorizationParameters: goidc.AuthorizationParameters{
 						Scopes:                  client.ScopeIDs,
 						LoginHint:               "random_hint",

@@ -28,6 +28,20 @@ func TestPushAuth(t *testing.T) {
 		ctx.AuthSessionIDFunc = func(_ context.Context) string {
 			return "random_authn_session_id"
 		}
+		var persistenceIDCalls int
+		ctx.AuthSessionPersistenceIDFunc = func(_ context.Context) string {
+			persistenceIDCalls++
+			return "random_authn_session_persistence_id"
+		}
+		ctx.PARHandleSessionFunc = func(_ context.Context, session *goidc.AuthnSession, _ *goidc.Client) error {
+			if persistenceIDCalls != 1 {
+				t.Fatalf("AuthSessionPersistenceIDFunc calls before persistence = %d, want 1", persistenceIDCalls)
+			}
+			if session.PersistenceID != "random_authn_session_persistence_id" {
+				t.Fatalf("PAR handler PersistenceID = %q, want %q", session.PersistenceID, "random_authn_session_persistence_id")
+			}
+			return nil
+		}
 		ctx.PARIDFunc = func(_ context.Context) string {
 			return "random_pushed_auth_req_id"
 		}
@@ -78,6 +92,9 @@ func TestPushAuth(t *testing.T) {
 		ctx.JARSigAlgs = []goidc.SignatureAlgorithm{goidc.SigAlgRS256}
 		ctx.AuthSessionIDFunc = func(_ context.Context) string {
 			return "random_authn_session_id"
+		}
+		ctx.AuthSessionPersistenceIDFunc = func(_ context.Context) string {
+			return "random_authn_session_persistence_id"
 		}
 		ctx.PARIDFunc = func(_ context.Context) string {
 			return "random_pushed_auth_req_id"
@@ -201,6 +218,12 @@ func TestPushAuth(t *testing.T) {
 				if session.ID == "" {
 					t.Fatal("expected session id to be set")
 				}
+				if session.PersistenceID != "random_authn_session_persistence_id" {
+					t.Fatalf("PersistenceID = %q, want %q", session.PersistenceID, "random_authn_session_persistence_id")
+				}
+				if session.PersistenceID == session.ID || session.PersistenceID == session.PushedAuthReqID {
+					t.Fatal("persistence ID must be generated independently from session and PAR IDs")
+				}
 				if session.ClientID != client.ID {
 					t.Errorf("ClientID = %q, want %q", session.ClientID, client.ID)
 				}
@@ -213,6 +236,7 @@ func TestPushAuth(t *testing.T) {
 
 				wantSession := goidc.AuthnSession{
 					ID:              session.ID,
+					PersistenceID:   "random_authn_session_persistence_id",
 					Status:          goidc.StatusPending,
 					PushedAuthReqID: session.PushedAuthReqID,
 					ClientID:        client.ID,
@@ -277,9 +301,16 @@ func TestPushAuth(t *testing.T) {
 					t.Fatalf("len(sessions) = %d, want 1", len(sessions))
 				}
 				session := sessions[0]
+				if session.PersistenceID != "random_authn_session_persistence_id" {
+					t.Fatalf("PersistenceID = %q, want %q", session.PersistenceID, "random_authn_session_persistence_id")
+				}
+				if session.PersistenceID == session.ID || session.PersistenceID == session.PushedAuthReqID {
+					t.Fatal("persistence ID must be generated independently from session and PAR IDs")
+				}
 
 				wantSession := goidc.AuthnSession{
 					ID:              session.ID,
+					PersistenceID:   "random_authn_session_persistence_id",
 					Status:          goidc.StatusPending,
 					PushedAuthReqID: session.PushedAuthReqID,
 					ClientID:        client.ID,

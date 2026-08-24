@@ -1187,12 +1187,16 @@ func TestSimpleHelpers(t *testing.T) {
 
 		ctx.LogoutSessionIDFunc = func(context.Context) string { return "logout_session_id" }
 		ctx.AuthSessionIDFunc = func(context.Context) string { return "authn_session_id" }
+		ctx.AuthSessionPersistenceIDFunc = func(context.Context) string { return "authn_session_persistence_id" }
 		ctx.DeviceAuthGenerateUserCodeFunc = func(context.Context) string { return "user_code" }
 		if got := ctx.LogoutSessionID(); got != "logout_session_id" {
 			t.Fatalf("LogoutSessionID() = %q, want %q", got, "logout_session_id")
 		}
 		if got := ctx.AuthnSessionID(); got != "authn_session_id" {
 			t.Fatalf("AuthnSessionID() = %q, want %q", got, "authn_session_id")
+		}
+		if got := ctx.AuthnSessionPersistenceID(); got != "authn_session_persistence_id" {
+			t.Fatalf("AuthnSessionPersistenceID() = %q, want %q", got, "authn_session_persistence_id")
 		}
 		if got := ctx.DeviceUserCode(); got != "user_code" {
 			t.Fatalf("DeviceUserCode() = %q, want %q", got, "user_code")

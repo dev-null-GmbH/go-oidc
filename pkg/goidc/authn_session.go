@@ -5,8 +5,12 @@ package goidc
 // It can be interacted with so to implement more sophisticated user
 // authentication flows.
 type AuthnSession struct {
-	ID     string `json:"id"`
-	Status Status `json:"status"`
+	ID string `json:"id"`
+	// PersistenceID is the stable operation identifier assigned when the
+	// authentication session is first created. Persistence adapters can use it
+	// to correlate retries without overloading ID or Store.
+	PersistenceID string `json:"persistence_id,omitempty"`
+	Status        Status `json:"status"`
 	// Subject is the user identifier.
 	//
 	// This value must be informed during the authentication flow.

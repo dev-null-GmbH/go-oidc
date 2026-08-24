@@ -13,11 +13,12 @@ type Configuration struct {
 	// authorization server issuer.
 	Host string
 
-	AuthManager          goidc.AuthManager
-	AuthTimeoutSecs      int
-	AuthCodeFunc         goidc.RandomFunc
-	AuthCodeLifetimeSecs int
-	AuthSessionIDFunc    goidc.RandomFunc
+	AuthManager                  goidc.AuthManager
+	AuthTimeoutSecs              int
+	AuthCodeFunc                 goidc.RandomFunc
+	AuthCodeLifetimeSecs         int
+	AuthSessionIDFunc            goidc.RandomFunc
+	AuthSessionPersistenceIDFunc goidc.RandomFunc
 
 	OpaqueTokenEnabled bool
 	OpaqueTokenManager goidc.OpaqueTokenManager

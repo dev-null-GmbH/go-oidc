@@ -189,6 +189,9 @@ func NewContext(tb testing.TB) oidc.Context {
 		VCISelfOfferIDFunc: func(context.Context) string {
 			return uuid.NewString()
 		},
+		AuthSessionPersistenceIDFunc: func(context.Context) string {
+			return uuid.NewString()
+		},
 		AuthTimeoutSecs: 60,
 		AuthnMethods: []goidc.AuthnMethod{
 			goidc.AuthnMethodNone,

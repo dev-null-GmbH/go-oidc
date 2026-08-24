@@ -2700,6 +2700,29 @@ func TestWithAuthnSessionIDFunc(t *testing.T) {
 	}
 }
 
+func TestWithAuthnSessionPersistenceIDFunc(t *testing.T) {
+	// Given.
+	p := &Provider{
+		config: oidc.Configuration{},
+	}
+	idFunc := func(context.Context) string { return "authn_session_persistence_id" }
+
+	// When.
+	err := WithAuthnSessionPersistenceIDFunc(idFunc)(p)
+
+	// Then.
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if p.config.AuthSessionPersistenceIDFunc == nil {
+		t.Fatal("AuthSessionPersistenceIDFunc cannot be nil")
+	}
+	if got := p.config.AuthSessionPersistenceIDFunc(t.Context()); got != "authn_session_persistence_id" {
+		t.Fatalf("AuthSessionPersistenceIDFunc() = %q, want %q", got, "authn_session_persistence_id")
+	}
+}
+
 func TestWithJWTID(t *testing.T) {
 	// Given.
 	p := &Provider{

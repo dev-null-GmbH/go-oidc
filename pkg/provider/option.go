@@ -772,6 +772,15 @@ func WithAuthnSessionIDFunc(f goidc.RandomFunc) Option {
 	}
 }
 
+// WithAuthnSessionPersistenceIDFunc sets the function used to generate stable
+// authentication session persistence operation IDs.
+func WithAuthnSessionPersistenceIDFunc(f goidc.RandomFunc) Option {
+	return func(p *Provider) error {
+		p.config.AuthSessionPersistenceIDFunc = f
+		return nil
+	}
+}
+
 // WithAuthSessionLifetime sets the user authentication session lifetime.
 // This defines how long an authorization request may last.
 // The default is [defaultAuthnSessionTimeoutSecs].

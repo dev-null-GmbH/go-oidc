@@ -212,6 +212,7 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 	op.config.GrantIDFunc = nonZeroOrDefault(op.config.GrantIDFunc, defaultGrantIDFunc)
 	op.config.JWTIDFunc = nonZeroOrDefault(op.config.JWTIDFunc, defaultJWTIDFunc)
 	op.config.AuthSessionIDFunc = nonZeroOrDefault(op.config.AuthSessionIDFunc, defaultSessionIDFunc)
+	op.config.AuthSessionPersistenceIDFunc = nonZeroOrDefault(op.config.AuthSessionPersistenceIDFunc, defaultAuthnSessionPersistenceIDFunc)
 
 	if slices.Contains(op.config.GrantTypes, goidc.GrantAuthorizationCode) {
 		op.config.AuthManager = nonZeroOrDefault(op.config.AuthManager, goidc.AuthManager(inmemoryManager))
@@ -868,6 +869,10 @@ func defaultJWTIDFunc(_ context.Context) string {
 
 func defaultSessionIDFunc(_ context.Context) string {
 	return uuid.NewString()
+}
+
+func defaultAuthnSessionPersistenceIDFunc(_ context.Context) string {
+	return uuid.Must(uuid.NewV7()).String()
 }
 
 func cacheControlMiddleware(next http.Handler) http.Handler {

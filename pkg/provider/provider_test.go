@@ -14,6 +14,7 @@ import (
 	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/google/uuid"
 )
 
 func TestNew(t *testing.T) {
@@ -59,6 +60,7 @@ func TestNew(t *testing.T) {
 				"OpaqueTokenManager",
 				"JWKSFunc",
 				"AuthSessionIDFunc",
+				"AuthSessionPersistenceIDFunc",
 				"GrantIDFunc",
 				"JWTIDFunc",
 				"OpaqueTokenFunc",
@@ -88,41 +90,41 @@ func TestNew(t *testing.T) {
 			setup: func() (Config, []Option) {
 				manager := storage.NewManager(100)
 				return Config{
-						Issuer:      issuer,
-						JWKS:        jwksFunc,
-						IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
-					}, []Option{
-						WithAuthCodeGrant(AuthCodeGrantConfig{
-							Manager: manager,
-							ResponseTypes: []goidc.ResponseType{goidc.ResponseTypeCode, goidc.ResponseTypeToken,
-								goidc.ResponseTypeIDToken, goidc.ResponseTypeIDTokenAndToken, goidc.ResponseTypeCodeAndIDToken,
-								goidc.ResponseTypeCodeAndToken, goidc.ResponseTypeCodeAndIDTokenAndToken},
-						},
-							WithPAR(manager),
-							WithJAR([]goidc.SignatureAlgorithm{goidc.SigAlgRS256}, WithJAREncryption(
-								[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
-								[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256},
-							)),
-							WithJARM([]goidc.SignatureAlgorithm{goidc.SigAlgRS256}),
-							WithFormPostResponseMode(),
-						),
-						WithCIBAGrant(CIBAGrantConfig{
-							Manager:       manager,
-							DeliveryModes: []goidc.CIBATokenDeliveryMode{goidc.CIBADeliveryModePoll},
-						},
-							WithCIBASessionHandler(nil),
-						),
-						WithPrivateKeyJWTAuthn(goidc.SigAlgRS256),
-						WithSecretJWTAuthn(goidc.SigAlgHS256),
-						WithDCR(manager),
-						WithTokenIntrospection(nil),
-						WithTokenRevocation(nil),
-						WithUserInfoSignatureAlgs(goidc.SigAlgPS256),
-						WithUserInfoEncryption(
+					Issuer:      issuer,
+					JWKS:        jwksFunc,
+					IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
+				}, []Option{
+					WithAuthCodeGrant(AuthCodeGrantConfig{
+						Manager: manager,
+						ResponseTypes: []goidc.ResponseType{goidc.ResponseTypeCode, goidc.ResponseTypeToken,
+							goidc.ResponseTypeIDToken, goidc.ResponseTypeIDTokenAndToken, goidc.ResponseTypeCodeAndIDToken,
+							goidc.ResponseTypeCodeAndToken, goidc.ResponseTypeCodeAndIDTokenAndToken},
+					},
+						WithPAR(manager),
+						WithJAR([]goidc.SignatureAlgorithm{goidc.SigAlgRS256}, WithJAREncryption(
 							[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
 							[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256},
-						),
-					}
+						)),
+						WithJARM([]goidc.SignatureAlgorithm{goidc.SigAlgRS256}),
+						WithFormPostResponseMode(),
+					),
+					WithCIBAGrant(CIBAGrantConfig{
+						Manager:       manager,
+						DeliveryModes: []goidc.CIBATokenDeliveryMode{goidc.CIBADeliveryModePoll},
+					},
+						WithCIBASessionHandler(nil),
+					),
+					WithPrivateKeyJWTAuthn(goidc.SigAlgRS256),
+					WithSecretJWTAuthn(goidc.SigAlgHS256),
+					WithDCR(manager),
+					WithTokenIntrospection(nil),
+					WithTokenRevocation(nil),
+					WithUserInfoSignatureAlgs(goidc.SigAlgPS256),
+					WithUserInfoEncryption(
+						[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
+						[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256},
+					),
+				}
 			},
 			want: oidc.Configuration{
 				Profile:                  goidc.ProfileOpenID,
@@ -200,6 +202,7 @@ func TestNew(t *testing.T) {
 				"AuthManager",
 				"AuthCodeFunc",
 				"AuthSessionIDFunc",
+				"AuthSessionPersistenceIDFunc",
 				"PARIDFunc",
 				"PARHandleSessionFunc",
 				"DCRManager",
@@ -258,6 +261,32 @@ func TestNew(t *testing.T) {
 				t.Error(diff)
 			}
 		})
+	}
+}
+
+func TestNewDefaultsAuthnSessionPersistenceIDFunc(t *testing.T) {
+	op, err := New(Config{
+		Issuer: "https://example.com",
+		JWKS: func(context.Context) (goidc.JSONWebKeySet, error) {
+			return goidc.JSONWebKeySet{}, nil
+		},
+		IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if op.config.AuthSessionPersistenceIDFunc == nil {
+		t.Fatal("default AuthSessionPersistenceIDFunc cannot be nil")
+	}
+
+	sessionID := op.config.AuthSessionIDFunc(t.Context())
+	persistenceID := op.config.AuthSessionPersistenceIDFunc(t.Context())
+	parsedPersistenceID, err := uuid.Parse(persistenceID)
+	if err != nil || parsedPersistenceID.Version() != 7 || parsedPersistenceID.String() != persistenceID {
+		t.Fatalf("default AuthSessionPersistenceIDFunc returned %q, want canonical UUIDv7", persistenceID)
+	}
+	if persistenceID == sessionID {
+		t.Fatal("default persistence ID must be generated independently from the authentication session ID")
 	}
 }
 

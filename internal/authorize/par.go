@@ -75,6 +75,7 @@ func pushAuth(ctx oidc.Context, req request) (parResponse, error) {
 
 			return &goidc.AuthnSession{
 				ID:                      ctx.AuthnSessionID(),
+				PersistenceID:           ctx.AuthnSessionPersistenceID(),
 				Status:                  goidc.StatusPending,
 				PushedAuthReqID:         ctx.PARID(),
 				ClientID:                c.ID,
@@ -93,6 +94,7 @@ func pushAuth(ctx oidc.Context, req request) (parResponse, error) {
 
 		return &goidc.AuthnSession{
 			ID:                      ctx.AuthnSessionID(),
+			PersistenceID:           ctx.AuthnSessionPersistenceID(),
 			Status:                  goidc.StatusPending,
 			PushedAuthReqID:         ctx.PARID(),
 			ClientID:                c.ID,
