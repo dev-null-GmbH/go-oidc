@@ -16,6 +16,7 @@ import (
 )
 
 func pushAuth(ctx oidc.Context, req request) (parResponse, error) {
+	ctx = ctx.BeginPARClientAuthentication()
 	var shouldRegisterFedClient bool
 	c, err := func() (*goidc.Client, error) {
 		if !ctx.OpenIDFedEnabled {
@@ -54,6 +55,13 @@ func pushAuth(ctx oidc.Context, req request) (parResponse, error) {
 	if err != nil {
 		return parResponse{}, err
 	}
+	if err := parRequestContextError(ctx); err != nil {
+		return parResponse{}, err
+	}
+	clientAssertionAuthority, err := ctx.PARClientAssertionAuthority(c)
+	if err != nil {
+		return parResponse{}, goidc.WrapError(goidc.ErrorCodeServerError, "server error", err)
+	}
 
 	as, err := func() (*goidc.AuthnSession, error) {
 		jar := ctx.JAREnabled && (ctx.JARRequired || c.JARRequired || req.RequestObject != "")
@@ -74,17 +82,18 @@ func pushAuth(ctx oidc.Context, req request) (parResponse, error) {
 			}
 
 			return &goidc.AuthnSession{
-				ID:                      ctx.AuthnSessionID(),
-				PersistenceID:           ctx.AuthnSessionPersistenceID(),
-				Status:                  goidc.StatusPending,
-				PushedAuthReqID:         ctx.PARID(),
-				ClientID:                c.ID,
-				AuthorizationParameters: jar.AuthorizationParameters,
-				CreatedAt:               timeutil.TimestampNow(),
-				ExpiresAt:               timeutil.TimestampNow() + ctx.PARLifetimeSecs,
-				JWKThumbprint:           dpopThumbprintForPAR(ctx, req),
-				ClientCertThumbprint:    tlsThumbprint(ctx),
-				Store:                   make(map[string]any),
+				ID:                       ctx.AuthnSessionID(),
+				PersistenceID:            ctx.AuthnSessionPersistenceID(),
+				Status:                   goidc.StatusPending,
+				PushedAuthReqID:          ctx.PARID(),
+				ClientID:                 c.ID,
+				ClientAssertionAuthority: cloneClientAssertionAuthority(clientAssertionAuthority),
+				AuthorizationParameters:  jar.AuthorizationParameters,
+				CreatedAt:                timeutil.TimestampNow(),
+				ExpiresAt:                timeutil.TimestampNow() + ctx.PARLifetimeSecs,
+				JWKThumbprint:            dpopThumbprintForPAR(ctx, req),
+				ClientCertThumbprint:     tlsThumbprint(ctx),
+				Store:                    make(map[string]any),
 			}, nil
 		}
 
@@ -93,20 +102,24 @@ func pushAuth(ctx oidc.Context, req request) (parResponse, error) {
 		}
 
 		return &goidc.AuthnSession{
-			ID:                      ctx.AuthnSessionID(),
-			PersistenceID:           ctx.AuthnSessionPersistenceID(),
-			Status:                  goidc.StatusPending,
-			PushedAuthReqID:         ctx.PARID(),
-			ClientID:                c.ID,
-			AuthorizationParameters: req.AuthorizationParameters,
-			CreatedAt:               timeutil.TimestampNow(),
-			ExpiresAt:               timeutil.TimestampNow() + ctx.PARLifetimeSecs,
-			JWKThumbprint:           dpopThumbprintForPAR(ctx, req),
-			ClientCertThumbprint:    tlsThumbprint(ctx),
-			Store:                   make(map[string]any),
+			ID:                       ctx.AuthnSessionID(),
+			PersistenceID:            ctx.AuthnSessionPersistenceID(),
+			Status:                   goidc.StatusPending,
+			PushedAuthReqID:          ctx.PARID(),
+			ClientID:                 c.ID,
+			ClientAssertionAuthority: cloneClientAssertionAuthority(clientAssertionAuthority),
+			AuthorizationParameters:  req.AuthorizationParameters,
+			CreatedAt:                timeutil.TimestampNow(),
+			ExpiresAt:                timeutil.TimestampNow() + ctx.PARLifetimeSecs,
+			JWKThumbprint:            dpopThumbprintForPAR(ctx, req),
+			ClientCertThumbprint:     tlsThumbprint(ctx),
+			Store:                    make(map[string]any),
 		}, nil
 	}()
 	if err != nil {
+		return parResponse{}, err
+	}
+	if err := parRequestContextError(ctx); err != nil {
 		return parResponse{}, err
 	}
 
@@ -117,21 +130,66 @@ func pushAuth(ctx oidc.Context, req request) (parResponse, error) {
 		}
 		return parResponse{}, fmt.Errorf("could not handle the pushed authorization request session: %w", err)
 	}
+	if !clientAssertionAuthoritiesEqual(as.ClientAssertionAuthority, clientAssertionAuthority) {
+		return parResponse{}, goidc.WrapError(
+			goidc.ErrorCodeServerError,
+			"server error",
+			errors.New("the PAR session handler modified authenticated client assertion authority evidence"),
+		)
+	}
+	// Replace the handler-visible pointer so a retained authority pointer cannot
+	// mutate the evidence subsequently passed to persistence.
+	as.ClientAssertionAuthority = cloneClientAssertionAuthority(clientAssertionAuthority)
+	persistedSession := *as
+	persistedSession.ClientAssertionAuthority = cloneClientAssertionAuthority(clientAssertionAuthority)
+	if err := parRequestContextError(ctx); err != nil {
+		return parResponse{}, err
+	}
 
 	if shouldRegisterFedClient {
 		if err := ctx.OpenIDFedSaveClient(c); err != nil {
 			return parResponse{}, fmt.Errorf("could not save the federated client for the pushed authorization request: %w", err)
 		}
 	}
+	if err := parRequestContextError(ctx); err != nil {
+		return parResponse{}, err
+	}
 
-	if err := ctx.AuthSaveSession(as); err != nil {
+	if err := ctx.AuthSaveSession(&persistedSession); err != nil {
 		return parResponse{}, fmt.Errorf("could not save the pushed authorization request session: %w", err)
 	}
 
 	return parResponse{
-		RequestURI: parRequestURIPrefix + as.PushedAuthReqID,
+		RequestURI: parRequestURIPrefix + persistedSession.PushedAuthReqID,
 		ExpiresIn:  ctx.PARLifetimeSecs,
 	}, nil
+}
+
+func parRequestContextError(ctx oidc.Context) error {
+	if err := ctx.Err(); err != nil {
+		return goidc.WrapError(goidc.ErrorCodeServerError, "server error", err)
+	}
+	return nil
+}
+
+func cloneClientAssertionAuthority(
+	authority *goidc.VerifiedClientAssertionAuthority,
+) *goidc.VerifiedClientAssertionAuthority {
+	if authority == nil {
+		return nil
+	}
+	clone := *authority
+	return &clone
+}
+
+func clientAssertionAuthoritiesEqual(
+	left *goidc.VerifiedClientAssertionAuthority,
+	right *goidc.VerifiedClientAssertionAuthority,
+) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 // dpopThumbprintForPAR extracts the DPoP JWK thumbprint from the request.

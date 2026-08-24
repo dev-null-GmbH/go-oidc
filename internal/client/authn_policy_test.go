@@ -2,6 +2,9 @@ package client_test
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -43,6 +46,9 @@ func TestPrivateKeyJWTAssertionPolicyRunsBeforeJTIConsumption(t *testing.T) {
 	var calls []string
 	ctx.PrivateKeyJWTAssertionPolicyFunc = func(_ context.Context, assertion goidc.VerifiedClientAssertion) error {
 		calls = append(calls, "policy")
+		if assertion.Authority != nil {
+			t.Errorf("legacy JWKS assertion authority = %#v, want nil", assertion.Authority)
+		}
 		if assertion.AuthenticatedClientID != c.ID {
 			t.Errorf("policy authenticated client ID = %q, want %q", assertion.AuthenticatedClientID, c.ID)
 		}
@@ -87,6 +93,471 @@ func TestPrivateKeyJWTAssertionPolicyRunsBeforeJTIConsumption(t *testing.T) {
 	}
 	if want := []string{"policy", "consume"}; !reflect.DeepEqual(calls, want) {
 		t.Fatalf("call order = %v, want %v", calls, want)
+	}
+}
+
+func TestPrivateKeyJWTAssertionPolicyReceivesMatchedAuthorityBinding(t *testing.T) {
+	ctx, c, signingKey := setUpPrivateKeyJWTAuthn(t)
+	legacyKey := oidctest.PrivateRS256JWK(t, signingKey.KeyID, goidc.KeyUsageSignature)
+	decoyKey := oidctest.PrivateRS256JWK(t, "decoy-key", goidc.KeyUsageSignature)
+	c.JWKS = &goidc.JSONWebKeySet{Keys: []goidc.JSONWebKey{legacyKey.Public()}}
+	c.PrivateKeyJWTAuthority = &goidc.PrivateKeyJWTAuthority{
+		SnapshotRevision: 23,
+		Keys: []goidc.PrivateKeyJWTAuthorityKey{
+			{
+				Key:            decoyKey.Public(),
+				KeyAuthorityID: "019c84de-89a7-7c86-840c-03670c737ee4",
+			},
+			{
+				Key:            signingKey.Public(),
+				KeyAuthorityID: "019c84de-c2d7-7d3b-9d90-b7ab9555112d",
+			},
+		},
+	}
+
+	now := timeutil.TimestampNow()
+	claims := map[string]any{
+		goidc.ClaimIssuer:   c.ID,
+		goidc.ClaimSubject:  c.ID,
+		goidc.ClaimAudience: ctx.Issuer(),
+		goidc.ClaimIssuedAt: now,
+		goidc.ClaimExpiry:   now + ctx.JWTLifetimeSecs - 10,
+		goidc.ClaimTokenID:  "assertion-id",
+		"snapshot_revision": 999,
+		"key_authority_id":  "attacker-controlled-claim",
+	}
+	assertion := oidctest.SignWithOptions(t, claims, signingKey,
+		(&jose.SignerOptions{}).
+			WithHeader("snapshot_revision", 998).
+			WithHeader("key_authority_id", "attacker-controlled-header"))
+	ctx.Request.PostForm = map[string][]string{
+		"client_assertion":      {assertion},
+		"client_assertion_type": {string(goidc.AssertionTypeJWTBearer)},
+	}
+
+	ctx.PrivateKeyJWTAssertionPolicyFunc = func(_ context.Context, verified goidc.VerifiedClientAssertion) error {
+		// Mutating the resolver-owned value after verification must not alter the
+		// authority binding captured for this callback.
+		c.PrivateKeyJWTAuthority.SnapshotRevision = 999
+		c.PrivateKeyJWTAuthority.Keys[1].KeyAuthorityID = "mutated-after-verification"
+
+		if verified.Authority == nil {
+			t.Fatal("verified authority binding is nil")
+		}
+		if verified.Authority.SnapshotRevision != 23 {
+			t.Errorf("authority snapshot revision = %d, want 23", verified.Authority.SnapshotRevision)
+		}
+		if verified.Authority.KeyAuthorityID != "019c84de-c2d7-7d3b-9d90-b7ab9555112d" {
+			t.Errorf("authority key ID = %q, want resolver-owned key ID", verified.Authority.KeyAuthorityID)
+		}
+		if verified.Header.KeyID != signingKey.KeyID {
+			t.Errorf("untrusted header kid = %q, want %q", verified.Header.KeyID, signingKey.KeyID)
+		}
+		return nil
+	}
+
+	if _, err := client.Authenticated(ctx, client.AuthnContextToken); err != nil {
+		t.Fatalf("Authenticated() error = %v", err)
+	}
+}
+
+func TestPrivateKeyJWTAuthorityRejectsRotatedKeyWithReusedHeaderKeyID(t *testing.T) {
+	ctx, c, rotatedKey := setUpPrivateKeyJWTAuthn(t)
+	currentKey := oidctest.PrivateRS256JWK(t, rotatedKey.KeyID, goidc.KeyUsageSignature)
+	c.JWKS = &goidc.JSONWebKeySet{Keys: []goidc.JSONWebKey{rotatedKey.Public()}}
+	c.PrivateKeyJWTAuthority = &goidc.PrivateKeyJWTAuthority{
+		SnapshotRevision: 24,
+		Keys: []goidc.PrivateKeyJWTAuthorityKey{
+			{
+				Key:            currentKey.Public(),
+				KeyAuthorityID: "019c84de-e9c2-7f87-9a41-a55ccf602edb",
+			},
+		},
+	}
+	ctx.Request.PostForm = validPrivateKeyJWTPolicyPostForm(t, ctx, c, rotatedKey)
+	ctx.PrivateKeyJWTAssertionPolicyFunc = func(context.Context, goidc.VerifiedClientAssertion) error {
+		t.Fatal("assertion signed by a rotated key reached policy")
+		return nil
+	}
+	ctx.ConsumeJTIUseFunc = func(context.Context, goidc.JTIUse) error {
+		t.Fatal("assertion signed by a rotated key consumed a JTI")
+		return nil
+	}
+
+	_, err := client.Authenticated(ctx, client.AuthnContextToken)
+	assertErrorCode(t, err, goidc.ErrorCodeInvalidClient)
+}
+
+func TestPrivateKeyJWTAuthorityEmptyKeySetDoesNotFallBackToLegacyJWKS(t *testing.T) {
+	ctx, c, revokedKey := setUpPrivateKeyJWTAuthn(t)
+	c.PrivateKeyJWTAuthority = &goidc.PrivateKeyJWTAuthority{SnapshotRevision: 25}
+	ctx.Request.PostForm = validPrivateKeyJWTPolicyPostForm(t, ctx, c, revokedKey)
+	ctx.PrivateKeyJWTAssertionPolicyFunc = func(context.Context, goidc.VerifiedClientAssertion) error {
+		t.Fatal("assertion signed by a revoked key reached policy")
+		return nil
+	}
+	ctx.ConsumeJTIUseFunc = func(context.Context, goidc.JTIUse) error {
+		t.Fatal("assertion signed by a revoked key consumed a JTI")
+		return nil
+	}
+
+	_, err := client.Authenticated(ctx, client.AuthnContextToken)
+	assertErrorCode(t, err, goidc.ErrorCodeInvalidClient)
+}
+
+func TestPrivateKeyJWTAuthorityRejectsInvalidOrAmbiguousSnapshot(t *testing.T) {
+	tests := []struct {
+		name      string
+		authority func(*testing.T, goidc.JSONWebKey) *goidc.PrivateKeyJWTAuthority
+	}{
+		{
+			name: "zero snapshot revision",
+			authority: func(_ *testing.T, key goidc.JSONWebKey) *goidc.PrivateKeyJWTAuthority {
+				return &goidc.PrivateKeyJWTAuthority{Keys: []goidc.PrivateKeyJWTAuthorityKey{{
+					Key: key.Public(), KeyAuthorityID: "authority-key",
+				}}}
+			},
+		},
+		{
+			name: "empty authority key id",
+			authority: func(_ *testing.T, key goidc.JSONWebKey) *goidc.PrivateKeyJWTAuthority {
+				return &goidc.PrivateKeyJWTAuthority{SnapshotRevision: 1, Keys: []goidc.PrivateKeyJWTAuthorityKey{{
+					Key: key.Public(),
+				}}}
+			},
+		},
+		{
+			name: "empty JOSE key id",
+			authority: func(_ *testing.T, key goidc.JSONWebKey) *goidc.PrivateKeyJWTAuthority {
+				key.KeyID = ""
+				return &goidc.PrivateKeyJWTAuthority{SnapshotRevision: 1, Keys: []goidc.PrivateKeyJWTAuthorityKey{{
+					Key: key.Public(), KeyAuthorityID: "authority-key",
+				}}}
+			},
+		},
+		{
+			name: "unused private key material",
+			authority: func(t *testing.T, key goidc.JSONWebKey) *goidc.PrivateKeyJWTAuthority {
+				privateKey := oidctest.PrivateRS256JWK(t, "unused-private", goidc.KeyUsageSignature)
+				return &goidc.PrivateKeyJWTAuthority{SnapshotRevision: 1, Keys: []goidc.PrivateKeyJWTAuthorityKey{
+					{Key: key.Public(), KeyAuthorityID: "authority-key"},
+					{Key: privateKey, KeyAuthorityID: "private-authority-key"},
+				}}
+			},
+		},
+		{
+			name: "unused symmetric key material",
+			authority: func(_ *testing.T, key goidc.JSONWebKey) *goidc.PrivateKeyJWTAuthority {
+				return &goidc.PrivateKeyJWTAuthority{SnapshotRevision: 1, Keys: []goidc.PrivateKeyJWTAuthorityKey{
+					{Key: key.Public(), KeyAuthorityID: "authority-key"},
+					{Key: goidc.JSONWebKey{
+						Key: []byte("not-an-asymmetric-public-key"), KeyID: "unused-symmetric",
+						Algorithm: string(goidc.SigAlgHS256), Use: string(goidc.KeyUsageSignature),
+					}, KeyAuthorityID: "symmetric-authority-key"},
+				}}
+			},
+		},
+		{
+			name: "duplicate authority key id",
+			authority: func(t *testing.T, key goidc.JSONWebKey) *goidc.PrivateKeyJWTAuthority {
+				other := oidctest.PrivateRS256JWK(t, "other-key", goidc.KeyUsageSignature)
+				return &goidc.PrivateKeyJWTAuthority{SnapshotRevision: 1, Keys: []goidc.PrivateKeyJWTAuthorityKey{
+					{Key: key.Public(), KeyAuthorityID: "duplicate-authority-key"},
+					{Key: other.Public(), KeyAuthorityID: "duplicate-authority-key"},
+				}}
+			},
+		},
+		{
+			name: "duplicate header key id",
+			authority: func(t *testing.T, key goidc.JSONWebKey) *goidc.PrivateKeyJWTAuthority {
+				other := oidctest.PrivateRS256JWK(t, key.KeyID, goidc.KeyUsageSignature)
+				return &goidc.PrivateKeyJWTAuthority{SnapshotRevision: 1, Keys: []goidc.PrivateKeyJWTAuthorityKey{
+					{Key: key.Public(), KeyAuthorityID: "authority-key"},
+					{Key: other.Public(), KeyAuthorityID: "other-authority-key"},
+				}}
+			},
+		},
+		{
+			name: "duplicate public key material under distinct identities",
+			authority: func(_ *testing.T, key goidc.JSONWebKey) *goidc.PrivateKeyJWTAuthority {
+				first := key.Public()
+				second := key.Public()
+				second.KeyID = "same-material-other-kid"
+				return &goidc.PrivateKeyJWTAuthority{SnapshotRevision: 1, Keys: []goidc.PrivateKeyJWTAuthorityKey{
+					{Key: first, KeyAuthorityID: "first-authority-key"},
+					{Key: second, KeyAuthorityID: "second-authority-key"},
+				}}
+			},
+		},
+		{
+			name: "public key thumbprint failure",
+			authority: func(t *testing.T, key goidc.JSONWebKey) *goidc.PrivateKeyJWTAuthority {
+				unsupportedKey, err := ecdsa.GenerateKey(elliptic.P224(), rand.Reader)
+				if err != nil {
+					t.Fatalf("generate unsupported thumbprint key: %v", err)
+				}
+				return &goidc.PrivateKeyJWTAuthority{SnapshotRevision: 1, Keys: []goidc.PrivateKeyJWTAuthorityKey{
+					{Key: key.Public(), KeyAuthorityID: "authority-key"},
+					{Key: goidc.JSONWebKey{
+						Key:   unsupportedKey.Public(),
+						KeyID: "unsupported-thumbprint-key", Algorithm: string(goidc.SigAlgRS256),
+						Use: string(goidc.KeyUsageSignature),
+					}, KeyAuthorityID: "unsupported-thumbprint-authority-key"},
+				}}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, c, signingKey := setUpPrivateKeyJWTAuthn(t)
+			c.PrivateKeyJWTAuthority = test.authority(t, signingKey)
+			ctx.Request.PostForm = validPrivateKeyJWTPolicyPostForm(t, ctx, c, signingKey)
+			ctx.PrivateKeyJWTAssertionPolicyFunc = func(context.Context, goidc.VerifiedClientAssertion) error {
+				t.Fatal("invalid authority snapshot reached policy")
+				return nil
+			}
+			ctx.ConsumeJTIUseFunc = func(context.Context, goidc.JTIUse) error {
+				t.Fatal("invalid authority snapshot consumed a JTI")
+				return nil
+			}
+
+			_, err := client.Authenticated(ctx, client.AuthnContextToken)
+			assertErrorCode(t, err, goidc.ErrorCodeInvalidClient)
+		})
+	}
+}
+
+func TestPrivateKeyJWTAuthorityRejectsKidlessAlgorithmAmbiguity(t *testing.T) {
+	ctx, c, signingKey := setUpPrivateKeyJWTAuthn(t)
+	signingKey.KeyID = ""
+	firstAuthorityKey := signingKey.Public()
+	firstAuthorityKey.KeyID = "first-key"
+	otherKey := oidctest.PrivateRS256JWK(t, "second-key", goidc.KeyUsageSignature)
+	c.PrivateKeyJWTAuthority = &goidc.PrivateKeyJWTAuthority{
+		SnapshotRevision: 27,
+		Keys: []goidc.PrivateKeyJWTAuthorityKey{
+			{Key: firstAuthorityKey, KeyAuthorityID: "first-authority-key"},
+			{Key: otherKey.Public(), KeyAuthorityID: "second-authority-key"},
+		},
+	}
+	ctx.Request.PostForm = validPrivateKeyJWTPolicyPostForm(t, ctx, c, signingKey)
+	ctx.PrivateKeyJWTAssertionPolicyFunc = func(context.Context, goidc.VerifiedClientAssertion) error {
+		t.Fatal("kid-less ambiguous assertion reached policy")
+		return nil
+	}
+	ctx.ConsumeJTIUseFunc = func(context.Context, goidc.JTIUse) error {
+		t.Fatal("kid-less ambiguous assertion consumed a JTI")
+		return nil
+	}
+
+	_, err := client.Authenticated(ctx, client.AuthnContextToken)
+	assertErrorCode(t, err, goidc.ErrorCodeInvalidClient)
+}
+
+func TestPrivateKeyJWTAssertionPolicyCanRejectStaleAuthorityRevision(t *testing.T) {
+	ctx, c, signingKey := setUpPrivateKeyJWTAuthn(t)
+	c.PrivateKeyJWTAuthority = &goidc.PrivateKeyJWTAuthority{
+		SnapshotRevision: 26,
+		Keys: []goidc.PrivateKeyJWTAuthorityKey{{
+			Key: signingKey.Public(), KeyAuthorityID: "019c84df-b88b-77f3-a99c-1d609062636d",
+		}},
+	}
+	ctx.Request.PostForm = validPrivateKeyJWTPolicyPostForm(t, ctx, c, signingKey)
+	ctx.PrivateKeyJWTAssertionPolicyFunc = func(_ context.Context, verified goidc.VerifiedClientAssertion) error {
+		if verified.Authority == nil || verified.Authority.SnapshotRevision != 26 {
+			t.Fatalf("verified authority = %#v, want stale revision 26", verified.Authority)
+		}
+		return errors.New("client authority snapshot is stale")
+	}
+	ctx.ConsumeJTIUseFunc = func(context.Context, goidc.JTIUse) error {
+		t.Fatal("stale authority snapshot consumed a JTI")
+		return nil
+	}
+
+	_, err := client.Authenticated(ctx, client.AuthnContextToken)
+	assertErrorCode(t, err, goidc.ErrorCodeInvalidClient)
+}
+
+func TestPrivateKeyJWTAuthorityPARStateIsRecordedOnlyAfterCompleteAuthentication(t *testing.T) {
+	tests := []struct {
+		name             string
+		configure        func(*testing.T, oidc.Context, *goidc.Client, goidc.JSONWebKey)
+		policyError      error
+		consumeError     error
+		wantSuccess      bool
+		wantPolicyCalls  int
+		wantConsumeCalls int
+	}{
+		{
+			name:             "success",
+			wantSuccess:      true,
+			wantPolicyCalls:  1,
+			wantConsumeCalls: 1,
+		},
+		{
+			name: "invalid signature",
+			configure: func(t *testing.T, ctx oidc.Context, c *goidc.Client, signingKey goidc.JSONWebKey) {
+				untrusted := oidctest.PrivateRS256JWK(t, signingKey.KeyID, goidc.KeyUsageSignature)
+				ctx.Request.PostForm = validPrivateKeyJWTPolicyPostForm(t, ctx, c, untrusted)
+			},
+		},
+		{
+			name:             "deployment policy rejection",
+			policyError:      errors.New("policy rejected assertion"),
+			wantPolicyCalls:  1,
+			wantConsumeCalls: 0,
+		},
+		{
+			name:             "JTI replay",
+			consumeError:     goidc.ErrJTIReplay,
+			wantPolicyCalls:  1,
+			wantConsumeCalls: 1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, c, signingKey := setUpPrivateKeyJWTAuthn(t)
+			ctx = ctx.BeginPARClientAuthentication()
+			c.PrivateKeyJWTAuthority = &goidc.PrivateKeyJWTAuthority{
+				SnapshotRevision: 91,
+				Keys: []goidc.PrivateKeyJWTAuthorityKey{{
+					Key: signingKey.Public(), KeyAuthorityID: "019c8a0a-63f6-7bf0-8c0d-f6b2f24d984a",
+				}},
+			}
+			ctx.Request.PostForm = validPrivateKeyJWTPolicyPostForm(t, ctx, c, signingKey)
+			if test.configure != nil {
+				test.configure(t, ctx, c, signingKey)
+			}
+
+			var policyCalls, consumeCalls int
+			ctx.PrivateKeyJWTAssertionPolicyFunc = func(context.Context, goidc.VerifiedClientAssertion) error {
+				policyCalls++
+				return test.policyError
+			}
+			ctx.ConsumeJTIUseFunc = func(context.Context, goidc.JTIUse) error {
+				consumeCalls++
+				return test.consumeError
+			}
+
+			err := client.Authenticate(ctx, c, client.AuthnContextPAR)
+			if test.wantSuccess {
+				if err != nil {
+					t.Fatalf("Authenticate() error = %v", err)
+				}
+				authority, authorityErr := ctx.PARClientAssertionAuthority(c)
+				if authorityErr != nil {
+					t.Fatalf("PARClientAssertionAuthority() error = %v", authorityErr)
+				}
+				if authority == nil || authority.SnapshotRevision != 91 ||
+					authority.KeyAuthorityID != "019c8a0a-63f6-7bf0-8c0d-f6b2f24d984a" {
+					t.Fatalf("captured authority = %#v, want exact verified authority", authority)
+				}
+			} else {
+				if err == nil {
+					t.Fatal("Authenticate() error = nil")
+				}
+				authority, authorityErr := ctx.PARClientAssertionAuthority(c)
+				if authorityErr == nil || authority != nil {
+					t.Fatalf("authority after failed authentication = %#v, error = %v; want absent failure", authority, authorityErr)
+				}
+			}
+			if policyCalls != test.wantPolicyCalls || consumeCalls != test.wantConsumeCalls {
+				t.Fatalf("policy/consume calls = %d/%d, want %d/%d",
+					policyCalls, consumeCalls, test.wantPolicyCalls, test.wantConsumeCalls)
+			}
+		})
+	}
+}
+
+func TestPrivateKeyJWTAuthorityPARStateDoesNotAliasPolicyEvidence(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*goidc.VerifiedClientAssertionAuthority, *goidc.VerifiedClientAssertionAuthority)
+	}{
+		{
+			name: "immediate policy mutation",
+			mutate: func(authority *goidc.VerifiedClientAssertionAuthority, _ *goidc.VerifiedClientAssertionAuthority) {
+				authority.SnapshotRevision = 999
+				authority.KeyAuthorityID = "policy-substituted-key"
+			},
+		},
+		{
+			name: "retained policy pointer mutation",
+			mutate: func(_ *goidc.VerifiedClientAssertionAuthority, retained *goidc.VerifiedClientAssertionAuthority) {
+				retained.SnapshotRevision = 998
+				retained.KeyAuthorityID = "retained-policy-substituted-key"
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, c, signingKey := setUpPrivateKeyJWTAuthn(t)
+			ctx = ctx.BeginPARClientAuthentication()
+			c.PrivateKeyJWTAuthority = &goidc.PrivateKeyJWTAuthority{
+				SnapshotRevision: 92,
+				Keys: []goidc.PrivateKeyJWTAuthorityKey{{
+					Key: signingKey.Public(), KeyAuthorityID: "019c8a0b-e4b3-72d9-862d-fec7d9730e67",
+				}},
+			}
+			ctx.Request.PostForm = validPrivateKeyJWTPolicyPostForm(t, ctx, c, signingKey)
+
+			var retained *goidc.VerifiedClientAssertionAuthority
+			ctx.PrivateKeyJWTAssertionPolicyFunc = func(_ context.Context, assertion goidc.VerifiedClientAssertion) error {
+				retained = assertion.Authority
+				if retained == nil {
+					t.Fatal("policy authority = nil")
+				}
+				if test.name == "immediate policy mutation" {
+					test.mutate(assertion.Authority, retained)
+				}
+				return nil
+			}
+			ctx.ConsumeJTIUseFunc = func(context.Context, goidc.JTIUse) error {
+				if test.name == "retained policy pointer mutation" {
+					test.mutate(nil, retained)
+				}
+				return nil
+			}
+
+			if err := client.Authenticate(ctx, c, client.AuthnContextPAR); err != nil {
+				t.Fatalf("Authenticate() error = %v", err)
+			}
+			authority, err := ctx.PARClientAssertionAuthority(c)
+			if err != nil {
+				t.Fatalf("PARClientAssertionAuthority() error = %v", err)
+			}
+			if authority == nil || authority.SnapshotRevision != 92 ||
+				authority.KeyAuthorityID != "019c8a0b-e4b3-72d9-862d-fec7d9730e67" {
+				t.Fatalf("captured authority = %#v, want exact verified authority", authority)
+			}
+		})
+	}
+}
+
+func TestNonPrivateKeyJWTAuthenticationLeavesFreshPARAuthorityStateAbsent(t *testing.T) {
+	ctx, _, _ := setUpPrivateKeyJWTAuthn(t)
+	ctx = ctx.BeginPARClientAuthentication()
+	secretClient := &goidc.Client{
+		ID:     "secret-client",
+		Secret: "secret",
+		ClientMeta: goidc.ClientMeta{
+			TokenAuthnMethod: goidc.AuthnMethodSecretPost,
+		},
+	}
+	ctx.Request.PostForm = map[string][]string{
+		"client_id":     {secretClient.ID},
+		"client_secret": {secretClient.Secret},
+	}
+	if err := client.Authenticate(ctx, secretClient, client.AuthnContextPAR); err != nil {
+		t.Fatalf("client_secret_post Authenticate() error = %v", err)
+	}
+	authority, err := ctx.PARClientAssertionAuthority(secretClient)
+	if err != nil {
+		t.Fatalf("PARClientAssertionAuthority() error = %v", err)
+	}
+	if authority != nil {
+		t.Fatalf("non-private_key_jwt authority = %#v, want nil", authority)
 	}
 }
 

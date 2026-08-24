@@ -4,6 +4,14 @@ type Client struct {
 	ID              string `json:"id"`
 	Secret          string `json:"secret,omitempty"`
 	SecretExpiresAt int    `json:"secret_expires_at,omitempty"`
+	// PrivateKeyJWTAuthority is a server-authority snapshot that binds each
+	// private_key_jwt verification key to an opaque, authority-owned identity.
+	//
+	// When non-nil, its keys are the exclusive source for private_key_jwt
+	// verification. An empty or invalid snapshot fails authentication and never
+	// falls back to the client JWKS. It is deliberately excluded from client
+	// metadata JSON so an OAuth client cannot supply its own authority binding.
+	PrivateKeyJWTAuthority *PrivateKeyJWTAuthority `json:"-"`
 	// RegistrationToken is the plain text registration access token generated during
 	// dynamic client registration.
 	// Note: For security reasons, it is strongly recommended to encrypt this value before storing it in a database.
@@ -16,6 +24,26 @@ type Client struct {
 	} `json:"federation,omitempty"`
 	cachedJWKS *JSONWebKeySet
 	ClientMeta
+}
+
+// PrivateKeyJWTAuthority is an immutable snapshot selected by the server's
+// client authority. SnapshotRevision must be positive. Keys must contain only
+// valid asymmetric public signature keys and must be safe for concurrent reads
+// for the duration of a request.
+type PrivateKeyJWTAuthority struct {
+	SnapshotRevision int64
+	Keys             []PrivateKeyJWTAuthorityKey
+}
+
+// PrivateKeyJWTAuthorityKey binds an exact public verification key to the
+// server authority's opaque identity for that key. KeyAuthorityID is not the
+// JOSE kid and is never derived or interpreted by this library. Key must have
+// a nonempty, snapshot-unique JOSE kid even though an assertion may omit its
+// kid when exactly one authority key matches the asserted algorithm. Public
+// key material must also be unique across the authority snapshot.
+type PrivateKeyJWTAuthorityKey struct {
+	Key            JSONWebKey
+	KeyAuthorityID string
 }
 
 func (c *Client) IsPublic() bool {

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dev-null-GmbH/go-oidc/internal/joseutil"
@@ -23,7 +24,16 @@ type Context struct {
 	Request               *http.Request
 	context               context.Context
 	tokenEndpointEvidence *tokenEndpointEvidenceState
+	clientAssertionState  *clientAssertionAuthorityState
 	*Configuration
+}
+
+type clientAssertionAuthorityState struct {
+	mutex                 sync.RWMutex
+	authenticatedClientID string
+	authority             *goidc.VerifiedClientAssertionAuthority
+	recorded              bool
+	invalid               bool
 }
 
 func NewHTTPContext(w http.ResponseWriter, r *http.Request, config *Configuration) Context {
@@ -39,6 +49,91 @@ func NewContext(ctx context.Context, config *Configuration) Context {
 		Configuration: config,
 		context:       ctx,
 	}
+}
+
+// BeginPARClientAuthentication returns a request-local context prepared to
+// capture private_key_jwt authority evidence during PAR client authentication.
+// Each call allocates independent state even when Configuration and clients are
+// shared by concurrent requests.
+func (ctx Context) BeginPARClientAuthentication() Context {
+	ctx.clientAssertionState = &clientAssertionAuthorityState{}
+	return ctx
+}
+
+// RecordClientAssertionAuthority captures a defensive copy of authority
+// evidence after private_key_jwt authentication has completely succeeded.
+// Calls outside a PAR authentication scope are intentionally ignored.
+func (ctx Context) RecordClientAssertionAuthority(
+	authenticatedClientID string,
+	authority *goidc.VerifiedClientAssertionAuthority,
+) {
+	if ctx.clientAssertionState == nil || authority == nil {
+		return
+	}
+	captured := *authority
+	ctx.clientAssertionState.mutex.Lock()
+	defer ctx.clientAssertionState.mutex.Unlock()
+	if ctx.clientAssertionState.invalid {
+		return
+	}
+	if ctx.clientAssertionState.recorded {
+		current := ctx.clientAssertionState.authority
+		if current == nil || ctx.clientAssertionState.authenticatedClientID != authenticatedClientID ||
+			*current != captured {
+			ctx.clientAssertionState.authenticatedClientID = ""
+			ctx.clientAssertionState.authority = nil
+			ctx.clientAssertionState.invalid = true
+		}
+		return
+	}
+	ctx.clientAssertionState.authenticatedClientID = authenticatedClientID
+	ctx.clientAssertionState.authority = &captured
+	ctx.clientAssertionState.recorded = true
+}
+
+// PARClientAssertionAuthority returns a defensive copy of request-local
+// authority evidence and verifies that it agrees with the authenticated client.
+func (ctx Context) PARClientAssertionAuthority(
+	client *goidc.Client,
+) (*goidc.VerifiedClientAssertionAuthority, error) {
+	if client == nil {
+		return nil, errors.New("the authenticated PAR client is nil")
+	}
+	expectsAuthority := client.TokenAuthnMethod == goidc.AuthnMethodPrivateKeyJWT &&
+		client.PrivateKeyJWTAuthority != nil
+	if ctx.clientAssertionState == nil {
+		if expectsAuthority {
+			return nil, errors.New("private_key_jwt authority evidence was not captured for PAR")
+		}
+		return nil, nil
+	}
+
+	ctx.clientAssertionState.mutex.RLock()
+	authenticatedClientID := ctx.clientAssertionState.authenticatedClientID
+	invalid := ctx.clientAssertionState.invalid
+	var authority *goidc.VerifiedClientAssertionAuthority
+	if ctx.clientAssertionState.authority != nil {
+		captured := *ctx.clientAssertionState.authority
+		authority = &captured
+	}
+	ctx.clientAssertionState.mutex.RUnlock()
+	if invalid {
+		return nil, errors.New("private_key_jwt authority evidence is conflicting")
+	}
+
+	if authority == nil {
+		if expectsAuthority {
+			return nil, errors.New("private_key_jwt authority evidence was not captured for PAR")
+		}
+		return nil, nil
+	}
+	if !expectsAuthority || authenticatedClientID != client.ID {
+		return nil, errors.New("private_key_jwt authority evidence conflicts with the authenticated PAR client")
+	}
+	if authority.SnapshotRevision <= 0 || authority.KeyAuthorityID == "" {
+		return nil, errors.New("private_key_jwt authority evidence is invalid")
+	}
+	return authority, nil
 }
 
 func Handler(config *Configuration, exec func(ctx Context)) http.HandlerFunc {

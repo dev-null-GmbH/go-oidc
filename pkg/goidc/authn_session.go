@@ -20,6 +20,12 @@ type AuthnSession struct {
 	// grant and returned in the introspection response.
 	Username string `json:"username,omitempty"`
 	ClientID string `json:"client_id"`
+	// ClientAssertionAuthority is server-authenticated evidence identifying the
+	// authority snapshot and exact public key that authenticated a private_key_jwt
+	// assertion for this PAR session. Its values are opaque server metadata and
+	// never come from JWT claims or JOSE headers. It is excluded from JSON to
+	// prevent protocol disclosure and client-controlled deserialization.
+	ClientAssertionAuthority *VerifiedClientAssertionAuthority `json:"-"`
 	// PushedAuthReqID is populated when the session is created from a pushed
 	// authorization request (PAR). It is the handle returned as request_uri.
 	PushedAuthReqID string `json:"pushed_auth_req_id,omitempty"`
