@@ -69,7 +69,7 @@ Luiky Vasconcelos has certified that [go-oidc](https://pkg.go.dev/github.com/lui
 
 Install the module:
 ```
-go get github.com/dev-null-GmbH/go-oidc@v0.25.1-d0.3
+go get github.com/dev-null-GmbH/go-oidc@v0.25.1-d0.4
 ```
 
 Fork consumers must exact-pin a governed `-d0.N` tag and must not use
@@ -106,6 +106,7 @@ Verify the setup at http://localhost/.well-known/openid-configuration.
 - [Grants](#grants)
 - [Tokens](#tokens)
 - [Authorization Code and Implicit Grants](#authorization-code-and-implicit-grants)
+- [Strict Human Confidential-BFF Authorization](#strict-human-confidential-bff-authorization)
 - [Refresh Token Grant](#refresh-token-grant)
 - [Client Credentials Grant](#client-credentials-grant)
 - [JWT Bearer Grant](#jwt-bearer-grant)
@@ -322,6 +323,68 @@ op, _ := provider.New(
 
 If you also want refresh tokens, enable them separately with
 `provider.WithRefreshTokenGrant(...)`.
+
+## Strict Human Confidential-BFF Authorization
+
+Fork release `v0.25.1-d0.4` adds a closed authorization-code flow for human
+web sessions behind a confidential BFF. Enable it with a deployment-owned
+implementation of `goidc.HumanAuthorizationAuthority`:
+
+```go
+op, err := provider.New(provider.Config{
+  Issuer:      "https://auth.example.com",
+  JWKS:        jwksFunc,
+  IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgPS256},
+},
+  provider.WithClientResolver(resolveClient),
+  provider.WithJTIUseConsumer(consumeJTI),
+  provider.WithResourceIndicators([]goidc.ResourceIndicator{"https://api.example.com/v1"}),
+  provider.WithACRs("urn:example:acr:passkey"),
+  provider.WithHumanConfidentialBFFAuthorizationAuthority(authority,
+    provider.WithHumanConfidentialBFFIdentityInteractionEndpoint(
+      "https://id.example.com/oidc/interaction/identity",
+    ),
+    provider.WithHumanConfidentialBFFIdentityReadyEndpoint(
+      "https://id.example.com/oidc/interaction/ready",
+    ),
+    provider.WithHumanConfidentialBFFBrowserBindingCookieName("__Host-human-oidc"),
+  ),
+)
+```
+
+The provider requires HTTPS, PS256 ID tokens, a typed JTI consumer, configured
+resources and ACRs, and two clean identity endpoints on one origin separate
+from the issuer. Its client resolver must classify eligible clients with
+`goidc.AuthorizationRequestProfileHumanConfidentialBFF` and supply a
+server-owned `goidc.PrivateKeyJWTAuthority`; these fields cannot be selected
+through client metadata. The profile admits only simple PAR, an outer
+`client_id` plus `request_uri` authorization request, PKCE S256,
+`private_key_jwt` PS256, authorization-code redemption, refresh rotation, and
+refresh-token revocation.
+
+`HumanAuthorizationAuthority` replaces the legacy authorization, PAR, grant,
+and refresh managers for this profile. Its methods must persist transitions
+atomically, enforce one-use and replay outcomes, and be safe under concurrent
+requests. Sealed Human values intentionally reject generic JSON serialization;
+persist the validated fields in deployment-owned records and mint boundary
+values with their constructors.
+
+Authority callbacks inherit the request context's cancellation and deadline.
+Deployments must configure HTTP server and upstream request timeouts and make
+persistence honor that context; the library does not add a hidden fixed
+persistence timeout. Because the client profile is selected only after form
+decoding, enabling this flow applies a 56 KiB pre-parse limit to the shared
+PAR, POST authorization, token, and revocation endpoints, including co-hosted
+legacy or machine requests. Deploy a separate provider surface if another
+profile requires larger encoded forms.
+
+The interaction handlers derive their origin only from the configured issuer
+and the canonical request `Host`; they never trust forwarding headers. A
+reverse-proxy boundary must authenticate and validate its forwarding metadata,
+then normalize `Host` to the public issuer and remove that metadata before
+delegating to the provider. Legacy authorization can coexist only when
+explicitly configured with `WithAuthCodeGrant` and `WithPAR`, and remains on
+its separate manager-backed path.
 
 ## Refresh Token Grant
 
