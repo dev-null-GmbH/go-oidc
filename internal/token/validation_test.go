@@ -16,9 +16,10 @@ func TestValidatePKCE(t *testing.T) {
 	shaVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 
 	tests := []struct {
-		name    string
-		setup   func(*testing.T) (request, *goidc.Grant)
-		wantErr goidc.ErrorCode
+		name      string
+		setup     func(*testing.T) (request, *goidc.Grant)
+		configure func(*oidc.Context)
+		wantErr   goidc.ErrorCode
 	}{
 		{
 			name: "disabled",
@@ -80,6 +81,53 @@ func TestValidatePKCE(t *testing.T) {
 			wantErr: goidc.ErrorCodeInvalidGrant,
 		},
 		{
+			name: "recorded sha256 enforced after PKCE disabled",
+			setup: func(*testing.T) (request, *goidc.Grant) {
+				return request{codeVerifier: "wrong_verifier_value_here_0000000000000000000"}, &goidc.Grant{
+					AuthParams: goidc.AuthorizationParameters{
+						CodeChallenge:       hashutil.Thumbprint(shaVerifier),
+						CodeChallengeMethod: goidc.CodeChallengeMethodSHA256,
+					},
+				}
+			},
+			configure: func(ctx *oidc.Context) {
+				ctx.PKCEEnabled = false
+			},
+			wantErr: goidc.ErrorCodeInvalidGrant,
+		},
+		{
+			name: "recorded sha256 cannot fall back to current plain default",
+			setup: func(*testing.T) (request, *goidc.Grant) {
+				challenge := hashutil.Thumbprint(shaVerifier)
+				return request{codeVerifier: challenge}, &goidc.Grant{
+					AuthParams: goidc.AuthorizationParameters{
+						CodeChallenge:       challenge,
+						CodeChallengeMethod: goidc.CodeChallengeMethodSHA256,
+					},
+				}
+			},
+			configure: func(ctx *oidc.Context) {
+				ctx.PKCEDefaultChallengeMethod = goidc.CodeChallengeMethodPlain
+				ctx.PKCEChallengeMethods = []goidc.CodeChallengeMethod{goidc.CodeChallengeMethodPlain}
+			},
+			wantErr: goidc.ErrorCodeInvalidGrant,
+		},
+		{
+			name: "recorded sha256 remains valid after current method removal",
+			setup: func(*testing.T) (request, *goidc.Grant) {
+				return request{codeVerifier: shaVerifier}, &goidc.Grant{
+					AuthParams: goidc.AuthorizationParameters{
+						CodeChallenge:       hashutil.Thumbprint(shaVerifier),
+						CodeChallengeMethod: goidc.CodeChallengeMethodSHA256,
+					},
+				}
+			},
+			configure: func(ctx *oidc.Context) {
+				ctx.PKCEDefaultChallengeMethod = goidc.CodeChallengeMethodPlain
+				ctx.PKCEChallengeMethods = []goidc.CodeChallengeMethod{goidc.CodeChallengeMethodPlain}
+			},
+		},
+		{
 			name: "too short",
 			setup: func(*testing.T) (request, *goidc.Grant) {
 				return request{codeVerifier: "short"}, &goidc.Grant{
@@ -101,6 +149,9 @@ func TestValidatePKCE(t *testing.T) {
 			ctx.PKCEChallengeMethods = []goidc.CodeChallengeMethod{
 				goidc.CodeChallengeMethodPlain,
 				goidc.CodeChallengeMethodSHA256,
+			}
+			if test.configure != nil {
+				test.configure(&ctx)
 			}
 
 			req, grant := test.setup(t)

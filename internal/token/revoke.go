@@ -162,10 +162,58 @@ func revoke(ctx oidc.Context, req queryRequest) error {
 	if req.token == "" {
 		return goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request", errors.New("token is required"))
 	}
+	if ctx.HumanConfidentialBFFAuthorizationEnabled && isHumanRefreshToken(req.token) {
+		clientID := ""
+		if ctx.Request != nil {
+			clientID = ctx.Request.PostFormValue("client_id")
+		}
+		if !validHumanRefreshRevocationForm(ctx.Request, req, clientID) {
+			return humanAuthorizationInvalidRequest()
+		}
+	}
 
+	ctx = ctx.BeginClientAssertionAuthentication()
 	c, err := client.Authenticated(ctx, client.AuthnContextTokenRevocation)
 	if err != nil {
 		return err
+	}
+	switch c.AuthorizationRequestProfile {
+	case goidc.AuthorizationRequestProfileHumanConfidentialBFF:
+		isolatedClient, isolateErr := isolateHumanTokenClient(c)
+		if isolateErr != nil {
+			return humanAuthorizationServerError()
+		}
+		if !validHumanRefreshRevocationForm(ctx.Request, req, isolatedClient.ID) {
+			return humanAuthorizationInvalidRequest()
+		}
+		refreshToken, tokenErr := goidc.NewHumanRefreshToken(req.token)
+		if tokenErr != nil {
+			return nil //nolint:nilerr // RFC 7009 deliberately hides token state.
+		}
+		authority, authorityErr := ctx.ClientAssertionAuthority(isolatedClient)
+		if authorityErr != nil || !humanTokenAuthorityMatchesClient(authority, isolatedClient) {
+			return humanAuthorizationServerError()
+		}
+		input, inputErr := goidc.NewHumanRefreshRevocationInput(
+			goidc.HumanRefreshRevocationInputConfig{
+				RefreshToken:             refreshToken,
+				ClientID:                 isolatedClient.ID,
+				ClientAssertionAuthority: *authority,
+			},
+		)
+		if inputErr != nil {
+			return humanAuthorizationServerError()
+		}
+		if revokeErr := ctx.HumanRevokeRefreshToken(input); revokeErr != nil {
+			return humanAuthorizationServerError()
+		}
+		return nil
+	case goidc.AuthorizationRequestProfileDefault:
+		if ctx.HumanConfidentialBFFAuthorizationEnabled && isHumanRefreshToken(req.token) {
+			return nil
+		}
+	default:
+		return humanAuthorizationServerError()
 	}
 
 	if !ctx.TokenRevocationIsClientAllowed(c) {

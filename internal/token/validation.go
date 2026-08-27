@@ -212,11 +212,10 @@ func validateScopes(ctx oidc.Context, req request, c *goidc.Client, opts *scopeV
 }
 
 func validatePKCE(ctx oidc.Context, req request, grant *goidc.Grant) error {
-	if !ctx.PKCEEnabled {
-		return nil
-	}
-
 	if grant.AuthParams.CodeChallenge == "" {
+		if !ctx.PKCEEnabled {
+			return nil
+		}
 		// [RFC 9700] a token request containing a code_verifier parameter is
 		// accepted only if a code_challenge parameter was present in the authorization request.
 		if req.codeVerifier != "" {
@@ -231,9 +230,13 @@ func validatePKCE(ctx oidc.Context, req request, grant *goidc.Grant) error {
 		return goidc.WrapError(goidc.ErrorCodeInvalidGrant, "invalid code_verifier", fmt.Errorf("code_verifier length %d is outside the allowed range", verifierLengh))
 	}
 
-	method := ctx.PKCEDefaultChallengeMethod
-	if grant.AuthParams.CodeChallengeMethod != "" && slices.Contains(ctx.PKCEChallengeMethods, grant.AuthParams.CodeChallengeMethod) {
-		method = grant.AuthParams.CodeChallengeMethod
+	// A recorded method is grant authority, not a deployment default. It must
+	// remain enforced even if PKCE is later disabled or its supported-method
+	// list changes before redemption; otherwise configuration rotation can
+	// silently remove or downgrade the verifier check.
+	method := grant.AuthParams.CodeChallengeMethod
+	if method == "" {
+		method = ctx.PKCEDefaultChallengeMethod
 	}
 
 	switch verifier, challenge := req.codeVerifier, grant.AuthParams.CodeChallenge; method {

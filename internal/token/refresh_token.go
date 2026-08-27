@@ -17,12 +17,42 @@ func generateRefreshToken(ctx oidc.Context, req request) (response, error) {
 		return response{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request",
 			fmt.Errorf("refresh_token is required"))
 	}
+	if ctx.HumanConfidentialBFFAuthorizationEnabled && isHumanRefreshToken(req.refreshToken) {
+		clientID := ""
+		if ctx.Request != nil {
+			clientID = ctx.Request.PostFormValue("client_id")
+		}
+		if !validHumanRefreshTokenForm(ctx.Request, req, clientID) {
+			return response{}, humanAuthorizationInvalidRequest()
+		}
+	}
 
+	ctx = ctx.BeginClientAssertionAuthentication()
 	c, err := client.Authenticated(ctx, client.AuthnContextToken)
 	if err != nil {
 		return response{}, err
 	}
+	switch c.AuthorizationRequestProfile {
+	case goidc.AuthorizationRequestProfileHumanConfidentialBFF:
+		isolatedClient, isolateErr := isolateHumanTokenClient(c)
+		if isolateErr != nil {
+			return response{}, humanAuthorizationServerError()
+		}
+		return generateHumanRefreshToken(ctx, req, isolatedClient)
+	case goidc.AuthorizationRequestProfileDefault:
+		if ctx.HumanConfidentialBFFAuthorizationEnabled && isHumanRefreshToken(req.refreshToken) {
+			return response{}, humanRefreshInvalidGrant()
+		}
+		return generateLegacyRefreshToken(ctx, req, c)
+	default:
+		return response{}, humanAuthorizationServerError()
+	}
+}
 
+func generateLegacyRefreshToken(ctx oidc.Context, req request, c *goidc.Client) (response, error) {
+	if ctx.HumanConfidentialBFFAuthorizationEnabled && !ctx.LegacyRefreshTokenGrantEnabled {
+		return response{}, humanAuthorizationServerError()
+	}
 	grant, err := ctx.RefreshGrantByRefreshToken(req.refreshToken)
 	if err != nil {
 		return response{}, goidc.WrapError(goidc.ErrorCodeInvalidGrant, "invalid grant", fmt.Errorf("could not load the grant by refresh token: %w", err))

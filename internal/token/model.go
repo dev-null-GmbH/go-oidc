@@ -102,6 +102,7 @@ type IDTokenOptions struct {
 }
 
 type request struct {
+	parseErr     error
 	grantType    goidc.GrantType
 	scopes       string
 	code         string
@@ -136,7 +137,9 @@ type request struct {
 }
 
 func newRequest(r *http.Request) request {
+	parseErr := r.ParseForm()
 	req := request{
+		parseErr:           parseErr,
 		grantType:          goidc.GrantType(r.PostFormValue("grant_type")),
 		scopes:             r.PostFormValue("scope"),
 		code:               r.PostFormValue("code"),
@@ -168,16 +171,47 @@ func newRequest(r *http.Request) request {
 }
 
 type response struct {
-	AccessToken          string             `json:"access_token,omitempty"`
-	IDToken              string             `json:"id_token,omitempty"`
-	RefreshToken         string             `json:"refresh_token,omitempty"`
-	ExpiresIn            int                `json:"expires_in,omitempty"`
-	TokenType            goidc.TokenType    `json:"token_type,omitempty"`
-	Scopes               string             `json:"scope,omitempty"`
-	AuthorizationDetails []goidc.AuthDetail `json:"authorization_details,omitempty"`
-	Resources            goidc.Resources    `json:"resources,omitempty"`
+	AccessToken           string             `json:"access_token,omitempty"`
+	IDToken               string             `json:"id_token,omitempty"`
+	RefreshToken          string             `json:"refresh_token,omitempty"`
+	RefreshTokenExpiresIn int                `json:"refresh_token_expires_in,omitempty"`
+	ExpiresIn             int                `json:"expires_in,omitempty"`
+	TokenType             goidc.TokenType    `json:"token_type,omitempty"`
+	Scopes                string             `json:"scope,omitempty"`
+	AuthorizationDetails  []goidc.AuthDetail `json:"authorization_details,omitempty"`
+	Resources             goidc.Resources    `json:"resources,omitempty"`
 	// IssuedTokenType is an identifier for the representation of the issued security token.
 	IssuedTokenType goidc.TokenTypeIdentifier `json:"issued_token_type,omitempty"`
+	// noStore marks strict bearer-token responses for mandatory cache prevention
+	// without changing legacy response behavior or the JSON contract.
+	noStore bool
+}
+
+// strictHumanResponse preserves the exact confidential-BFF response shape.
+// Resources is an Audiences alias in the public model and normally collapses
+// a singleton to a JSON string, so the strict transport uses []string here.
+type strictHumanResponse struct {
+	AccessToken           string          `json:"access_token,omitempty"`
+	IDToken               string          `json:"id_token,omitempty"`
+	RefreshToken          string          `json:"refresh_token,omitempty"`
+	RefreshTokenExpiresIn int             `json:"refresh_token_expires_in,omitempty"`
+	ExpiresIn             int             `json:"expires_in,omitempty"`
+	TokenType             goidc.TokenType `json:"token_type,omitempty"`
+	Scopes                string          `json:"scope,omitempty"`
+	Resources             []string        `json:"resources,omitempty"`
+}
+
+func newStrictHumanResponse(resp response) strictHumanResponse {
+	return strictHumanResponse{
+		AccessToken:           resp.AccessToken,
+		IDToken:               resp.IDToken,
+		RefreshToken:          resp.RefreshToken,
+		RefreshTokenExpiresIn: resp.RefreshTokenExpiresIn,
+		ExpiresIn:             resp.ExpiresIn,
+		TokenType:             resp.TokenType,
+		Scopes:                resp.Scopes,
+		Resources:             []string(resp.Resources),
+	}
 }
 
 type cibaResponse struct {
@@ -186,12 +220,15 @@ type cibaResponse struct {
 }
 
 type queryRequest struct {
+	parseErr      error
 	token         string
 	tokenTypeHint goidc.TokenTypeHint
 }
 
 func newQueryRequest(req *http.Request) queryRequest {
+	parseErr := req.ParseForm()
 	return queryRequest{
+		parseErr:      parseErr,
 		token:         req.PostFormValue("token"),
 		tokenTypeHint: goidc.TokenTypeHint(req.PostFormValue("token_type_hint")),
 	}
