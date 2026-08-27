@@ -716,9 +716,9 @@ func TestNew_ValidationErrors(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name:    "jar by-reference unregistered uris require jar by-reference",
+			name:    "jar by-reference unregistered uris are disabled",
 			opts:    []Option{Option(WithJARByReferenceUnregisteredURIs())},
-			wantErr: "jar by-reference unregistered uris cannot be enabled without jar by-reference",
+			wantErr: "unregistered JAR request_uri fetching is disabled; pre-register request_uri values",
 		},
 		{
 			name: "dcr secret lifetime requires secret client auth",

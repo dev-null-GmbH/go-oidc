@@ -2516,6 +2516,15 @@ func TestJARByReference(t *testing.T) {
 	}
 }
 
+func TestWithJARByReferenceUnregisteredURIsRejected(t *testing.T) {
+	p := &Provider{}
+	err := WithJARByReferenceUnregisteredURIs()(p)
+	if err == nil || err.Error() !=
+		"unregistered JAR request_uri fetching is disabled; pre-register request_uri values" {
+		t.Fatalf("WithJARByReferenceUnregisteredURIs() error = %v", err)
+	}
+}
+
 func TestWithJWTLeewayTime(t *testing.T) {
 	// Given.
 	p := &Provider{

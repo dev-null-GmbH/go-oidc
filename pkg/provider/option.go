@@ -1224,14 +1224,14 @@ func WithJARByReference(httpClientFunc goidc.HTTPClientFunc) JAROption {
 	}
 }
 
-// WithJARByReferenceUnregisteredURIs allows request_uri values that were not
-// pre-registered by the client.
-// Avoid using this option when possible, as it expands the attack surface for
-// server-side request_uri fetches.
+// WithJARByReferenceUnregisteredURIs is retained for source compatibility but
+// always returns an error. Fetching an authorization-endpoint request_uri that
+// is not selected from server-held client registration is an SSRF primitive.
+//
+// Deprecated: pre-register every by-reference JAR request_uri on the client.
 func WithJARByReferenceUnregisteredURIs() JAROption {
-	return func(p *Provider) error {
-		p.config.JARByReferenceUnregisteredURIEnabled = true
-		return nil
+	return func(*Provider) error {
+		return errors.New("unregistered JAR request_uri fetching is disabled; pre-register request_uri values")
 	}
 }
 

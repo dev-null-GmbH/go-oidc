@@ -303,12 +303,14 @@ func TestJARFromRequestURI(t *testing.T) {
 		},
 	}, privateJWK)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, err := w.Write([]byte(requestObject)); err != nil {
 			t.Fatal(err)
 		}
 	}))
 	defer server.Close()
+	client.RequestURIs = []string{server.URL}
+	ctx.JARByReferenceHTTPClientFunc = func(context.Context) *http.Client { return server.Client() }
 
 	jar, err := jarFromRequestURI(ctx, server.URL, client)
 	if err != nil {
@@ -348,10 +350,11 @@ func TestJARFromRequestURIErrors(t *testing.T) {
 	}
 
 	t.Run("non-200 response", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusBadGateway)
 		}))
 		defer server.Close()
+		client.RequestURIs = []string{server.URL}
 
 		ctx := oidc.Context{
 			Configuration: &oidc.Configuration{
@@ -360,7 +363,7 @@ func TestJARFromRequestURIErrors(t *testing.T) {
 				JARSigAlgs:                   []goidc.SignatureAlgorithm{goidc.SignatureAlgorithm(privateJWK.Algorithm)},
 				JARByReferenceEnabled:        true,
 				HTTPClientFunc:               func(_ context.Context) *http.Client { return http.DefaultClient },
-				JARByReferenceHTTPClientFunc: func(_ context.Context) *http.Client { return http.DefaultClient },
+				JARByReferenceHTTPClientFunc: func(_ context.Context) *http.Client { return server.Client() },
 			},
 			Request: &http.Request{Method: http.MethodPost},
 		}
@@ -408,12 +411,13 @@ func TestJARFromRequestURIUsesDedicatedClient(t *testing.T) {
 		"response_type":     goidc.ResponseTypeCode,
 	}, privateJWK)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if _, err := w.Write([]byte(requestObject)); err != nil {
 			t.Fatal(err)
 		}
 	}))
 	defer server.Close()
+	client.RequestURIs = []string{server.URL}
 
 	ctx := oidc.Context{
 		Configuration: &oidc.Configuration{
@@ -429,7 +433,7 @@ func TestJARFromRequestURIUsesDedicatedClient(t *testing.T) {
 				}
 			},
 			JARByReferenceHTTPClientFunc: func(_ context.Context) *http.Client {
-				return http.DefaultClient
+				return server.Client()
 			},
 		},
 		Request: &http.Request{Method: http.MethodPost},
@@ -437,6 +441,121 @@ func TestJARFromRequestURIUsesDedicatedClient(t *testing.T) {
 
 	if _, err := jarFromRequestURI(ctx, server.URL, client); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestJARFromRequestURIRejectsUnregisteredAndUnsafeTargetsBeforeNetwork(t *testing.T) {
+	tests := []struct {
+		name       string
+		requestURI string
+		registered []string
+		client     bool
+	}{
+		{
+			name:       "unregistered HTTPS URI",
+			requestURI: "https://attacker.example/request.jwt",
+			registered: []string{"https://client.example/request.jwt"},
+			client:     true,
+		},
+		{
+			name:       "cleartext registered URI",
+			requestURI: "http://client.example/request.jwt",
+			registered: []string{"http://client.example/request.jwt"},
+			client:     true,
+		},
+		{
+			name:       "registered URI with credentials",
+			requestURI: "https://user:password@client.example/request.jwt",
+			registered: []string{"https://user:password@client.example/request.jwt"},
+			client:     true,
+		},
+		{
+			name:       "registered URI with fragment",
+			requestURI: "https://client.example/request.jwt#fragment",
+			registered: []string{"https://client.example/request.jwt#fragment"},
+			client:     true,
+		},
+		{
+			name:       "registered URI without host",
+			requestURI: "https:///request.jwt",
+			registered: []string{"https:///request.jwt"},
+			client:     true,
+		},
+		{
+			name:       "missing client",
+			requestURI: "https://client.example/request.jwt",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			transportCalls := 0
+			ctx := oidc.Context{
+				Configuration: &oidc.Configuration{
+					JARByReferenceEnabled: true,
+					JARByReferenceHTTPClientFunc: func(context.Context) *http.Client {
+						return &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+							transportCalls++
+							return nil, errors.New("unexpected network request")
+						})}
+					},
+				},
+				Request: httptest.NewRequest(http.MethodGet, "https://server.example.com/authorize", nil),
+			}
+			var c *goidc.Client
+			if test.client {
+				c = &goidc.Client{ClientMeta: goidc.ClientMeta{RequestURIs: test.registered}}
+			}
+
+			_, err := jarFromRequestURI(ctx, test.requestURI, c)
+			if err == nil {
+				t.Fatal("jarFromRequestURI() error = nil")
+			}
+			var oidcErr goidc.Error
+			if !errors.As(err, &oidcErr) || oidcErr.Code != goidc.ErrorCodeInvalidRequest ||
+				oidcErr.Description != "invalid request_uri" {
+				t.Fatalf("jarFromRequestURI() error = %#v", err)
+			}
+			if transportCalls != 0 {
+				t.Fatalf("untrusted request_uri reached transport %d times", transportCalls)
+			}
+		})
+	}
+}
+
+func TestJARFromRequestURIDoesNotFollowRedirects(t *testing.T) {
+	targetCalls := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/registered.jwt":
+			http.Redirect(response, request, "/unregistered.jwt", http.StatusFound)
+		case "/unregistered.jwt":
+			targetCalls++
+			response.WriteHeader(http.StatusOK)
+		default:
+			response.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	registeredURI := server.URL + "/registered.jwt"
+	ctx := oidc.Context{
+		Configuration: &oidc.Configuration{
+			JARByReferenceEnabled: true,
+			JARByReferenceHTTPClientFunc: func(context.Context) *http.Client {
+				return server.Client()
+			},
+		},
+		Request: httptest.NewRequest(http.MethodGet, "https://server.example.com/authorize", nil),
+	}
+	c := &goidc.Client{ClientMeta: goidc.ClientMeta{RequestURIs: []string{registeredURI}}}
+
+	_, err := jarFromRequestURI(ctx, registeredURI, c)
+	if err == nil {
+		t.Fatal("jarFromRequestURI() error = nil")
+	}
+	if targetCalls != 0 {
+		t.Fatalf("redirect target received %d requests", targetCalls)
 	}
 }
 

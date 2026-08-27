@@ -1200,6 +1200,12 @@ op, _ := provider.New(
 
 Encryption and content encryption algorithms can be configured via `provider.JAREncryption` and `provider.JARContentEncryptionAlgs`.
 
+By-reference JAR fetches require an exact pre-registered HTTPS `request_uri`
+from the resolved client's `request_uris` metadata and never follow redirects.
+Unregistered by-reference fetching is disabled as an SSRF boundary;
+`WithJARByReferenceUnregisteredURIs` is retained only for source compatibility
+and returns a configuration error.
+
 ## [JWT-Secured Authorization Response Mode (JARM)](https://openid.net/specs/oauth-v2-jarm.html)
 
 JARM returns authorization responses as signed (and optionally encrypted)

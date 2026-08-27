@@ -190,12 +190,11 @@ type Configuration struct {
 	// JARByReferenceEnabled determines whether Request Objects can be provided
 	// by reference using the "request_uri" parameter. When enabled, the authorization
 	// server retrieves the request object from the specified URI.
-	JARByReferenceEnabled                bool
-	JARByReferenceUnregisteredURIEnabled bool
-	JAREncEnabled                        bool
-	JARKeyEncAlgs                        []goidc.KeyEncryptionAlgorithm
-	JARContentEncAlgs                    []goidc.ContentEncryptionAlgorithm
-	JARByReferenceHTTPClientFunc         goidc.HTTPClientFunc
+	JARByReferenceEnabled        bool
+	JAREncEnabled                bool
+	JARKeyEncAlgs                []goidc.KeyEncryptionAlgorithm
+	JARContentEncAlgs            []goidc.ContentEncryptionAlgorithm
+	JARByReferenceHTTPClientFunc goidc.HTTPClientFunc
 
 	// PAREnabled allows client to push authorization requests.
 	PAREnabled bool

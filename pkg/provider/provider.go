@@ -169,10 +169,6 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 		return nil, errors.New("par cannot be enabled without authorization code grant")
 	}
 
-	if op.config.JARByReferenceUnregisteredURIEnabled && !op.config.JARByReferenceEnabled {
-		return nil, errors.New("jar by-reference unregistered uris cannot be enabled without jar by-reference")
-	}
-
 	if op.config.DCRSecretLifetimeSecs != 0 && !slices.ContainsFunc(op.config.AuthnMethods, func(method goidc.AuthnMethod) bool {
 		return method == goidc.AuthnMethodSecretBasic || method == goidc.AuthnMethodSecretPost || method == goidc.AuthnMethodSecretJWT
 	}) {

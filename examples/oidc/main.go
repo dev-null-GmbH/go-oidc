@@ -42,7 +42,6 @@ func main() {
 			provider.WithJAR(
 				[]goidc.SignatureAlgorithm{goidc.SigAlgRS256, goidc.SigAlgNone},
 				provider.WithJARByReference(nil),
-				provider.WithJARByReferenceUnregisteredURIs(),
 			),
 			provider.WithJARM([]goidc.SignatureAlgorithm{goidc.SigAlgRS256}),
 			provider.WithIssuerResponseParameter(),

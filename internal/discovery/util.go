@@ -55,7 +55,7 @@ func NewConfiguration(ctx oidc.Context) goidc.Configuration {
 		config.JARAlgs = ctx.JARSigAlgs
 		if ctx.JARByReferenceEnabled {
 			config.JARByReferenceEnabled = ctx.JARByReferenceEnabled
-			config.JARRequestURIRegistrationRequired = !ctx.JARByReferenceUnregisteredURIEnabled
+			config.JARRequestURIRegistrationRequired = true
 		}
 		if ctx.JAREncEnabled {
 			config.JARKeyEncAlgs = ctx.JARKeyEncAlgs
@@ -200,7 +200,7 @@ func NewAuthorizationServerMetadata(ctx oidc.Context) authorizationServerMetadat
 		metadata.JARAlgs = ctx.JARSigAlgs
 		if ctx.JARByReferenceEnabled {
 			metadata.JARByReferenceEnabled = true
-			metadata.JARRequestURIRegistrationRequired = !ctx.JARByReferenceUnregisteredURIEnabled
+			metadata.JARRequestURIRegistrationRequired = true
 		}
 		if ctx.JAREncEnabled {
 			metadata.JARKeyEncAlgs = ctx.JARKeyEncAlgs

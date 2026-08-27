@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/dev-null-GmbH/go-oidc/internal/client"
@@ -25,7 +27,32 @@ type jarOptions struct {
 }
 
 func jarFromRequestURI(ctx oidc.Context, reqURI string, client *goidc.Client) (request, error) {
-	resp, err := ctx.JARHTTPClient().Get(reqURI)
+	registeredURI, err := registeredJARRequestURI(reqURI, client)
+	if err != nil {
+		return request{}, err
+	}
+
+	outboundRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, registeredURI, nil)
+	if err != nil {
+		return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri",
+			fmt.Errorf("could not create the request_uri request: %w", err))
+	}
+	httpClient := ctx.JARHTTPClient()
+	if httpClient == nil {
+		return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri",
+			errors.New("the request_uri HTTP client is not configured"))
+	}
+	// Redirects are separate, unregistered network destinations. Enforce the
+	// registered target even when a deployment supplies a permissive client.
+	jarHTTPClient := &http.Client{
+		Transport: httpClient.Transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+		Jar:     httpClient.Jar,
+		Timeout: httpClient.Timeout,
+	}
+	resp, err := jarHTTPClient.Do(outboundRequest)
 	if err != nil {
 		return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri",
 			fmt.Errorf("could not fetch the request object from request_uri: %w", err))
@@ -56,6 +83,34 @@ func jarFromRequestURI(ctx oidc.Context, reqURI string, client *goidc.Client) (r
 	}
 
 	return jarFromRequestObject(ctx, string(reqObject), client, nil)
+}
+
+func registeredJARRequestURI(reqURI string, client *goidc.Client) (string, error) {
+	if client == nil {
+		return "", invalidJARRequestURI()
+	}
+
+	// Select the outbound target from resolved server-side client metadata, not
+	// from the authorization request. Exact pre-registration is the allowlist
+	// boundary required before an authorization endpoint can make a network call.
+	for _, registeredURI := range client.RequestURIs {
+		if registeredURI != reqURI {
+			continue
+		}
+		parsed, err := url.Parse(registeredURI)
+		if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" ||
+			parsed.User != nil || parsed.Opaque != "" || strings.Contains(registeredURI, "#") {
+			return "", invalidJARRequestURI()
+		}
+		return registeredURI, nil
+	}
+
+	return "", invalidJARRequestURI()
+}
+
+func invalidJARRequestURI() error {
+	return goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri",
+		errors.New("request_uri must be an exact pre-registered HTTPS URI without credentials or a fragment"))
 }
 
 func jarFromRequestObject(ctx oidc.Context, reqObject string, c *goidc.Client, opts *jarOptions) (request, error) {
