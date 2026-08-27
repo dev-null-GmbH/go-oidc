@@ -117,11 +117,15 @@ func logout(ctx oidc.Context, ls *goidc.LogoutSession) error {
 		}
 
 		if ls.PostLogoutRedirectURI != "" {
+			redirectURI, err := currentPostLogoutRedirectURI(ctx, ls)
+			if err != nil {
+				return err
+			}
 			params := make(map[string]string)
 			if ls.State != "" {
 				params["state"] = ls.State
 			}
-			ctx.Redirect(strutil.URLWithQueryParams(ls.PostLogoutRedirectURI, params))
+			ctx.Redirect(strutil.URLWithQueryParams(redirectURI, params))
 			return nil
 		}
 
@@ -143,6 +147,35 @@ func logout(ctx oidc.Context, ls *goidc.LogoutSession) error {
 		}
 		return errors.New("logout failed")
 	}
+}
+
+// currentPostLogoutRedirectURI selects the destination from the current
+// server-owned client registration. The persisted logout-session value is
+// only used for exact matching and is never returned as the redirect base.
+func currentPostLogoutRedirectURI(ctx oidc.Context, ls *goidc.LogoutSession) (string, error) {
+	if ls == nil || ls.ClientID == "" || ls.PostLogoutRedirectURI == "" {
+		return "", goidc.WrapError(
+			goidc.ErrorCodeServerError,
+			"server error",
+			errors.New("post_logout_redirect_uri cannot be rebound to a current client"),
+		)
+	}
+
+	c, err := client.Client(ctx, ls.ClientID)
+	if err != nil {
+		return "", fmt.Errorf("could not load the current client for post-logout redirect: %w", err)
+	}
+	for _, registered := range c.PostLogoutRedirectURIs {
+		if registered == ls.PostLogoutRedirectURI {
+			return registered, nil
+		}
+	}
+
+	return "", goidc.WrapError(
+		goidc.ErrorCodeServerError,
+		"server error",
+		errors.New("post_logout_redirect_uri is not registered for the current client"),
+	)
 }
 
 func validateRequest(ctx oidc.Context, req request, c *goidc.Client) error {

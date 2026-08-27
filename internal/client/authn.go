@@ -284,7 +284,7 @@ func authenticatePrivateKeyJWT(ctx oidc.Context, c *goidc.Client, authnCtx Authn
 			errors.New("the client assertion must contain exactly one JOSE header"))
 	}
 
-	jwk, err := JWKMatchingHeader(ctx, c, parsedAssertion.Headers[0])
+	jwk, authority, err := privateKeyJWTVerificationKey(ctx, c, parsedAssertion.Headers[0], sigAlgs)
 	if err != nil {
 		return goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client", err)
 	}
@@ -313,7 +313,8 @@ func authenticatePrivateKeyJWT(ctx oidc.Context, c *goidc.Client, authnCtx Authn
 			KeyID:     header.KeyID,
 			Type:      typ,
 		},
-		Claims: rawClaims,
+		Claims:    rawClaims,
+		Authority: verifiedClientAssertionAuthority(authority),
 	}); err != nil {
 		if isClientAuthenticationServerError(err) {
 			return err
@@ -321,7 +322,119 @@ func authenticatePrivateKeyJWT(ctx oidc.Context, c *goidc.Client, authnCtx Authn
 		return goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client", err)
 	}
 
-	return consumeClientAssertionJTI(ctx, c, claims, authnCtx)
+	if err := consumeClientAssertionJTI(ctx, c, claims, authnCtx); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return goidc.WrapError(goidc.ErrorCodeServerError, "server error", err)
+	}
+	ctx.RecordClientAssertionAuthority(c.ID, verifiedClientAssertionAuthority(authority))
+	return nil
+}
+
+type privateKeyJWTAuthorityBinding struct {
+	snapshotRevision int64
+	keyAuthorityID   string
+}
+
+func verifiedClientAssertionAuthority(
+	authority *privateKeyJWTAuthorityBinding,
+) *goidc.VerifiedClientAssertionAuthority {
+	if authority == nil {
+		return nil
+	}
+	return &goidc.VerifiedClientAssertionAuthority{
+		SnapshotRevision: authority.snapshotRevision,
+		KeyAuthorityID:   authority.keyAuthorityID,
+	}
+}
+
+func privateKeyJWTVerificationKey(
+	ctx oidc.Context,
+	c *goidc.Client,
+	header jose.Header,
+	allowedAlgorithms []goidc.SignatureAlgorithm,
+) (goidc.JSONWebKey, *privateKeyJWTAuthorityBinding, error) {
+	if c.PrivateKeyJWTAuthority == nil {
+		key, err := JWKMatchingHeader(ctx, c, header)
+		return key, nil, err
+	}
+
+	// Capture scalar metadata and the slice before validating or selecting a
+	// candidate. The callback result below never aliases resolver-owned metadata.
+	revision := c.PrivateKeyJWTAuthority.SnapshotRevision
+	keys := append([]goidc.PrivateKeyJWTAuthorityKey(nil), c.PrivateKeyJWTAuthority.Keys...)
+	if revision <= 0 {
+		return goidc.JSONWebKey{}, nil, errors.New("the private_key_jwt authority snapshot revision must be positive")
+	}
+	if len(keys) == 0 {
+		return goidc.JSONWebKey{}, nil, errors.New("the private_key_jwt authority snapshot contains no verification keys")
+	}
+
+	seenHeaderKeyIDs := make(map[string]struct{}, len(keys))
+	seenAuthorityKeyIDs := make(map[string]struct{}, len(keys))
+	seenPublicKeyThumbprints := make(map[string]struct{}, len(keys))
+	for _, authorityKey := range keys {
+		if authorityKey.KeyAuthorityID == "" {
+			return goidc.JSONWebKey{}, nil, errors.New("a private_key_jwt authority key has an empty authority ID")
+		}
+		if _, exists := seenAuthorityKeyIDs[authorityKey.KeyAuthorityID]; exists {
+			return goidc.JSONWebKey{}, nil, errors.New("the private_key_jwt authority snapshot contains duplicate authority key IDs")
+		}
+		seenAuthorityKeyIDs[authorityKey.KeyAuthorityID] = struct{}{}
+
+		key := authorityKey.Key
+		if !key.Valid() {
+			return goidc.JSONWebKey{}, nil, errors.New("the private_key_jwt authority snapshot contains an invalid key")
+		}
+		if !key.IsPublic() {
+			return goidc.JSONWebKey{}, nil, errors.New("the private_key_jwt authority snapshot must contain only asymmetric public keys")
+		}
+		thumbprint, err := key.Thumbprint(crypto.SHA256)
+		if err != nil {
+			return goidc.JSONWebKey{}, nil, fmt.Errorf("could not identify a private_key_jwt authority public key: %w", err)
+		}
+		if _, exists := seenPublicKeyThumbprints[string(thumbprint)]; exists {
+			return goidc.JSONWebKey{}, nil, errors.New("the private_key_jwt authority snapshot contains duplicate public key material")
+		}
+		seenPublicKeyThumbprints[string(thumbprint)] = struct{}{}
+		if key.Use != string(goidc.KeyUsageSignature) {
+			return goidc.JSONWebKey{}, nil, errors.New("the private_key_jwt authority snapshot must contain only signature keys")
+		}
+		if !slices.Contains(allowedAlgorithms, goidc.SignatureAlgorithm(key.Algorithm)) {
+			return goidc.JSONWebKey{}, nil, errors.New("the private_key_jwt authority snapshot contains a key with a disallowed algorithm")
+		}
+		if key.KeyID == "" {
+			return goidc.JSONWebKey{}, nil, errors.New("a private_key_jwt authority key has an empty JOSE key ID")
+		}
+		if _, exists := seenHeaderKeyIDs[key.KeyID]; exists {
+			return goidc.JSONWebKey{}, nil, errors.New("the private_key_jwt authority snapshot contains duplicate JOSE key IDs")
+		}
+		seenHeaderKeyIDs[key.KeyID] = struct{}{}
+	}
+
+	matchingIndexes := make([]int, 0, 1)
+	for i, authorityKey := range keys {
+		if authorityKey.Key.Algorithm != header.Algorithm {
+			continue
+		}
+		if header.KeyID != "" && authorityKey.Key.KeyID != header.KeyID {
+			continue
+		}
+		matchingIndexes = append(matchingIndexes, i)
+	}
+	if len(matchingIndexes) == 0 {
+		return goidc.JSONWebKey{}, nil, errors.New("no private_key_jwt authority key matches the assertion header")
+	}
+	if len(matchingIndexes) != 1 {
+		return goidc.JSONWebKey{}, nil, errors.New("the private_key_jwt assertion header matches multiple authority keys")
+	}
+
+	matched := keys[matchingIndexes[0]]
+	return matched.Key, &privateKeyJWTAuthorityBinding{
+		snapshotRevision: revision,
+		keyAuthorityID:   matched.KeyAuthorityID,
+	}, nil
 }
 
 func isClientAuthenticationServerError(err error) bool {

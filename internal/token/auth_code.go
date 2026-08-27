@@ -14,9 +14,26 @@ import (
 )
 
 func generateAuthCodeToken(ctx oidc.Context, req request) (response, error) {
+	ctx = ctx.BeginClientAssertionAuthentication()
 	c, err := client.Authenticated(ctx, client.AuthnContextToken)
 	if err != nil {
 		return response{}, err
+	}
+	if c.AuthorizationRequestProfile == goidc.AuthorizationRequestProfileHumanConfidentialBFF {
+		isolatedClient, isolateErr := isolateHumanTokenClient(c)
+		if isolateErr != nil {
+			return response{}, humanAuthorizationServerError()
+		}
+		return generateHumanAuthorizationCodeToken(ctx, req, isolatedClient)
+	}
+	if c.AuthorizationRequestProfile != goidc.AuthorizationRequestProfileDefault {
+		return response{}, humanAuthorizationServerError()
+	}
+	if !ctx.LegacyAuthorizationCodeEnabled {
+		return response{}, humanAuthorizationServerError()
+	}
+	if ctx.HumanConfidentialBFFAuthorizationEnabled && isHumanAuthorizationCode(req.code) {
+		return response{}, humanAuthorizationInvalidGrant()
 	}
 
 	if req.code == "" {

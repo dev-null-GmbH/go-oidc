@@ -279,30 +279,20 @@ func TestOIDCConfig_JARByReferenceMetadata(t *testing.T) {
 	tests := []struct {
 		name                               string
 		byReferenceEnabled                 bool
-		unregisteredUREnabled              bool
 		wantByReferenceEnabled             bool
 		wantRegistrationRequiredAdvertised bool
 	}{
 		{
 			name:                               "disabled",
 			byReferenceEnabled:                 false,
-			unregisteredUREnabled:              false,
 			wantByReferenceEnabled:             false,
 			wantRegistrationRequiredAdvertised: false,
 		},
 		{
 			name:                               "enabled with registration required",
 			byReferenceEnabled:                 true,
-			unregisteredUREnabled:              false,
 			wantByReferenceEnabled:             true,
 			wantRegistrationRequiredAdvertised: true,
-		},
-		{
-			name:                               "enabled with unregistered uris allowed",
-			byReferenceEnabled:                 true,
-			unregisteredUREnabled:              true,
-			wantByReferenceEnabled:             true,
-			wantRegistrationRequiredAdvertised: false,
 		},
 	}
 
@@ -311,7 +301,6 @@ func TestOIDCConfig_JARByReferenceMetadata(t *testing.T) {
 			ctx := oidctest.NewContext(t)
 			ctx.JAREnabled = true
 			ctx.JARByReferenceEnabled = test.byReferenceEnabled
-			ctx.JARByReferenceUnregisteredURIEnabled = test.unregisteredUREnabled
 
 			got := NewConfiguration(ctx)
 

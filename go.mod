@@ -1,6 +1,6 @@
 module github.com/dev-null-GmbH/go-oidc
 
-go 1.26.5
+go 1.26.6
 
 retract (
 	v0.25.1-d0.2 // Draft creation failed; use v0.25.1-d0.3.

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/dev-null-GmbH/go-oidc/internal/client"
 	"github.com/dev-null-GmbH/go-oidc/internal/federation"
@@ -58,6 +59,15 @@ func initAuth(ctx oidc.Context, req request) error {
 		}
 		return goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client_id", fmt.Errorf("could not load the client: %w", err))
 	}
+	c, strictHumanAdmission, err := authorizationAdmissionClient(c)
+	if err != nil {
+		return err
+	}
+	if strictHumanAdmission {
+		if err := validateHumanConfidentialBFFOuterRequest(ctx, req); err != nil {
+			return err
+		}
+	}
 
 	// Check that the client is allowed to call the authorization endpoint.
 	if !slices.ContainsFunc(c.GrantTypes, func(gt goidc.GrantType) bool {
@@ -65,6 +75,24 @@ func initAuth(ctx oidc.Context, req request) error {
 	}) {
 		return goidc.WrapError(goidc.ErrorCodeUnauthorizedClient, "unauthorized client",
 			errors.New("the client is not allowed to use the authorization endpoint grant types"))
+	}
+	if strictHumanAdmission {
+		return startHumanConfidentialBFFAuthorization(ctx, req, c)
+	}
+	if ctx.HumanConfidentialBFFAuthorizationEnabled &&
+		strings.HasPrefix(req.RequestURI, goidc.HumanPushedRequestURIPrefix) {
+		return goidc.WrapError(
+			goidc.ErrorCodeServerError,
+			"server error",
+			errors.New("a strict human request_uri cannot enter legacy authorization dispatch"),
+		)
+	}
+	if !ctx.LegacyAuthorizationCodeEnabled {
+		return goidc.WrapError(
+			goidc.ErrorCodeServerError,
+			"server error",
+			errors.New("legacy authorization-session persistence is unavailable"),
+		)
 	}
 
 	as, err := func() (*goidc.AuthnSession, error) {
@@ -81,6 +109,9 @@ func initAuth(ctx oidc.Context, req request) error {
 				}
 				return nil, fmt.Errorf("could not load the pushed authorization request session: %w", err)
 			}
+			if err := validateAuthorizationRequestProfileBinding(ctx, as, c); err != nil {
+				return nil, err
+			}
 
 			if err := validateRequestWithPAR(ctx, req, as, c); err != nil {
 				as.Status = goidc.StatusFailure
@@ -92,7 +123,7 @@ func initAuth(ctx oidc.Context, req request) error {
 			}
 
 			// For FAPI, only the parameters sent during PAR are considered.
-			if ctx.Profile.IsFAPI() {
+			if ctx.Profile.IsFAPI() || strictHumanAdmission {
 				return as, nil
 			}
 
@@ -150,7 +181,19 @@ func initAuth(ctx oidc.Context, req request) error {
 
 	var policy goidc.AuthnPolicy
 	for _, candidate := range ctx.AuthPolicies {
-		if candidate.Setup(ctx.Request, as, c) {
+		setupSession := as
+		setupClient := c
+		if strictHumanAdmission {
+			setupSession, err = cloneHumanConfidentialBFFAuthenticationSession(as)
+			if err != nil {
+				return err
+			}
+			setupClient, err = isolatedHumanConfidentialBFFCallbackClient(c)
+			if err != nil {
+				return err
+			}
+		}
+		if candidate.Setup(ctx.Request, setupSession, setupClient) {
 			policy = candidate
 			break
 		}
@@ -218,11 +261,110 @@ func initAuth(ctx oidc.Context, req request) error {
 		}
 	}
 
+	if strictHumanAdmission {
+		if err := validateAuthorizationContinuationProfileBinding(ctx, as, c); err != nil {
+			return redirectError(ctx, err, c)
+		}
+	}
 	if err := authenticate(ctx, as, c); err != nil {
 		return redirectError(ctx, err, c)
 	}
 
 	return nil
+}
+
+func startHumanConfidentialBFFAuthorization(ctx oidc.Context, req request, c *goidc.Client) error {
+	if c == nil || !validHumanConfidentialBFFStartConfiguration(ctx) {
+		return goidc.WrapError(
+			goidc.ErrorCodeServerError,
+			"server error",
+			errors.New("the human authorization continuation is unavailable"),
+		)
+	}
+
+	requestURI, err := goidc.NewHumanPushedRequestURI(req.RequestURI)
+	if err != nil {
+		return invalidHumanConfidentialBFFRequest("request_uri is not a valid human pushed-request capability")
+	}
+	input, err := goidc.NewHumanStartInput(c.ID, requestURI)
+	if err != nil {
+		return goidc.WrapError(
+			goidc.ErrorCodeServerError,
+			"server error",
+			errors.New("the human authorization start input could not be sealed"),
+		)
+	}
+	decision, err := ctx.HumanConsumePARAndStartContinuation(input)
+	if err != nil {
+		return err
+	}
+	if decision.Outcome() == goidc.HumanStartOutcomeRejected {
+		return invalidHumanConfidentialBFFRequest("the human pushed authorization request was rejected")
+	}
+	if decision.Outcome() != goidc.HumanStartOutcomePending {
+		return goidc.WrapError(
+			goidc.ErrorCodeServerError,
+			"server error",
+			errors.New("the human authorization start decision was invalid"),
+		)
+	}
+
+	now := int64(timeutil.TimestampNow())
+	expiresAt := decision.ExpiresAt()
+	maxAge, validDeadline := humanConfidentialBFFStartDeadline(
+		expiresAt,
+		now,
+		ctx.JWTLeewayTimeSecs,
+	)
+	if !validDeadline {
+		return goidc.WrapError(
+			goidc.ErrorCodeServerError,
+			"server error",
+			errors.New("the human authorization interaction deadline was invalid"),
+		)
+	}
+	entry, err := decision.EntryCapability().Render()
+	if err != nil {
+		return goidc.WrapError(goidc.ErrorCodeServerError, "server error", err)
+	}
+	browserBinding, err := decision.BrowserBindingCapability().Render()
+	if err != nil {
+		return goidc.WrapError(goidc.ErrorCodeServerError, "server error", err)
+	}
+
+	http.SetCookie(ctx.Response, &http.Cookie{
+		Name:     ctx.HumanBrowserBindingCookieName,
+		Value:    browserBinding,
+		Path:     "/",
+		Expires:  time.Unix(expiresAt, 0).UTC(),
+		MaxAge:   maxAge,
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	ctx.Response.Header().Set("Location", ctx.HumanIdentityInteractionEndpoint+"#"+entry)
+	ctx.Response.Header().Set("Cache-Control", "no-store")
+	ctx.Response.Header().Set("Pragma", "no-cache")
+	ctx.Response.Header().Set("Referrer-Policy", "no-referrer")
+	ctx.Response.WriteHeader(http.StatusSeeOther)
+	return nil
+}
+
+func humanConfidentialBFFStartDeadline(expiresAt, now int64, configuredSkew int) (int, bool) {
+	skew, validSkew := oidc.HumanAuthorizationClockSkewSeconds(configuredSkew)
+	if !validSkew || now < 1 || expiresAt <= now {
+		return 0, false
+	}
+	remaining := expiresAt - now
+	if remaining > 300+skew {
+		return 0, false
+	}
+	// The database deadline remains authoritative, but the browser-visible
+	// lifetime must never exceed the fixed five-minute interaction window.
+	if remaining > 300 {
+		remaining = 300
+	}
+	return int(remaining), true
 }
 
 func continueAuth(ctx oidc.Context, id string) error {
@@ -247,6 +389,13 @@ func continueAuth(ctx oidc.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("could not load the client for the authentication session: %w", err)
 	}
+	c, _, err = authorizationAdmissionClient(c)
+	if err != nil {
+		return err
+	}
+	if err := validateAuthorizationContinuationProfileBinding(ctx, as, c); err != nil {
+		return err
+	}
 
 	if oauthErr := authenticate(ctx, as, c); oauthErr != nil {
 		return redirectError(ctx, oauthErr, c)
@@ -268,7 +417,48 @@ func authenticate(ctx oidc.Context, as *goidc.AuthnSession, c *goidc.Client) err
 		return fmt.Errorf("the authentication session is missing the policy id")
 	}
 
-	switch status, authErr := ctx.Policy(ctx.AuthPolicies, as.PolicyID).Authenticate(ctx.Response, ctx.Request, as, c); status {
+	callbackSession := as
+	callbackClient := c
+	strictHumanAdmission := c.AuthorizationRequestProfile ==
+		goidc.AuthorizationRequestProfileHumanConfidentialBFF
+	if strictHumanAdmission {
+		var err error
+		callbackSession, err = cloneHumanConfidentialBFFAuthenticationSession(as)
+		if err != nil {
+			return goidc.WrapError(goidc.ErrorCodeServerError, "server error", err)
+		}
+		callbackClient, err = isolatedHumanConfidentialBFFCallbackClient(c)
+		if err != nil {
+			return err
+		}
+	}
+	status, authErr := ctx.Policy(ctx.AuthPolicies, as.PolicyID).Authenticate(
+		ctx.Response,
+		ctx.Request,
+		callbackSession,
+		callbackClient,
+	)
+	if authErr != nil {
+		status = goidc.StatusFailure
+	}
+	if strictHumanAdmission {
+		if authErr != nil {
+			clearHumanConfidentialBFFAuthenticationOutputs(as)
+		} else if err := applyHumanConfidentialBFFAuthenticationOutputs(as, callbackSession, status); err != nil {
+			return failHumanConfidentialBFFAuthentication(ctx, as, err)
+		}
+		if status == goidc.StatusSuccess &&
+			(!humanConfidentialBFFSessionMatchesCurrentServer(ctx, as) ||
+				!validHumanConfidentialBFFPairwiseSubject(ctx, as, c)) {
+			return failHumanConfidentialBFFAuthentication(
+				ctx,
+				as,
+				errors.New("the strict authentication result is outside current server authority"),
+			)
+		}
+	}
+
+	switch status {
 	case goidc.StatusSuccess:
 		as.Status = goidc.StatusSuccess
 		if err := ctx.AuthSaveSession(as); err != nil {
@@ -375,6 +565,31 @@ func authenticate(ctx oidc.Context, as *goidc.AuthnSession, c *goidc.Client) err
 
 		return newRedirectionError(goidc.ErrorCodeAccessDenied, "access denied", as.AuthorizationParameters)
 	}
+}
+
+func clearHumanConfidentialBFFAuthenticationOutputs(session *goidc.AuthnSession) {
+	if session == nil {
+		return
+	}
+	session.Subject = ""
+	session.Username = ""
+	session.GrantedScopes = ""
+	session.GrantedAuthDetails = nil
+	session.GrantedResources = nil
+	session.Store = nil
+}
+
+func failHumanConfidentialBFFAuthentication(
+	ctx oidc.Context,
+	session *goidc.AuthnSession,
+	cause error,
+) error {
+	clearHumanConfidentialBFFAuthenticationOutputs(session)
+	session.Status = goidc.StatusFailure
+	if err := ctx.AuthSaveSession(session); err != nil {
+		return fmt.Errorf("could not terminalize the rejected strict authentication session: %w", err)
+	}
+	return goidc.WrapError(goidc.ErrorCodeServerError, "server error", cause)
 }
 
 func federationClient(ctx oidc.Context, req request) (*goidc.Client, error) {

@@ -58,7 +58,7 @@ openssl req -new -newkey rsa:2048 -nodes -x509 -sha256 -days 3 \
   -addext 'basicConstraints=critical,CA:FALSE' \
   -addext 'keyUsage=critical,digitalSignature,keyEncipherment' \
   -addext 'extendedKeyUsage=serverAuth' \
-  -addext 'subjectAltName=DNS:auth.localhost,DNS:matls-auth.localhost,DNS:fed-trust-anchor.localhost,DNS:localhost' \
+  -addext 'subjectAltName=DNS:auth.localhost,DNS:matls-auth.localhost,DNS:fed-trust-anchor.localhost,DNS:localhost,DNS:localhost.emobix.co.uk' \
   >/dev/null 2>&1
 chmod 0600 "$temporary_root/examples/keys/server.key"
 chmod 0644 "$temporary_root/examples/keys/server.crt"

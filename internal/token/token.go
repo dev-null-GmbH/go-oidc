@@ -242,6 +242,20 @@ var accessTokenEngineOwnedClaims = map[string]struct{}{
 	goidc.ClaimGrantID:     {},
 }
 
+var idTokenEngineOwnedClaims = map[string]struct{}{
+	goidc.ClaimIssuer:           {},
+	goidc.ClaimSubject:          {},
+	goidc.ClaimAudience:         {},
+	goidc.ClaimExpiry:           {},
+	goidc.ClaimIssuedAt:         {},
+	goidc.ClaimNonce:            {},
+	goidc.ClaimAccessTokenHash:  {},
+	goidc.ClaimAuthzCodeHash:    {},
+	goidc.ClaimStateHash:        {},
+	goidc.ClaimRefreshTokenHash: {},
+	goidc.ClaimAuthReqID:        {},
+}
+
 func projectAccessTokenClaims(
 	ctx oidc.Context,
 	grantType goidc.GrantType,
@@ -341,6 +355,15 @@ func (accessTokenClaimsProjectionError) Error() string { return "access token cl
 func (err accessTokenClaimsProjectionError) Unwrap() error { return err.cause }
 
 func MakeIDToken(ctx oidc.Context, c *goidc.Client, opts IDTokenOptions) (string, error) {
+	for claim := range opts.Claims {
+		if _, reserved := idTokenEngineOwnedClaims[claim]; reserved {
+			return "", goidc.WrapError(
+				goidc.ErrorCodeServerError,
+				"server error",
+				errors.New("ID token claim collides with an engine-owned claim"),
+			)
+		}
+	}
 	alg := ctx.IDTokenDefaultSigAlg
 	if c.IDTokenSigAlg != "" && slices.Contains(ctx.IDTokenSigAlgs, c.IDTokenSigAlg) {
 		alg = c.IDTokenSigAlg

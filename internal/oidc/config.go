@@ -6,6 +6,19 @@ import (
 	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
+// HumanAuthorizationMaximumClockSkewSeconds bounds tolerance between the
+// process clock and timestamps authored by the atomic human authority.
+const HumanAuthorizationMaximumClockSkewSeconds = 60
+
+// HumanAuthorizationClockSkewSeconds validates and converts the configured
+// JWT leeway for use at the strict human-authorization boundary.
+func HumanAuthorizationClockSkewSeconds(seconds int) (int64, bool) {
+	if seconds < 0 || seconds > HumanAuthorizationMaximumClockSkewSeconds {
+		return 0, false
+	}
+	return int64(seconds), true
+}
+
 type Configuration struct {
 	GrantManager goidc.GrantManager
 	Profile      goidc.Profile
@@ -13,11 +26,22 @@ type Configuration struct {
 	// authorization server issuer.
 	Host string
 
-	AuthManager          goidc.AuthManager
-	AuthTimeoutSecs      int
-	AuthCodeFunc         goidc.RandomFunc
-	AuthCodeLifetimeSecs int
-	AuthSessionIDFunc    goidc.RandomFunc
+	AuthManager goidc.AuthManager
+	// LegacyAuthorizationCodeEnabled distinguishes mutable AuthManager-based
+	// authorization-code flows from the strict human authority path.
+	LegacyAuthorizationCodeEnabled bool
+	AuthTimeoutSecs                int
+	AuthCodeFunc                   goidc.RandomFunc
+	AuthCodeLifetimeSecs           int
+	AuthSessionIDFunc              goidc.RandomFunc
+	AuthSessionPersistenceIDFunc   goidc.RandomFunc
+
+	HumanConfidentialBFFAuthorizationEnabled bool
+	HumanAuthorizationAuthority              goidc.HumanAuthorizationAuthority
+	HumanIdentityInteractionEndpoint         string
+	HumanIdentityReadyEndpoint               string
+	HumanBrowserBindingCookieName            string
+	HumanAccessTokenLifetimeSecs             int
 
 	OpaqueTokenEnabled bool
 	OpaqueTokenManager goidc.OpaqueTokenManager
@@ -68,6 +92,7 @@ type Configuration struct {
 	HandleErrorFunc    goidc.HandleErrorFunc
 
 	AuthnMethods                            []goidc.AuthnMethod
+	AuthnMethodsExplicitlyConfigured        bool
 	AuthnMethodDefault                      goidc.AuthnMethod
 	AuthnMethodPrivateKeyJWTSigAlgs         []goidc.SignatureAlgorithm
 	AuthnMethodSecretJWTSigAlgs             []goidc.SignatureAlgorithm
@@ -133,16 +158,22 @@ type Configuration struct {
 	TokenIntrospectionEndpoint            string
 	TokenIntrospectionIsClientAllowedFunc goidc.IsClientAllowedTokenIntrospectionFunc
 
-	TokenRevocationEnabled                         bool
+	TokenRevocationEnabled bool
+	// LegacyTokenRevocationEnabled distinguishes generic Grant-backed token
+	// revocation from the strict human authority's atomic refresh-family path.
+	LegacyTokenRevocationEnabled                   bool
 	TokenRevocationEndpoint                        string
 	TokenRevocationIsClientAllowedFunc             goidc.IsClientAllowedFunc
 	TokenRevocationRevokeGrantOnAccessTokenEnabled bool
 
-	RefreshTokenManager         goidc.RefreshTokenManager
-	RefreshTokenFunc            goidc.RandomFunc
-	RefreshTokenShouldIssueFunc goidc.RefreshTokenShouldIssueFunc
-	RefreshTokenRotationEnabled bool
-	RefreshTokenLifetimeSecs    int
+	// LegacyRefreshTokenGrantEnabled distinguishes generic mutable Grant-based
+	// refresh from the strict human authority's atomic rotation path.
+	LegacyRefreshTokenGrantEnabled bool
+	RefreshTokenManager            goidc.RefreshTokenManager
+	RefreshTokenFunc               goidc.RandomFunc
+	RefreshTokenShouldIssueFunc    goidc.RefreshTokenShouldIssueFunc
+	RefreshTokenRotationEnabled    bool
+	RefreshTokenLifetimeSecs       int
 
 	JARMEnabled       bool
 	JARMSigAlgDefault goidc.SignatureAlgorithm
@@ -159,8 +190,11 @@ type Configuration struct {
 	// JARByReferenceEnabled determines whether Request Objects can be provided
 	// by reference using the "request_uri" parameter. When enabled, the authorization
 	// server retrieves the request object from the specified URI.
-	JARByReferenceEnabled                bool
-	JARByReferenceUnregisteredURIEnabled bool
+	JARByReferenceEnabled bool
+	// JARByReferenceAllowedLoopbackOrigins permits an exact HTTPS origin to
+	// resolve exclusively to loopback addresses. All other origins remain
+	// subject to the public-address-only request_uri policy.
+	JARByReferenceAllowedLoopbackOrigins []string
 	JAREncEnabled                        bool
 	JARKeyEncAlgs                        []goidc.KeyEncryptionAlgorithm
 	JARContentEncAlgs                    []goidc.ContentEncryptionAlgorithm
@@ -170,15 +204,15 @@ type Configuration struct {
 	PAREnabled bool
 	// PARRequired indicates that authorization requests can only be made if
 	// they were pushed.
-	PARRequired          bool
-	PARManager           goidc.PARManager
+	PARRequired bool
+	PARManager  goidc.PARManager
+	// LegacyPAREnabled distinguishes PARManager persistence from strict human
+	// StorePAR authority.
+	LegacyPAREnabled     bool
 	PARIDFunc            goidc.RandomFunc
 	PAREndpoint          string
 	PARHandleSessionFunc goidc.HandleSessionFunc
 	PARLifetimeSecs      int
-	// PARUnregisteredRedirectURIEnabled indicates whether the redirect URIs
-	// informed during PAR must be previously registered or not.
-	PARUnregisteredRedirectURIEnabled bool
 
 	CIBAEndpoint                   string
 	CIBAManager                    goidc.CIBAManager

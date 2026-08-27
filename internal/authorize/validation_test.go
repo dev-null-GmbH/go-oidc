@@ -285,10 +285,9 @@ func TestValidateRequestWithPAR(t *testing.T) {
 			},
 		},
 		{
-			name: "unregistered redirect uri does not mutate client",
+			name: "unregistered redirect uri is rejected for par continuation",
 			setup: func(t *testing.T) (oidc.Context, request, *goidc.AuthnSession, *goidc.Client) {
 				ctx := oidctest.NewContext(t)
-				ctx.PARUnregisteredRedirectURIEnabled = true
 				client, _ := oidctest.NewClient(t)
 				session := &goidc.AuthnSession{
 					Status:    goidc.StatusPending,
@@ -309,6 +308,7 @@ func TestValidateRequestWithPAR(t *testing.T) {
 				}
 				return ctx, req, session, client
 			},
+			wantErr:          goidc.ErrorCodeInvalidRequest,
 			wantRedirectURIs: []string{"https://example.com/callback"},
 		},
 		{
@@ -545,10 +545,9 @@ func TestValidatePushedRequest(t *testing.T) {
 			},
 		},
 		{
-			name: "unregistered redirect uri does not mutate client",
+			name: "unregistered redirect uri is rejected at par",
 			setup: func(t *testing.T) (oidc.Context, request, *goidc.Client) {
 				ctx := oidctest.NewContext(t)
-				ctx.PARUnregisteredRedirectURIEnabled = true
 				client, _ := oidctest.NewClient(t)
 				req := request{
 					ClientID: client.ID,
@@ -560,6 +559,7 @@ func TestValidatePushedRequest(t *testing.T) {
 				}
 				return ctx, req, client
 			},
+			wantErr:          true,
 			wantRedirectURIs: []string{"https://example.com/callback"},
 		},
 		{

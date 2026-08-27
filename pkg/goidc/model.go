@@ -584,16 +584,27 @@ type VerifiedClientAssertionHeader struct {
 	Type      string
 }
 
+// VerifiedClientAssertionAuthority identifies the server-authority snapshot and
+// exact public key that verified a private_key_jwt assertion. KeyAuthorityID is
+// opaque and is not the JOSE kid. The library never derives or interprets it.
+type VerifiedClientAssertionAuthority struct {
+	SnapshotRevision int64
+	KeyAuthorityID   string
+}
+
 // VerifiedClientAssertion contains the authenticated client identity, protected
 // header fields, and claims of a client assertion whose signature and standard
 // claims have been verified. AuthenticatedClientID comes from the resolved
-// client, not from client-controlled claims. Custom headers and claims remain
-// client-controlled: validate them before use, and do not log the raw claims
-// because they may contain sensitive values.
+// client, not from client-controlled claims. Authority is non-nil only when the
+// resolved client supplied a PrivateKeyJWTAuthority snapshot, and identifies the
+// exact authority key whose public material verified the signature. Custom
+// headers and claims remain client-controlled: validate them before use, and do
+// not log the raw claims because they may contain sensitive values.
 type VerifiedClientAssertion struct {
 	AuthenticatedClientID string
 	Header                VerifiedClientAssertionHeader
 	Claims                json.RawMessage
+	Authority             *VerifiedClientAssertionAuthority
 }
 
 // PrivateKeyJWTAssertionPolicyFunc applies deployment-specific policy to a

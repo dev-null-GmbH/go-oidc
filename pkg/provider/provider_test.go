@@ -14,6 +14,7 @@ import (
 	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/google/uuid"
 )
 
 func TestNew(t *testing.T) {
@@ -59,6 +60,7 @@ func TestNew(t *testing.T) {
 				"OpaqueTokenManager",
 				"JWKSFunc",
 				"AuthSessionIDFunc",
+				"AuthSessionPersistenceIDFunc",
 				"GrantIDFunc",
 				"JWTIDFunc",
 				"OpaqueTokenFunc",
@@ -87,61 +89,64 @@ func TestNew(t *testing.T) {
 			name: "with options",
 			setup: func() (Config, []Option) {
 				manager := storage.NewManager(100)
-				return Config{
-						Issuer:      issuer,
-						JWKS:        jwksFunc,
-						IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
-					}, []Option{
-						WithAuthCodeGrant(AuthCodeGrantConfig{
-							Manager: manager,
-							ResponseTypes: []goidc.ResponseType{goidc.ResponseTypeCode, goidc.ResponseTypeToken,
-								goidc.ResponseTypeIDToken, goidc.ResponseTypeIDTokenAndToken, goidc.ResponseTypeCodeAndIDToken,
-								goidc.ResponseTypeCodeAndToken, goidc.ResponseTypeCodeAndIDTokenAndToken},
-						},
-							WithPAR(manager),
-							WithJAR([]goidc.SignatureAlgorithm{goidc.SigAlgRS256}, WithJAREncryption(
-								[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
-								[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256},
-							)),
-							WithJARM([]goidc.SignatureAlgorithm{goidc.SigAlgRS256}),
-							WithFormPostResponseMode(),
-						),
-						WithCIBAGrant(CIBAGrantConfig{
-							Manager:       manager,
-							DeliveryModes: []goidc.CIBATokenDeliveryMode{goidc.CIBADeliveryModePoll},
-						},
-							WithCIBASessionHandler(nil),
-						),
-						WithPrivateKeyJWTAuthn(goidc.SigAlgRS256),
-						WithSecretJWTAuthn(goidc.SigAlgHS256),
-						WithDCR(manager),
-						WithTokenIntrospection(nil),
-						WithTokenRevocation(nil),
-						WithUserInfoSignatureAlgs(goidc.SigAlgPS256),
-						WithUserInfoEncryption(
+				config := Config{
+					Issuer:      issuer,
+					JWKS:        jwksFunc,
+					IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
+				}
+				options := []Option{
+					WithAuthCodeGrant(AuthCodeGrantConfig{
+						Manager: manager,
+						ResponseTypes: []goidc.ResponseType{goidc.ResponseTypeCode, goidc.ResponseTypeToken,
+							goidc.ResponseTypeIDToken, goidc.ResponseTypeIDTokenAndToken, goidc.ResponseTypeCodeAndIDToken,
+							goidc.ResponseTypeCodeAndToken, goidc.ResponseTypeCodeAndIDTokenAndToken},
+					},
+						WithPAR(manager),
+						WithJAR([]goidc.SignatureAlgorithm{goidc.SigAlgRS256}, WithJAREncryption(
 							[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
 							[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256},
-						),
-					}
+						)),
+						WithJARM([]goidc.SignatureAlgorithm{goidc.SigAlgRS256}),
+						WithFormPostResponseMode(),
+					),
+					WithCIBAGrant(CIBAGrantConfig{
+						Manager:       manager,
+						DeliveryModes: []goidc.CIBATokenDeliveryMode{goidc.CIBADeliveryModePoll},
+					},
+						WithCIBASessionHandler(nil),
+					),
+					WithPrivateKeyJWTAuthn(goidc.SigAlgRS256),
+					WithSecretJWTAuthn(goidc.SigAlgHS256),
+					WithDCR(manager),
+					WithTokenIntrospection(nil),
+					WithTokenRevocation(nil),
+					WithUserInfoSignatureAlgs(goidc.SigAlgPS256),
+					WithUserInfoEncryption(
+						[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
+						[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256},
+					),
+				}
+				return config, options
 			},
 			want: oidc.Configuration{
-				Profile:                  goidc.ProfileOpenID,
-				Host:                     issuer,
-				Scopes:                   []goidc.Scope{goidc.ScopeOpenID},
-				AuthTimeoutSecs:          defaultAuthnSessionTimeoutSecs,
-				ClaimTypes:               []goidc.ClaimType{goidc.ClaimTypeNormal},
-				SubIdentifierTypeDefault: goidc.SubIdentifierPublic,
-				SubIdentifierTypes:       []goidc.SubIdentifierType{goidc.SubIdentifierPublic},
-				JWKSEndpoint:             defaultEndpointJSONWebKeySet,
-				TokenEndpoint:            defaultEndpointToken,
-				AuthorizationEndpoint:    defaultEndpointAuthorize,
-				UserInfoEndpoint:         defaultEndpointUserInfo,
-				UserInfoDefaultSigAlg:    goidc.SigAlgPS256,
-				UserInfoSigAlgs:          []goidc.SignatureAlgorithm{goidc.SigAlgPS256},
-				IDTokenDefaultSigAlg:     goidc.SigAlgRS256,
-				IDTokenSigAlgs:           []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
-				IDTokenLifetimeSecs:      defaultIDTokenLifetimeSecs,
-				JWTLifetimeSecs:          defaultJWTLifetimeSecs,
+				Profile:                        goidc.ProfileOpenID,
+				Host:                           issuer,
+				LegacyAuthorizationCodeEnabled: true,
+				Scopes:                         []goidc.Scope{goidc.ScopeOpenID},
+				AuthTimeoutSecs:                defaultAuthnSessionTimeoutSecs,
+				ClaimTypes:                     []goidc.ClaimType{goidc.ClaimTypeNormal},
+				SubIdentifierTypeDefault:       goidc.SubIdentifierPublic,
+				SubIdentifierTypes:             []goidc.SubIdentifierType{goidc.SubIdentifierPublic},
+				JWKSEndpoint:                   defaultEndpointJSONWebKeySet,
+				TokenEndpoint:                  defaultEndpointToken,
+				AuthorizationEndpoint:          defaultEndpointAuthorize,
+				UserInfoEndpoint:               defaultEndpointUserInfo,
+				UserInfoDefaultSigAlg:          goidc.SigAlgPS256,
+				UserInfoSigAlgs:                []goidc.SignatureAlgorithm{goidc.SigAlgPS256},
+				IDTokenDefaultSigAlg:           goidc.SigAlgRS256,
+				IDTokenSigAlgs:                 []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
+				IDTokenLifetimeSecs:            defaultIDTokenLifetimeSecs,
+				JWTLifetimeSecs:                defaultJWTLifetimeSecs,
 				GrantTypes: []goidc.GrantType{
 					goidc.GrantAuthorizationCode,
 					goidc.GrantCIBA,
@@ -156,22 +161,24 @@ func TestNew(t *testing.T) {
 					goidc.ResponseTypeCodeAndToken,
 					goidc.ResponseTypeCodeAndIDTokenAndToken,
 				},
-				AuthnMethods:                    []goidc.AuthnMethod{goidc.AuthnMethodPrivateKeyJWT, goidc.AuthnMethodSecretJWT},
-				AuthnMethodPrivateKeyJWTSigAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
-				AuthnMethodSecretJWTSigAlgs:     []goidc.SignatureAlgorithm{goidc.SigAlgHS256},
-				DCREnabled:                      true,
-				DCREndpoint:                     defaultEndpointDynamicClient,
-				PAREnabled:                      true,
-				PAREndpoint:                     defaultEndpointPushedAuthorizationRequest,
-				PARLifetimeSecs:                 defaultPARLifetimeSecs,
-				JAREnabled:                      true,
-				JARSigAlgs:                      []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
-				JAREncEnabled:                   true,
-				JARKeyEncAlgs:                   []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
-				JARContentEncAlgs:               []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256},
-				JARMEnabled:                     true,
-				JARMSigAlgDefault:               goidc.SigAlgRS256,
-				JARMSigAlgs:                     []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
+				AuthnMethods:                     []goidc.AuthnMethod{goidc.AuthnMethodPrivateKeyJWT, goidc.AuthnMethodSecretJWT},
+				AuthnMethodsExplicitlyConfigured: true,
+				AuthnMethodPrivateKeyJWTSigAlgs:  []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
+				AuthnMethodSecretJWTSigAlgs:      []goidc.SignatureAlgorithm{goidc.SigAlgHS256},
+				DCREnabled:                       true,
+				DCREndpoint:                      defaultEndpointDynamicClient,
+				PAREnabled:                       true,
+				LegacyPAREnabled:                 true,
+				PAREndpoint:                      defaultEndpointPushedAuthorizationRequest,
+				PARLifetimeSecs:                  defaultPARLifetimeSecs,
+				JAREnabled:                       true,
+				JARSigAlgs:                       []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
+				JAREncEnabled:                    true,
+				JARKeyEncAlgs:                    []goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
+				JARContentEncAlgs:                []goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256},
+				JARMEnabled:                      true,
+				JARMSigAlgDefault:                goidc.SigAlgRS256,
+				JARMSigAlgs:                      []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
 				ResponseModes: []goidc.ResponseMode{
 					goidc.ResponseModeQuery,
 					goidc.ResponseModeFragment,
@@ -185,6 +192,7 @@ func TestNew(t *testing.T) {
 				TokenIntrospectionEnabled:      true,
 				TokenIntrospectionEndpoint:     defaultEndpointTokenIntrospection,
 				TokenRevocationEnabled:         true,
+				LegacyTokenRevocationEnabled:   true,
 				TokenRevocationEndpoint:        defaultEndpointTokenRevocation,
 				CIBAProfile:                    goidc.CIBAProfileOpenID,
 				CIBATokenDeliveryModes:         []goidc.CIBATokenDeliveryMode{goidc.CIBADeliveryModePoll},
@@ -200,6 +208,7 @@ func TestNew(t *testing.T) {
 				"AuthManager",
 				"AuthCodeFunc",
 				"AuthSessionIDFunc",
+				"AuthSessionPersistenceIDFunc",
 				"PARIDFunc",
 				"PARHandleSessionFunc",
 				"DCRManager",
@@ -258,6 +267,32 @@ func TestNew(t *testing.T) {
 				t.Error(diff)
 			}
 		})
+	}
+}
+
+func TestNewDefaultsAuthnSessionPersistenceIDFunc(t *testing.T) {
+	op, err := New(Config{
+		Issuer: "https://example.com",
+		JWKS: func(context.Context) (goidc.JSONWebKeySet, error) {
+			return goidc.JSONWebKeySet{}, nil
+		},
+		IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if op.config.AuthSessionPersistenceIDFunc == nil {
+		t.Fatal("default AuthSessionPersistenceIDFunc cannot be nil")
+	}
+
+	sessionID := op.config.AuthSessionIDFunc(t.Context())
+	persistenceID := op.config.AuthSessionPersistenceIDFunc(t.Context())
+	parsedPersistenceID, err := uuid.Parse(persistenceID)
+	if err != nil || parsedPersistenceID.Version() != 7 || parsedPersistenceID.String() != persistenceID {
+		t.Fatalf("default AuthSessionPersistenceIDFunc returned %q, want canonical UUIDv7", persistenceID)
+	}
+	if persistenceID == sessionID {
+		t.Fatal("default persistence ID must be generated independently from the authentication session ID")
 	}
 }
 
@@ -423,6 +458,38 @@ func TestNewRequiresGrantIDConsumersDisabledBeforeOmittingGrantID(t *testing.T) 
 		WithAccessTokenGrantIDClaim(false),
 	); err == nil {
 		t.Fatal("New() error = nil, want credential-issuer incompatibility error")
+	}
+}
+
+func TestNewSeparatesStrictHumanRevocationFromLegacyGrantIDConsumers(t *testing.T) {
+	humanOptions := []Option{
+		withHumanAuthorizationJTIUseConsumer(),
+		withHumanAuthorizationResourceIndicators(),
+		withHumanAuthorizationACRs(),
+		WithoutUserInfo(),
+		WithAccessTokenGrantIDClaim(false),
+		WithHumanConfidentialBFFAuthorizationAuthority(
+			humanAuthorizationAuthorityProviderStub{},
+			validHumanAuthorizationProviderOptions()...,
+		),
+	}
+	if _, err := New(humanAuthorizationProviderConfig(goidc.SigAlgPS256), humanOptions...); err != nil {
+		t.Fatalf("New() with strict human-only revocation and omitted machine grant_id error = %v", err)
+	}
+
+	for name, options := range map[string][]Option{
+		"legacy revocation before human authority": append(
+			[]Option{WithTokenRevocation(nil)}, humanOptions...,
+		),
+		"legacy revocation after human authority": append(
+			append([]Option(nil), humanOptions...), WithTokenRevocation(nil),
+		),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := New(humanAuthorizationProviderConfig(goidc.SigAlgPS256), options...); err == nil {
+				t.Fatal("New() error = nil, want legacy token-revocation grant_id incompatibility")
+			}
+		})
 	}
 }
 
@@ -651,9 +718,14 @@ func TestNew_ValidationErrors(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name:    "jar by-reference unregistered uris require jar by-reference",
+			name:    "par unregistered redirect uris are disabled",
+			opts:    []Option{Option(WithPAR(nil, WithPARUnregisteredRedirectURIs()))},
+			wantErr: "unregistered PAR redirect_uri values are disabled; pre-register redirect_uri values",
+		},
+		{
+			name:    "jar by-reference unregistered uris are disabled",
 			opts:    []Option{Option(WithJARByReferenceUnregisteredURIs())},
-			wantErr: "jar by-reference unregistered uris cannot be enabled without jar by-reference",
+			wantErr: "unregistered JAR request_uri fetching is disabled; pre-register request_uri values",
 		},
 		{
 			name: "dcr secret lifetime requires secret client auth",

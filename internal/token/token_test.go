@@ -279,6 +279,38 @@ func TestMakeIDToken(t *testing.T) {
 	}
 }
 
+func TestMakeIDTokenRejectsAdditionalClaimCollisions(t *testing.T) {
+	t.Parallel()
+
+	for _, claim := range []string{
+		goidc.ClaimIssuer,
+		goidc.ClaimSubject,
+		goidc.ClaimAudience,
+		goidc.ClaimExpiry,
+		goidc.ClaimIssuedAt,
+		goidc.ClaimNonce,
+		goidc.ClaimAccessTokenHash,
+		goidc.ClaimAuthzCodeHash,
+		goidc.ClaimStateHash,
+		goidc.ClaimRefreshTokenHash,
+		goidc.ClaimAuthReqID,
+	} {
+		t.Run(claim, func(t *testing.T) {
+			t.Parallel()
+			ctx := oidctest.NewContext(t)
+			client, _ := oidctest.NewClient(t)
+
+			idToken, err := MakeIDToken(ctx, client, IDTokenOptions{
+				Subject: "authoritative-subject",
+				Claims:  map[string]any{claim: "attacker-controlled"},
+			})
+			if err == nil || idToken != "" {
+				t.Fatalf("MakeIDToken() = (%q, %v), want empty token and collision error", idToken, err)
+			}
+		})
+	}
+}
+
 func TestIssue(t *testing.T) {
 	tests := []struct {
 		name     string

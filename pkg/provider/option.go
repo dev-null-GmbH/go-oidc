@@ -3,14 +3,254 @@ package provider
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/netip"
 	"net/url"
+	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
 type Option func(p *Provider) error
+
+// HumanConfidentialBFFAuthorizationOption configures the fixed browser
+// transport and immutable token policy used by the strict human authority.
+type HumanConfidentialBFFAuthorizationOption func(*Provider) error
+
+// WithHumanConfidentialBFFAuthorizationAuthority enables the stage-typed,
+// atomic human authorization path. It does not enable legacy AuthManager or
+// PARManager persistence; mixed providers may enable those separately through
+// WithAuthCodeGrant and WithPAR.
+func WithHumanConfidentialBFFAuthorizationAuthority(
+	authority goidc.HumanAuthorizationAuthority,
+	opts ...HumanConfidentialBFFAuthorizationOption,
+) Option {
+	return func(p *Provider) error {
+		if p.config.HumanConfidentialBFFAuthorizationEnabled {
+			return errors.New("human confidential-BFF authorization is already configured")
+		}
+		if nilInterface(authority) {
+			return errors.New("human authorization authority cannot be nil")
+		}
+
+		p.config.HumanConfidentialBFFAuthorizationEnabled = true
+		p.config.HumanAuthorizationAuthority = authority
+		p.config.HumanAccessTokenLifetimeSecs = 300
+		p.config.TokenRevocationEnabled = true
+		for _, opt := range opts {
+			if opt == nil {
+				return errors.New("human confidential-BFF authorization option cannot be nil")
+			}
+			if err := opt(p); err != nil {
+				return err
+			}
+		}
+		if p.config.HumanIdentityInteractionEndpoint == "" {
+			return errors.New("human identity interaction endpoint is required")
+		}
+		if p.config.HumanIdentityReadyEndpoint == "" {
+			return errors.New("human identity ready endpoint is required")
+		}
+		if p.config.HumanBrowserBindingCookieName == "" {
+			return errors.New("human browser-binding cookie name is required")
+		}
+
+		if !slices.Contains(p.config.GrantTypes, goidc.GrantAuthorizationCode) {
+			p.config.GrantTypes = append(p.config.GrantTypes, goidc.GrantAuthorizationCode)
+		}
+		if !slices.Contains(p.config.GrantTypes, goidc.GrantRefreshToken) {
+			p.config.GrantTypes = append(p.config.GrantTypes, goidc.GrantRefreshToken)
+		}
+		if !slices.Contains(p.config.ResponseTypes, goidc.ResponseTypeCode) {
+			p.config.ResponseTypes = append(p.config.ResponseTypes, goidc.ResponseTypeCode)
+		}
+		p.config.PAREnabled = true
+		p.config.PKCEEnabled = true
+		if p.config.PKCEDefaultChallengeMethod == "" {
+			p.config.PKCEDefaultChallengeMethod = goidc.CodeChallengeMethodSHA256
+		}
+		if !slices.Contains(p.config.PKCEChallengeMethods, goidc.CodeChallengeMethodSHA256) {
+			p.config.PKCEChallengeMethods = append(
+				p.config.PKCEChallengeMethods,
+				goidc.CodeChallengeMethodSHA256,
+			)
+		}
+		if !slices.Contains(p.config.AuthnMethods, goidc.AuthnMethodPrivateKeyJWT) {
+			p.config.AuthnMethods = append(p.config.AuthnMethods, goidc.AuthnMethodPrivateKeyJWT)
+		}
+		if !slices.Contains(p.config.AuthnMethodPrivateKeyJWTSigAlgs, goidc.SigAlgPS256) {
+			p.config.AuthnMethodPrivateKeyJWTSigAlgs = append(
+				p.config.AuthnMethodPrivateKeyJWTSigAlgs,
+				goidc.SigAlgPS256,
+			)
+		}
+		if len(p.config.SubIdentifierTypes) == 0 {
+			p.config.SubIdentifierTypes = []goidc.SubIdentifierType{
+				goidc.SubIdentifierPublic,
+				goidc.SubIdentifierPairwise,
+			}
+		} else if !slices.Contains(p.config.SubIdentifierTypes, goidc.SubIdentifierPairwise) {
+			p.config.SubIdentifierTypes = append(p.config.SubIdentifierTypes, goidc.SubIdentifierPairwise)
+		}
+		return nil
+	}
+}
+
+// WithHumanConfidentialBFFIdentityInteractionEndpoint pins the fixed clean
+// identity-origin route. The authorization handler adds only E as a fragment.
+func WithHumanConfidentialBFFIdentityInteractionEndpoint(endpoint string) HumanConfidentialBFFAuthorizationOption {
+	return func(p *Provider) error {
+		if !validHumanIdentityInteractionEndpoint(endpoint) {
+			return errors.New("invalid human identity interaction endpoint")
+		}
+		p.config.HumanIdentityInteractionEndpoint = endpoint
+		return nil
+	}
+}
+
+// WithHumanConfidentialBFFIdentityReadyEndpoint pins the second clean
+// identity-origin route. The browser-confirmation handler adds only C as a
+// fragment after the authority has committed the R+C+B transition.
+func WithHumanConfidentialBFFIdentityReadyEndpoint(endpoint string) HumanConfidentialBFFAuthorizationOption {
+	return func(p *Provider) error {
+		if !validHumanIdentityInteractionEndpoint(endpoint) {
+			return errors.New("invalid human identity ready endpoint")
+		}
+		p.config.HumanIdentityReadyEndpoint = endpoint
+		return nil
+	}
+}
+
+// WithHumanConfidentialBFFBrowserBindingCookieName pins the host-only cookie
+// name. Handlers always apply Secure, HttpOnly, Path=/, and SameSite=Strict.
+func WithHumanConfidentialBFFBrowserBindingCookieName(name string) HumanConfidentialBFFAuthorizationOption {
+	return func(p *Provider) error {
+		if !validHumanBrowserBindingCookieName(name) {
+			return errors.New("invalid human browser-binding cookie name")
+		}
+		p.config.HumanBrowserBindingCookieName = name
+		return nil
+	}
+}
+
+// WithHumanConfidentialBFFAccessTokenLifetime fixes direct strict access-token
+// issuance to a bounded lifetime without calling mutable TokenOptions.
+func WithHumanConfidentialBFFAccessTokenLifetime(seconds int) HumanConfidentialBFFAuthorizationOption {
+	return func(p *Provider) error {
+		if seconds < 1 || seconds > 600 {
+			return errors.New("human access-token lifetime must be between 1 and 600 seconds")
+		}
+		p.config.HumanAccessTokenLifetimeSecs = seconds
+		return nil
+	}
+}
+
+func validHumanIdentityInteractionEndpoint(endpoint string) bool {
+	parsed, err := url.ParseRequestURI(endpoint)
+	return err == nil && len(endpoint) <= 512 && providerHumanASCII(endpoint) &&
+		!strings.Contains(endpoint, "*") && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil &&
+		parsed.Fragment == "" && parsed.RawFragment == "" && parsed.RawQuery == "" &&
+		!parsed.ForceQuery && parsed.Opaque == "" && parsed.RawPath == "" && parsed.Path != "" &&
+		parsed.Port() == "" && parsed.Host == strings.ToLower(parsed.Host) && parsed.Hostname() == parsed.Host &&
+		net.ParseIP(parsed.Hostname()) == nil && validHumanInteractionDNSHost(parsed.Hostname()) &&
+		validHumanInteractionPath(parsed.Path) && parsed.String() == endpoint
+}
+
+func validHumanAuthorizationIssuer(issuer string) bool {
+	parsed, err := url.ParseRequestURI(issuer)
+	return err == nil && len(issuer) <= 512 && providerHumanASCII(issuer) &&
+		!strings.Contains(issuer, "*") && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil &&
+		parsed.Fragment == "" && parsed.RawFragment == "" && parsed.RawQuery == "" &&
+		!parsed.ForceQuery && parsed.Opaque == "" && parsed.RawPath == "" &&
+		parsed.Port() == "" && parsed.Host == strings.ToLower(parsed.Host) && parsed.Hostname() == parsed.Host &&
+		net.ParseIP(parsed.Hostname()) == nil && validHumanInteractionDNSHost(parsed.Hostname()) &&
+		(parsed.Path == "" || validHumanInteractionPath(parsed.Path)) && parsed.String() == issuer
+}
+
+func validHumanIdentityEndpointTopology(issuer, interaction, ready string) bool {
+	issuerURL, issuerErr := url.ParseRequestURI(issuer)
+	interactionURL, interactionErr := url.ParseRequestURI(interaction)
+	readyURL, readyErr := url.ParseRequestURI(ready)
+	return issuerErr == nil && interactionErr == nil && readyErr == nil &&
+		interactionURL.Scheme == readyURL.Scheme && interactionURL.Host == readyURL.Host &&
+		interactionURL.Hostname() != issuerURL.Hostname() && readyURL.Hostname() != issuerURL.Hostname()
+}
+
+func validHumanBrowserBindingCookieName(name string) bool {
+	if !strings.HasPrefix(name, "__Host-") || len(name) == len("__Host-") || len(name) > 128 {
+		return false
+	}
+	for index := range len(name) {
+		character := name[index]
+		if character <= 0x20 || character >= 0x7f || strings.ContainsRune("()<>@,;:\"/[]?={}\\", rune(character)) {
+			return false
+		}
+	}
+	return true
+}
+
+func validHumanInteractionDNSHost(host string) bool {
+	labels := strings.Split(host, ".")
+	if len(labels) < 2 || len(host) > 253 {
+		return false
+	}
+	for _, label := range labels {
+		if len(label) < 1 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for index := range len(label) {
+			character := label[index]
+			if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func validHumanInteractionPath(path string) bool {
+	if path[0] != '/' || strings.Contains(path, "//") {
+		return false
+	}
+	for _, segment := range strings.Split(path, "/") {
+		if segment == "." || segment == ".." {
+			return false
+		}
+	}
+	for index := range len(path) {
+		character := path[index]
+		if (character < 'A' || character > 'Z') && (character < 'a' || character > 'z') &&
+			(character < '0' || character > '9') && !strings.ContainsRune("/._~-", rune(character)) {
+			return false
+		}
+	}
+	return true
+}
+
+func providerHumanASCII(value string) bool {
+	for index := range len(value) {
+		if value[index] > 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+func nilInterface(value any) bool {
+	if value == nil {
+		return true
+	}
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
+}
 
 // ── Profile ───────────────────────────────────────────────────────────────────
 
@@ -413,6 +653,7 @@ func WithDefaultAuthn(method goidc.AuthnMethod) Option {
 // WithNoneAuthn enables the "none" client authentication method.
 func WithNoneAuthn() Option {
 	return func(p *Provider) error {
+		p.config.AuthnMethodsExplicitlyConfigured = true
 		p.config.AuthnMethods = append(p.config.AuthnMethods, goidc.AuthnMethodNone)
 		return nil
 	}
@@ -422,6 +663,7 @@ func WithNoneAuthn() Option {
 // authentication method.
 func WithSecretPostAuthn() Option {
 	return func(p *Provider) error {
+		p.config.AuthnMethodsExplicitlyConfigured = true
 		p.config.AuthnMethods = append(p.config.AuthnMethods, goidc.AuthnMethodSecretPost)
 		return nil
 	}
@@ -431,6 +673,7 @@ func WithSecretPostAuthn() Option {
 // authentication method.
 func WithSecretBasicAuthn() Option {
 	return func(p *Provider) error {
+		p.config.AuthnMethodsExplicitlyConfigured = true
 		p.config.AuthnMethods = append(p.config.AuthnMethods, goidc.AuthnMethodSecretBasic)
 		return nil
 	}
@@ -440,6 +683,7 @@ func WithSecretBasicAuthn() Option {
 // authentication method with the given signature algorithms.
 func WithPrivateKeyJWTAuthn(algs ...goidc.SignatureAlgorithm) Option {
 	return func(p *Provider) error {
+		p.config.AuthnMethodsExplicitlyConfigured = true
 		if len(algs) == 0 {
 			return errors.New("at least one signature algorithm is required for private_key_jwt")
 		}
@@ -451,7 +695,9 @@ func WithPrivateKeyJWTAuthn(algs ...goidc.SignatureAlgorithm) Option {
 				return errors.New("symmetric algorithms are not allowed for private_key_jwt authentication")
 			}
 		}
-		p.config.AuthnMethods = append(p.config.AuthnMethods, goidc.AuthnMethodPrivateKeyJWT)
+		if !slices.Contains(p.config.AuthnMethods, goidc.AuthnMethodPrivateKeyJWT) {
+			p.config.AuthnMethods = append(p.config.AuthnMethods, goidc.AuthnMethodPrivateKeyJWT)
+		}
 		p.config.AuthnMethodPrivateKeyJWTSigAlgs = algs
 		return nil
 	}
@@ -474,6 +720,7 @@ func WithPrivateKeyJWTAssertionPolicy(f goidc.PrivateKeyJWTAssertionPolicyFunc) 
 // authentication method with the given signature algorithms.
 func WithSecretJWTAuthn(algs ...goidc.SignatureAlgorithm) Option {
 	return func(p *Provider) error {
+		p.config.AuthnMethodsExplicitlyConfigured = true
 		if len(algs) == 0 {
 			return errors.New("at least one signature algorithm is required for client_secret_jwt")
 		}
@@ -494,6 +741,7 @@ func WithSecretJWTAuthn(algs ...goidc.SignatureAlgorithm) Option {
 // WithTLSAuthn enables the "tls_client_auth" client authentication method.
 func WithTLSAuthn() Option {
 	return func(p *Provider) error {
+		p.config.AuthnMethodsExplicitlyConfigured = true
 		p.config.AuthnMethods = append(p.config.AuthnMethods, goidc.AuthnMethodTLS)
 		return nil
 	}
@@ -503,6 +751,7 @@ func WithTLSAuthn() Option {
 // authentication method.
 func WithSelfSignedTLSAuthn() Option {
 	return func(p *Provider) error {
+		p.config.AuthnMethodsExplicitlyConfigured = true
 		p.config.AuthnMethods = append(p.config.AuthnMethods, goidc.AuthnMethodSelfSignedTLS)
 		return nil
 	}
@@ -514,6 +763,7 @@ type AttestationJWTAuthnOption Option
 // authentication method with the given trusted attestation issuers.
 func WithAttestationJWTAuthn(issuers []goidc.AttestationIssuer, opts ...AttestationJWTAuthnOption) Option {
 	return func(p *Provider) error {
+		p.config.AuthnMethodsExplicitlyConfigured = true
 		if len(issuers) == 0 {
 			return errors.New("at least one attestation issuer is required")
 		}
@@ -728,8 +978,15 @@ func WithAuthCodeGrant(cfg AuthCodeGrantConfig, opts ...AuthCodeGrantOption) Opt
 			return errors.New("at least one response type is required for the authorization code grant")
 		}
 		p.config.AuthManager = cfg.Manager
-		p.config.GrantTypes = append(p.config.GrantTypes, goidc.GrantAuthorizationCode)
-		p.config.ResponseTypes = append(p.config.ResponseTypes, cfg.ResponseTypes...)
+		p.config.LegacyAuthorizationCodeEnabled = true
+		if !slices.Contains(p.config.GrantTypes, goidc.GrantAuthorizationCode) {
+			p.config.GrantTypes = append(p.config.GrantTypes, goidc.GrantAuthorizationCode)
+		}
+		for _, responseType := range cfg.ResponseTypes {
+			if !slices.Contains(p.config.ResponseTypes, responseType) {
+				p.config.ResponseTypes = append(p.config.ResponseTypes, responseType)
+			}
+		}
 		for _, opt := range opts {
 			if err := opt(p); err != nil {
 				return err
@@ -772,6 +1029,15 @@ func WithAuthnSessionIDFunc(f goidc.RandomFunc) Option {
 	}
 }
 
+// WithAuthnSessionPersistenceIDFunc sets the function used to generate stable
+// authentication session persistence operation IDs.
+func WithAuthnSessionPersistenceIDFunc(f goidc.RandomFunc) Option {
+	return func(p *Provider) error {
+		p.config.AuthSessionPersistenceIDFunc = f
+		return nil
+	}
+}
+
 // WithAuthSessionLifetime sets the user authentication session lifetime.
 // This defines how long an authorization request may last.
 // The default is [defaultAuthnSessionTimeoutSecs].
@@ -791,13 +1057,22 @@ func WithFormPostResponseMode() AuthCodeGrantOption {
 	}
 }
 
+// WithAuthorizationResponseIssuer enables the RFC 9207 "iss" parameter in
+// authorization responses. It can be used with either the strict Human
+// authorization authority or a legacy authorization-code grant.
+func WithAuthorizationResponseIssuer() Option {
+	return enableAuthorizationResponseIssuer
+}
+
+func enableAuthorizationResponseIssuer(p *Provider) error {
+	p.config.IssuerRespParamEnabled = true
+	return nil
+}
+
 // WithIssuerResponseParameter enables the "iss" parameter to be sent in the
-// response of authorization requests.
+// response of authorization requests configured through [WithAuthCodeGrant].
 func WithIssuerResponseParameter() AuthCodeGrantOption {
-	return func(p *Provider) error {
-		p.config.IssuerRespParamEnabled = true
-		return nil
-	}
+	return AuthCodeGrantOption(enableAuthorizationResponseIssuer)
 }
 
 // WithClaimsParameter allows clients to send the "claims" parameter during
@@ -852,6 +1127,7 @@ type PAROption Option
 func WithPAR(manager goidc.PARManager, opts ...PAROption) AuthCodeGrantOption {
 	return func(p *Provider) error {
 		p.config.PAREnabled = true
+		p.config.LegacyPAREnabled = true
 		p.config.PARManager = manager
 		for _, opt := range opts {
 			if err := opt(p); err != nil {
@@ -896,12 +1172,14 @@ func WithPARLifetime(secs int) PAROption {
 	}
 }
 
-// WithPARUnregisteredRedirectURIs allows clients to inform unregistered
-// redirect URIs during requests to pushed authorization endpoint.
+// WithPARUnregisteredRedirectURIs is retained for source compatibility but
+// always returns an error. RFC 9126 requires a pushed authorization request's
+// redirect_uri to be validated against the authenticated client's registration.
+//
+// Deprecated: pre-register every redirect_uri used with PAR.
 func WithPARUnregisteredRedirectURIs() PAROption {
-	return func(p *Provider) error {
-		p.config.PARUnregisteredRedirectURIEnabled = true
-		return nil
+	return func(*Provider) error {
+		return errors.New("unregistered PAR redirect_uri values are disabled; pre-register redirect_uri values")
 	}
 }
 
@@ -950,7 +1228,13 @@ func WithJARRequired() JAROption {
 // WithJARByReference enables support for request objects referenced by the
 // "request_uri" authorization parameter. The httpClientFunc defines how to
 // generate the HTTP client used to fetch request objects. If nil, the provider
-// falls back to [WithHTTPClientFunc].
+// falls back to [WithHTTPClientFunc]. By-reference fetches accept the default
+// transport or a *http.Transport making a direct connection; configured plain
+// dial hooks are replaced by a bounded guard-owned dialer and proxy settings
+// are disabled so the fetch is always direct. Disabled TLS verification, custom
+// TLS dial/protocol hooks, and arbitrary RoundTrippers fail closed because they
+// cannot preserve the request_uri destination-address policy. The configured
+// client's cookie jar is not used for the fetch.
 func WithJARByReference(httpClientFunc goidc.HTTPClientFunc) JAROption {
 	return func(p *Provider) error {
 		p.config.JARByReferenceEnabled = true
@@ -959,14 +1243,109 @@ func WithJARByReference(httpClientFunc goidc.HTTPClientFunc) JAROption {
 	}
 }
 
-// WithJARByReferenceUnregisteredURIs allows request_uri values that were not
-// pre-registered by the client.
-// Avoid using this option when possible, as it expands the attack surface for
-// server-side request_uri fetches.
-func WithJARByReferenceUnregisteredURIs() JAROption {
+// WithJARByReferenceAllowedLoopbackOrigins opts exact HTTPS origins into
+// loopback-only request_uri resolution. This is intended for local conformance
+// fixtures. Every address returned for an allowlisted origin must be loopback;
+// public, private, link-local, mapped, and mixed DNS answers remain rejected.
+// Origins must not include credentials, paths, queries, or fragments.
+func WithJARByReferenceAllowedLoopbackOrigins(origins ...string) JAROption {
+	configuredOrigins := slices.Clone(origins)
 	return func(p *Provider) error {
-		p.config.JARByReferenceUnregisteredURIEnabled = true
+		if len(configuredOrigins) == 0 {
+			return errors.New("at least one loopback origin is required for JAR by-reference fetching")
+		}
+
+		canonicalOrigins := make([]string, 0, len(configuredOrigins))
+		seen := make(map[string]struct{}, len(configuredOrigins))
+		for index, origin := range configuredOrigins {
+			canonical, err := canonicalJARLoopbackOrigin(origin)
+			if err != nil {
+				return fmt.Errorf("invalid JAR by-reference loopback origin at index %d: %w", index, err)
+			}
+			if _, duplicate := seen[canonical]; duplicate {
+				continue
+			}
+			seen[canonical] = struct{}{}
+			canonicalOrigins = append(canonicalOrigins, canonical)
+		}
+
+		p.config.JARByReferenceAllowedLoopbackOrigins = canonicalOrigins
 		return nil
+	}
+}
+
+func canonicalJARLoopbackOrigin(origin string) (string, error) {
+	parsed, err := url.Parse(origin)
+	if err != nil || strings.Contains(origin, "#") || !strings.EqualFold(parsed.Scheme, "https") || parsed.Host == "" ||
+		parsed.Hostname() == "" || parsed.User != nil || parsed.Opaque != "" || parsed.Path != "" ||
+		parsed.RawPath != "" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" ||
+		parsed.RawFragment != "" {
+		return "", errors.New("origin must be an exact HTTPS origin without credentials, path, query, or fragment")
+	}
+
+	port := parsed.Port()
+	portNumber := 443
+	if strings.HasSuffix(parsed.Host, ":") || strings.Contains(parsed.Hostname(), "%") {
+		return "", errors.New("origin host or port is invalid")
+	}
+	if port != "" {
+		var parseErr error
+		portNumber, parseErr = strconv.Atoi(port)
+		if parseErr != nil || portNumber < 1 || portNumber > 65535 {
+			return "", errors.New("origin port must be between 1 and 65535")
+		}
+	}
+
+	hostname := strings.ToLower(parsed.Hostname())
+	isIPv6 := false
+	if address, parseErr := netip.ParseAddr(hostname); parseErr == nil {
+		if address.Is4In6() || address.Zone() != "" {
+			return "", errors.New("origin IP address is not supported")
+		}
+		if !address.IsLoopback() {
+			return "", errors.New("literal origin IP address must be loopback")
+		}
+		hostname = address.String()
+		isIPv6 = address.Is6()
+	} else if !validJAROriginDNSName(hostname) {
+		return "", errors.New("origin hostname is invalid")
+	}
+
+	host := hostname
+	if portNumber != 443 {
+		host = net.JoinHostPort(hostname, strconv.Itoa(portNumber))
+	} else if isIPv6 {
+		host = "[" + hostname + "]"
+	}
+	return "https://" + host, nil
+}
+
+func validJAROriginDNSName(hostname string) bool {
+	if hostname == "" || len(hostname) > 253 || strings.HasSuffix(hostname, ".") {
+		return false
+	}
+	for _, label := range strings.Split(hostname, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for index := range len(label) {
+			character := label[index]
+			if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// WithJARByReferenceUnregisteredURIs is retained for source compatibility but
+// always returns an error. Fetching an authorization-endpoint request_uri that
+// is not selected from server-held client registration is an SSRF primitive.
+//
+// Deprecated: pre-register every by-reference JAR request_uri on the client.
+func WithJARByReferenceUnregisteredURIs() JAROption {
+	return func(*Provider) error {
+		return errors.New("unregistered JAR request_uri fetching is disabled; pre-register request_uri values")
 	}
 }
 
@@ -1058,8 +1437,11 @@ type RefreshTokenOption Option
 // the default in-memory storage is used.
 func WithRefreshTokenGrant(manager goidc.RefreshTokenManager, opts ...RefreshTokenOption) Option {
 	return func(p *Provider) error {
+		p.config.LegacyRefreshTokenGrantEnabled = true
 		p.config.RefreshTokenManager = manager
-		p.config.GrantTypes = append(p.config.GrantTypes, goidc.GrantRefreshToken)
+		if !slices.Contains(p.config.GrantTypes, goidc.GrantRefreshToken) {
+			p.config.GrantTypes = append(p.config.GrantTypes, goidc.GrantRefreshToken)
+		}
 		for _, opt := range opts {
 			if err := opt(p); err != nil {
 				return err
@@ -1518,6 +1900,7 @@ type TokenRevocationOption Option
 func WithTokenRevocation(f goidc.IsClientAllowedFunc, opts ...TokenRevocationOption) Option {
 	return func(p *Provider) error {
 		p.config.TokenRevocationEnabled = true
+		p.config.LegacyTokenRevocationEnabled = true
 		p.config.TokenRevocationIsClientAllowedFunc = f
 		for _, opt := range opts {
 			if err := opt(p); err != nil {
@@ -1780,7 +2163,7 @@ func WithACRs(values ...goidc.ACR) Option {
 		if len(values) == 0 {
 			return errors.New("at least one ACR value is required")
 		}
-		p.config.ACRs = values
+		p.config.ACRs = slices.Clone(values)
 		return nil
 	}
 }

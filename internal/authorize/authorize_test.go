@@ -918,9 +918,14 @@ func TestInitAuth(t *testing.T) {
 				ctx, client := setup(t)
 				ctx.PAREnabled = true
 				ctx.PARManager = ctx.AuthManager.(goidc.PARManager)
+				ctx.AuthSessionPersistenceIDFunc = func(context.Context) string {
+					t.Fatal("loaded PAR session must retain its existing persistence ID")
+					return ""
+				}
 
 				session := &goidc.AuthnSession{
 					ID:              "random_par_session",
+					PersistenceID:   "existing_authn_session_persistence_id",
 					Status:          goidc.StatusPending,
 					PushedAuthReqID: "random_pushed_auth_req_id",
 					ClientID:        client.ID,
@@ -955,6 +960,9 @@ func TestInitAuth(t *testing.T) {
 				}
 				if sessions[0].Status != goidc.StatusSuccess {
 					t.Fatalf("session.Status = %q, want %q", sessions[0].Status, goidc.StatusSuccess)
+				}
+				if sessions[0].PersistenceID != "existing_authn_session_persistence_id" {
+					t.Fatalf("session.PersistenceID = %q, want %q", sessions[0].PersistenceID, "existing_authn_session_persistence_id")
 				}
 
 				grants := oidctest.Grants(t, ctx)

@@ -76,6 +76,10 @@ fi
 
 require_literal .github/workflows/conformance.yml "$expected_maven_image"
 require_literal docker-compose.yml "$expected_mongo_image"
+require_literal docker-compose.yml \
+  './examples/keys/server.crt:/etc/ssl/certs/nginx-selfsigned.crt:ro'
+require_literal docker-compose.yml \
+  './examples/keys/server.key:/etc/ssl/private/nginx-selfsigned.key:ro'
 require_literal scripts/prepare-conformance-suite.sh "$expected_commit"
 require_literal scripts/prepare-conformance-suite.sh "$expected_nginx_image"
 require_literal scripts/prepare-conformance-suite.sh "$expected_temurin_image"
@@ -91,6 +95,9 @@ require_literal .github/workflows/conformance.yml \
   '${{ env.PIP_CACHE_DIR }}'
 require_literal Makefile "./scripts/prepare-conformance-suite.sh conformance-suite"
 require_literal Makefile "./scripts/generate-conformance-certificates.sh"
+require_literal Makefile "run-cs: keys"
+require_literal scripts/generate-conformance-certificates.sh \
+  'DNS:localhost.emobix.co.uk'
 
 if grep -Eq '^[[:space:]]+path:[[:space:]]+conformance-suite$' \
   .github/workflows/conformance.yml; then

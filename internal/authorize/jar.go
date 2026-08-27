@@ -1,10 +1,12 @@
 package authorize
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 
 const (
 	maxJARResponseByteSize int64 = 1_000_000 // 1 MB.
+	maxJARNetworkTimeout         = 30 * time.Second
 )
 
 type jarOptions struct {
@@ -25,7 +28,55 @@ type jarOptions struct {
 }
 
 func jarFromRequestURI(ctx oidc.Context, reqURI string, client *goidc.Client) (request, error) {
-	resp, err := ctx.JARHTTPClient().Get(reqURI)
+	return jarFromRequestURIWithNetworkControl(ctx, reqURI, client, jarNetworkControl{})
+}
+
+func jarFromRequestURIWithNetworkControl(
+	ctx oidc.Context,
+	reqURI string,
+	client *goidc.Client,
+	networkControl jarNetworkControl,
+) (request, error) {
+	registeredURI, err := registeredJARRequestURI(reqURI, client)
+	if err != nil {
+		return request{}, err
+	}
+	httpClient := ctx.JARHTTPClient()
+	if httpClient == nil {
+		return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri",
+			errors.New("the request_uri HTTP client is not configured"))
+	}
+	networkTimeout := maxJARNetworkTimeout
+	if httpClient.Timeout > 0 && httpClient.Timeout < networkTimeout {
+		networkTimeout = httpClient.Timeout
+	}
+	networkContext, cancelNetwork := context.WithTimeout(ctx, networkTimeout)
+	defer cancelNetwork()
+	if networkControl.allowAddress == nil {
+		origin, originErr := canonicalJARNetworkOrigin(registeredURI)
+		if originErr != nil {
+			return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri", originErr)
+		}
+		if slices.Contains(ctx.JARByReferenceAllowedLoopbackOrigins, origin) {
+			networkControl.allowAddress = loopbackJARIPAddress
+		}
+	}
+	target, err := resolveJARNetworkTarget(networkContext, registeredURI, networkControl)
+	if err != nil {
+		return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri", err)
+	}
+
+	outboundRequest, err := http.NewRequestWithContext(networkContext, http.MethodGet, registeredURI, nil)
+	if err != nil {
+		return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri",
+			fmt.Errorf("could not create the request_uri request: %w", err))
+	}
+	jarHTTPClient, jarTransport, err := newGuardedJARHTTPClient(httpClient, target)
+	if err != nil {
+		return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri", err)
+	}
+	defer jarTransport.CloseIdleConnections()
+	resp, err := jarHTTPClient.Do(outboundRequest)
 	if err != nil {
 		return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri",
 			fmt.Errorf("could not fetch the request object from request_uri: %w", err))
@@ -56,6 +107,39 @@ func jarFromRequestURI(ctx oidc.Context, reqURI string, client *goidc.Client) (r
 	}
 
 	return jarFromRequestObject(ctx, string(reqObject), client, nil)
+}
+
+func registeredJARRequestURI(reqURI string, client *goidc.Client) (string, error) {
+	if client == nil {
+		return "", invalidJARRequestURI()
+	}
+
+	// Select the outbound target from resolved server-side client metadata, not
+	// from the authorization request. Exact pre-registration is the allowlist
+	// boundary required before an authorization endpoint can make a network call.
+	for _, registeredURI := range client.RequestURIs {
+		if registeredURI != reqURI {
+			continue
+		}
+		parsed, err := url.Parse(registeredURI)
+		if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" ||
+			parsed.User != nil || parsed.Opaque != "" {
+			return "", invalidJARRequestURI()
+		}
+		// A fragment may distinguish an exact registered request_uri, but URI
+		// fragments are client-side identifiers and must never reach the HTTP
+		// request target used to fetch the request object.
+		parsed.Fragment = ""
+		parsed.RawFragment = ""
+		return parsed.String(), nil
+	}
+
+	return "", invalidJARRequestURI()
+}
+
+func invalidJARRequestURI() error {
+	return goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri",
+		errors.New("request_uri must be an exact pre-registered HTTPS URI without credentials"))
 }
 
 func jarFromRequestObject(ctx oidc.Context, reqObject string, c *goidc.Client, opts *jarOptions) (request, error) {

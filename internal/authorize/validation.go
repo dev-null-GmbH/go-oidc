@@ -37,10 +37,6 @@ func validateRequestWithPAR(ctx oidc.Context, req request, as *goidc.AuthnSessio
 		return goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request", errors.New("the request_uri has expired"))
 	}
 
-	if ctx.PARUnregisteredRedirectURIEnabled && as.RedirectURI != "" {
-		c = clientWithRedirectURI(c, as.RedirectURI)
-	}
-
 	return validateInWithOutParams(ctx, as.AuthorizationParameters, req.AuthorizationParameters, c)
 }
 
@@ -120,10 +116,6 @@ func validateSimplePushedRequest(ctx oidc.Context, req request, c *goidc.Client)
 func validatePushedRequest(ctx oidc.Context, req request, c *goidc.Client) error {
 	if req.RequestURI != "" {
 		return goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request", errors.New("request_uri is not allowed during PAR"))
-	}
-
-	if ctx.PARUnregisteredRedirectURIEnabled && req.RedirectURI != "" {
-		c = clientWithRedirectURI(c, req.RedirectURI)
 	}
 
 	if ctx.Profile.IsFAPI() {
@@ -345,7 +337,7 @@ func validateRequestURIAsOptional(ctx oidc.Context, params goidc.AuthorizationPa
 		return goidc.WrapError(goidc.ErrorCodeRequestURINotSupported, "request_uri_not_supported", errors.New("request_uri is not supported"))
 	}
 
-	if !ctx.JARByReferenceUnregisteredURIEnabled && !slices.Contains(c.RequestURIs, params.RequestURI) {
+	if !slices.Contains(c.RequestURIs, params.RequestURI) {
 		return goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri", errors.New("request_uri is not registered for the client"))
 	}
 
@@ -581,11 +573,4 @@ func validateVerifiableCredentialsAsOptional(ctx oidc.Context, params goidc.Auth
 	}
 
 	return nil
-}
-
-// clientWithRedirectURI creates a copy of the client with the given redirect URI.
-func clientWithRedirectURI(c *goidc.Client, uri string) *goidc.Client {
-	copied := *c
-	copied.RedirectURIs = append(slices.Clone(c.RedirectURIs), uri)
-	return &copied
 }

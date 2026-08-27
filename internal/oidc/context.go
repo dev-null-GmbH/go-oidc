@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dev-null-GmbH/go-oidc/internal/joseutil"
@@ -23,7 +25,16 @@ type Context struct {
 	Request               *http.Request
 	context               context.Context
 	tokenEndpointEvidence *tokenEndpointEvidenceState
+	clientAssertionState  *clientAssertionAuthorityState
 	*Configuration
+}
+
+type clientAssertionAuthorityState struct {
+	mutex                 sync.RWMutex
+	authenticatedClientID string
+	authority             *goidc.VerifiedClientAssertionAuthority
+	recorded              bool
+	invalid               bool
 }
 
 func NewHTTPContext(w http.ResponseWriter, r *http.Request, config *Configuration) Context {
@@ -39,6 +50,103 @@ func NewContext(ctx context.Context, config *Configuration) Context {
 		Configuration: config,
 		context:       ctx,
 	}
+}
+
+// BeginClientAssertionAuthentication returns a request-local context prepared
+// to capture private_key_jwt authority evidence during client authentication.
+// Each call allocates independent state even when Configuration and clients are
+// shared by concurrent requests.
+func (ctx Context) BeginClientAssertionAuthentication() Context {
+	ctx.clientAssertionState = &clientAssertionAuthorityState{}
+	return ctx
+}
+
+// BeginPARClientAuthentication is retained as a compatibility alias.
+func (ctx Context) BeginPARClientAuthentication() Context {
+	return ctx.BeginClientAssertionAuthentication()
+}
+
+// RecordClientAssertionAuthority captures a defensive copy of authority
+// evidence after private_key_jwt authentication has completely succeeded.
+// Calls outside a client-assertion authentication scope are intentionally ignored.
+func (ctx Context) RecordClientAssertionAuthority(
+	authenticatedClientID string,
+	authority *goidc.VerifiedClientAssertionAuthority,
+) {
+	if ctx.clientAssertionState == nil || authority == nil {
+		return
+	}
+	captured := *authority
+	ctx.clientAssertionState.mutex.Lock()
+	defer ctx.clientAssertionState.mutex.Unlock()
+	if ctx.clientAssertionState.invalid {
+		return
+	}
+	if ctx.clientAssertionState.recorded {
+		current := ctx.clientAssertionState.authority
+		if current == nil || ctx.clientAssertionState.authenticatedClientID != authenticatedClientID ||
+			*current != captured {
+			ctx.clientAssertionState.authenticatedClientID = ""
+			ctx.clientAssertionState.authority = nil
+			ctx.clientAssertionState.invalid = true
+		}
+		return
+	}
+	ctx.clientAssertionState.authenticatedClientID = authenticatedClientID
+	ctx.clientAssertionState.authority = &captured
+	ctx.clientAssertionState.recorded = true
+}
+
+// ClientAssertionAuthority returns a defensive copy of request-local authority
+// evidence and verifies that it agrees with the authenticated client.
+func (ctx Context) ClientAssertionAuthority(
+	client *goidc.Client,
+) (*goidc.VerifiedClientAssertionAuthority, error) {
+	if client == nil {
+		return nil, errors.New("the authenticated client is nil")
+	}
+	expectsAuthority := client.TokenAuthnMethod == goidc.AuthnMethodPrivateKeyJWT &&
+		client.PrivateKeyJWTAuthority != nil
+	if ctx.clientAssertionState == nil {
+		if expectsAuthority {
+			return nil, errors.New("private_key_jwt authority evidence was not captured for client authentication")
+		}
+		return nil, nil
+	}
+
+	ctx.clientAssertionState.mutex.RLock()
+	authenticatedClientID := ctx.clientAssertionState.authenticatedClientID
+	invalid := ctx.clientAssertionState.invalid
+	var authority *goidc.VerifiedClientAssertionAuthority
+	if ctx.clientAssertionState.authority != nil {
+		captured := *ctx.clientAssertionState.authority
+		authority = &captured
+	}
+	ctx.clientAssertionState.mutex.RUnlock()
+	if invalid {
+		return nil, errors.New("private_key_jwt authority evidence is conflicting")
+	}
+
+	if authority == nil {
+		if expectsAuthority {
+			return nil, errors.New("private_key_jwt authority evidence was not captured for client authentication")
+		}
+		return nil, nil
+	}
+	if !expectsAuthority || authenticatedClientID != client.ID {
+		return nil, errors.New("private_key_jwt authority evidence conflicts with the authenticated client")
+	}
+	if authority.SnapshotRevision <= 0 || authority.KeyAuthorityID == "" {
+		return nil, errors.New("private_key_jwt authority evidence is invalid")
+	}
+	return authority, nil
+}
+
+// PARClientAssertionAuthority is retained as a compatibility alias.
+func (ctx Context) PARClientAssertionAuthority(
+	client *goidc.Client,
+) (*goidc.VerifiedClientAssertionAuthority, error) {
+	return ctx.ClientAssertionAuthority(client)
 }
 
 func Handler(config *Configuration, exec func(ctx Context)) http.HandlerFunc {
@@ -331,6 +439,10 @@ func (ctx Context) LogoutSessionID() string {
 
 func (ctx Context) AuthnSessionID() string {
 	return ctx.AuthSessionIDFunc(ctx)
+}
+
+func (ctx Context) AuthnSessionPersistenceID() string {
+	return ctx.AuthSessionPersistenceIDFunc(ctx)
 }
 
 func (ctx Context) PARID() string {
@@ -678,6 +790,146 @@ func (ctx Context) PARHandleSession(as *goidc.AuthnSession, c *goidc.Client) err
 
 func (ctx Context) PARSessionByPushedAuthReqID(id string) (*goidc.AuthnSession, error) {
 	return ctx.PARManager.SessionByPushedAuthReqID(ctx, id)
+}
+
+// HumanStorePAR invokes the strict atomic PAR authority through a bounded,
+// panic-safe, cancellation-aware boundary.
+func (ctx Context) HumanStorePAR(input goidc.HumanPARInput) (goidc.HumanPARDecision, error) {
+	return callHumanAuthorizationAuthority(ctx, input,
+		func(authority goidc.HumanAuthorizationAuthority, callbackContext context.Context, candidate goidc.HumanPARInput) (goidc.HumanPARDecision, error) {
+			return authority.StorePAR(callbackContext, candidate)
+		}, nil)
+}
+
+// HumanConsumePARAndStartContinuation atomically consumes request_uri and
+// starts the purpose-separated browser interaction.
+func (ctx Context) HumanConsumePARAndStartContinuation(input goidc.HumanStartInput) (goidc.HumanStartDecision, error) {
+	return callHumanAuthorizationAuthority(ctx, input,
+		func(authority goidc.HumanAuthorizationAuthority, callbackContext context.Context, candidate goidc.HumanStartInput) (goidc.HumanStartDecision, error) {
+			return authority.ConsumePARAndStartContinuation(callbackContext, candidate)
+		}, nil)
+}
+
+func (ctx Context) HumanConfirmBrowser(input goidc.HumanContinuationInput) (goidc.HumanContinuationDecision, error) {
+	return callHumanAuthorizationAuthority(ctx, input,
+		func(authority goidc.HumanAuthorizationAuthority, callbackContext context.Context, candidate goidc.HumanContinuationInput) (goidc.HumanContinuationDecision, error) {
+			return authority.ConfirmBrowser(callbackContext, candidate)
+		}, func(candidate goidc.HumanContinuationInput, decision goidc.HumanContinuationDecision) bool {
+			if decision.Outcome() == goidc.HumanContinuationOutcomeExpired ||
+				decision.Outcome() == goidc.HumanContinuationOutcomeRejected {
+				return true
+			}
+			returned, ok := decision.BrowserReturnCapability()
+			if !ok {
+				return false
+			}
+			returnedText, returnedErr := returned.Render()
+			expectedText, expectedErr := candidate.BrowserReturnCapability().Render()
+			return returnedErr == nil && expectedErr == nil && returnedText == expectedText
+		})
+}
+
+func (ctx Context) HumanCompleteAuthorization(input goidc.HumanCompletionInput) (goidc.HumanCompletionDecision, error) {
+	return callHumanAuthorizationAuthority(ctx, input,
+		func(authority goidc.HumanAuthorizationAuthority, callbackContext context.Context, candidate goidc.HumanCompletionInput) (goidc.HumanCompletionDecision, error) {
+			return authority.CompleteAuthorization(callbackContext, candidate)
+		}, nil)
+}
+
+func (ctx Context) HumanRedeemAuthorizationCode(input goidc.HumanCodeRedemptionInput) (goidc.HumanCodeRedemptionDecision, error) {
+	return callHumanAuthorizationAuthority(ctx, input,
+		func(authority goidc.HumanAuthorizationAuthority, callbackContext context.Context, candidate goidc.HumanCodeRedemptionInput) (goidc.HumanCodeRedemptionDecision, error) {
+			return authority.RedeemAuthorizationCode(callbackContext, candidate)
+		},
+		func(candidate goidc.HumanCodeRedemptionInput, decision goidc.HumanCodeRedemptionDecision) bool {
+			return decision.Outcome() == goidc.HumanCodeRedemptionOutcomeRejected ||
+				decision.ClientID() == candidate.ClientID() &&
+					decision.ClientAssertionAuthority() == candidate.ClientAssertionAuthority()
+		})
+}
+
+// HumanRotateRefreshToken invokes the strict atomic refresh authority and
+// rejects any successful decision that is not bound to the freshly verified
+// client assertion authority supplied in the input.
+func (ctx Context) HumanRotateRefreshToken(
+	input goidc.HumanRefreshRotationInput,
+) (goidc.HumanRefreshRotationDecision, error) {
+	return callHumanAuthorizationAuthority(ctx, input,
+		func(authority goidc.HumanAuthorizationAuthority, callbackContext context.Context, candidate goidc.HumanRefreshRotationInput) (goidc.HumanRefreshRotationDecision, error) {
+			return authority.RotateRefreshToken(callbackContext, candidate)
+		},
+		func(candidate goidc.HumanRefreshRotationInput, decision goidc.HumanRefreshRotationDecision) bool {
+			return decision.Outcome() == goidc.HumanRefreshRotationOutcomeRejected ||
+				decision.ClientID() == candidate.ClientID() &&
+					decision.ClientAssertionAuthority() == candidate.ClientAssertionAuthority()
+		})
+}
+
+// HumanRevokeRefreshToken invokes the strict atomic family-revocation
+// authority through the same panic-safe and cancellation-aware boundary as
+// the other human authorization operations. Its nil result is deliberately
+// state-blind for RFC 7009.
+func (ctx Context) HumanRevokeRefreshToken(input goidc.HumanRefreshRevocationInput) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = humanAuthorizationAuthorityServerError()
+		}
+	}()
+	if !input.Valid() || humanAuthorizationAuthorityIsNil(ctx.HumanAuthorizationAuthority) ||
+		ctx.Err() != nil {
+		return humanAuthorizationAuthorityServerError()
+	}
+	if callbackErr := ctx.HumanAuthorizationAuthority.RevokeRefreshToken(ctx.Context(), input); callbackErr != nil || ctx.Err() != nil {
+		return humanAuthorizationAuthorityServerError()
+	}
+	return nil
+}
+
+type humanAuthorizationBoundaryValue interface {
+	Valid() bool
+}
+
+func callHumanAuthorizationAuthority[Input, Output humanAuthorizationBoundaryValue](
+	ctx Context,
+	input Input,
+	invoke func(goidc.HumanAuthorizationAuthority, context.Context, Input) (Output, error),
+	correlate func(Input, Output) bool,
+) (output Output, err error) {
+	defer func() {
+		if recover() != nil {
+			output = *new(Output)
+			err = humanAuthorizationAuthorityServerError()
+		}
+	}()
+	if !input.Valid() || humanAuthorizationAuthorityIsNil(ctx.HumanAuthorizationAuthority) || ctx.Err() != nil {
+		return output, humanAuthorizationAuthorityServerError()
+	}
+	output, callbackErr := invoke(ctx.HumanAuthorizationAuthority, ctx.Context(), input)
+	if callbackErr != nil || ctx.Err() != nil || !output.Valid() || correlate != nil && !correlate(input, output) {
+		return *new(Output), humanAuthorizationAuthorityServerError()
+	}
+	return output, nil
+}
+
+func humanAuthorizationAuthorityIsNil(authority goidc.HumanAuthorizationAuthority) bool {
+	if authority == nil {
+		return true
+	}
+	value := reflect.ValueOf(authority)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+func humanAuthorizationAuthorityServerError() error {
+	return goidc.WrapError(
+		goidc.ErrorCodeServerError,
+		"server error",
+		errors.New("human authorization authority failed"),
+	)
 }
 
 func (ctx Context) ClientSecret() string {

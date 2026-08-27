@@ -5,8 +5,12 @@ package goidc
 // It can be interacted with so to implement more sophisticated user
 // authentication flows.
 type AuthnSession struct {
-	ID     string `json:"id"`
-	Status Status `json:"status"`
+	ID string `json:"id"`
+	// PersistenceID is the stable operation identifier assigned when the
+	// authentication session is first created. Persistence adapters can use it
+	// to correlate retries without overloading ID or Store.
+	PersistenceID string `json:"persistence_id,omitempty"`
+	Status        Status `json:"status"`
 	// Subject is the user identifier.
 	//
 	// This value must be informed during the authentication flow.
@@ -16,6 +20,16 @@ type AuthnSession struct {
 	// grant and returned in the introspection response.
 	Username string `json:"username,omitempty"`
 	ClientID string `json:"client_id"`
+	// AuthorizationRequestProfile binds the server-owned admission profile that
+	// created this session. It is excluded from protocol JSON so a client cannot
+	// rewrite the parser contract between PAR, authorization, and continuation.
+	AuthorizationRequestProfile AuthorizationRequestProfile `json:"-"`
+	// ClientAssertionAuthority is server-authenticated evidence identifying the
+	// authority snapshot and exact public key that authenticated a private_key_jwt
+	// assertion for this PAR session. Its values are opaque server metadata and
+	// never come from JWT claims or JOSE headers. It is excluded from JSON to
+	// prevent protocol disclosure and client-controlled deserialization.
+	ClientAssertionAuthority *VerifiedClientAssertionAuthority `json:"-"`
 	// PushedAuthReqID is populated when the session is created from a pushed
 	// authorization request (PAR). It is the handle returned as request_uri.
 	PushedAuthReqID string `json:"pushed_auth_req_id,omitempty"`

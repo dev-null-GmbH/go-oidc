@@ -316,8 +316,9 @@ func TestTokenRevocationEndpoint(t *testing.T) {
 
 	want := &Provider{
 		config: oidc.Configuration{
-			TokenRevocationEnabled:  true,
-			TokenRevocationEndpoint: "/revoke",
+			TokenRevocationEnabled:       true,
+			LegacyTokenRevocationEnabled: true,
+			TokenRevocationEndpoint:      "/revoke",
 		},
 	}
 	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
@@ -781,6 +782,10 @@ func TestWithRefreshTokenGrant(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	if !p.config.LegacyRefreshTokenGrantEnabled {
+		t.Error("legacy refresh grant marker not set")
+	}
+
 	if !slices.Contains(p.config.GrantTypes, goidc.GrantRefreshToken) {
 		t.Error("GrantRefreshToken not added")
 	}
@@ -1054,27 +1059,12 @@ func TestWithPARRequired(t *testing.T) {
 	}
 }
 
-func TestWithUnregisteredRedirectURIsForPAR(t *testing.T) {
-	// Given.
-	p := &Provider{
-		config: oidc.Configuration{},
-	}
-
-	// When.
+func TestWithUnregisteredRedirectURIsForPARRejected(t *testing.T) {
+	p := &Provider{}
 	err := WithPARUnregisteredRedirectURIs()(p)
-
-	// Then.
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	want := &Provider{
-		config: oidc.Configuration{
-			PARUnregisteredRedirectURIEnabled: true,
-		},
-	}
-	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
-		t.Error(diff)
+	if err == nil || err.Error() !=
+		"unregistered PAR redirect_uri values are disabled; pre-register redirect_uri values" {
+		t.Fatalf("WithPARUnregisteredRedirectURIs() error = %v", err)
 	}
 }
 
@@ -1309,6 +1299,30 @@ func TestWithIssuerResponseParameter(t *testing.T) {
 
 	// When.
 	err := WithIssuerResponseParameter()(p)
+
+	// Then.
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := &Provider{
+		config: oidc.Configuration{
+			IssuerRespParamEnabled: true,
+		},
+	}
+	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
+		t.Error(diff)
+	}
+}
+
+func TestWithAuthorizationResponseIssuer(t *testing.T) {
+	// Given.
+	p := &Provider{
+		config: oidc.Configuration{},
+	}
+
+	// When.
+	err := WithAuthorizationResponseIssuer()(p)
 
 	// Then.
 	if err != nil {
@@ -1654,8 +1668,8 @@ func TestWithTokenRevocation(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !p.config.TokenRevocationEnabled {
-		t.Error("TokenRevocationEnabled should be true")
+	if !p.config.TokenRevocationEnabled || !p.config.LegacyTokenRevocationEnabled {
+		t.Error("legacy token revocation flags should both be true")
 	}
 
 	if p.config.TokenRevocationIsClientAllowedFunc == nil {
@@ -1677,8 +1691,8 @@ func TestTokenRevocationRevokeGrantOnAccessToken(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !p.config.TokenRevocationEnabled {
-		t.Error("TokenRevocationEnabled should be true")
+	if !p.config.TokenRevocationEnabled || !p.config.LegacyTokenRevocationEnabled {
+		t.Error("legacy token revocation flags should both be true")
 	}
 
 	if !p.config.TokenRevocationRevokeGrantOnAccessTokenEnabled {
@@ -1772,7 +1786,9 @@ func TestWithACRs(t *testing.T) {
 	}
 
 	// When.
-	err := WithACRs("0")(p)
+	values := []goidc.ACR{"0"}
+	err := WithACRs(values...)(p)
+	values[0] = "mutated-after-configuration"
 
 	// Then.
 	if err != nil {
@@ -2509,6 +2525,78 @@ func TestJARByReference(t *testing.T) {
 	}
 }
 
+func TestWithJARByReferenceAllowedLoopbackOrigins(t *testing.T) {
+	origins := []string{
+		"HTTPS://LOCALHOST:443",
+		"https://[0:0:0:0:0:0:0:1]:8443",
+		"https://localhost:443",
+	}
+	p := &Provider{config: oidc.Configuration{}}
+	option := WithJARByReferenceAllowedLoopbackOrigins(origins...)
+	origins[0] = "https://mutated-before-apply.example"
+
+	err := option(p)
+	if err != nil {
+		t.Fatalf("WithJARByReferenceAllowedLoopbackOrigins() error = %v", err)
+	}
+	origins[1] = "https://mutated-after-apply.example"
+
+	want := []string{"https://localhost", "https://[::1]:8443"}
+	if diff := cmp.Diff(p.config.JARByReferenceAllowedLoopbackOrigins, want); diff != "" {
+		t.Fatal(diff)
+	}
+}
+
+func TestWithJARByReferenceAllowedLoopbackOriginsRejectsInvalidOriginsAtomically(t *testing.T) {
+	for _, origin := range []string{
+		"",
+		"http://localhost",
+		"https://user@localhost",
+		"https://localhost/",
+		"https://localhost/request.jwt",
+		"https://localhost?query",
+		"https://localhost#fragment",
+		"https://localhost#",
+		"https:///missing-host",
+		"https://*.localhost",
+		"https://localhost:",
+		"https://localhost:0",
+		"https://localhost:65536",
+		"https://[::ffff:127.0.0.1]",
+	} {
+		t.Run(origin, func(t *testing.T) {
+			p := &Provider{config: oidc.Configuration{
+				JARByReferenceAllowedLoopbackOrigins: []string{"https://existing.example"},
+			}}
+
+			err := WithJARByReferenceAllowedLoopbackOrigins("https://localhost", origin)(p)
+			if err == nil {
+				t.Fatal("WithJARByReferenceAllowedLoopbackOrigins() error = nil")
+			}
+			want := []string{"https://existing.example"}
+			if diff := cmp.Diff(p.config.JARByReferenceAllowedLoopbackOrigins, want); diff != "" {
+				t.Fatalf("configuration changed after validation failure (-got +want):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestWithJARByReferenceAllowedLoopbackOriginsRequiresOrigin(t *testing.T) {
+	err := WithJARByReferenceAllowedLoopbackOrigins()(&Provider{})
+	if err == nil {
+		t.Fatal("WithJARByReferenceAllowedLoopbackOrigins() error = nil")
+	}
+}
+
+func TestWithJARByReferenceUnregisteredURIsRejected(t *testing.T) {
+	p := &Provider{}
+	err := WithJARByReferenceUnregisteredURIs()(p)
+	if err == nil || err.Error() !=
+		"unregistered JAR request_uri fetching is disabled; pre-register request_uri values" {
+		t.Fatalf("WithJARByReferenceUnregisteredURIs() error = %v", err)
+	}
+}
+
 func TestWithJWTLeewayTime(t *testing.T) {
 	// Given.
 	p := &Provider{
@@ -2697,6 +2785,29 @@ func TestWithAuthnSessionIDFunc(t *testing.T) {
 
 	if p.config.AuthSessionIDFunc == nil {
 		t.Error("AuthnSessionGenerateIDFunc cannot be nil")
+	}
+}
+
+func TestWithAuthnSessionPersistenceIDFunc(t *testing.T) {
+	// Given.
+	p := &Provider{
+		config: oidc.Configuration{},
+	}
+	idFunc := func(context.Context) string { return "authn_session_persistence_id" }
+
+	// When.
+	err := WithAuthnSessionPersistenceIDFunc(idFunc)(p)
+
+	// Then.
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if p.config.AuthSessionPersistenceIDFunc == nil {
+		t.Fatal("AuthSessionPersistenceIDFunc cannot be nil")
+	}
+	if got := p.config.AuthSessionPersistenceIDFunc(t.Context()); got != "authn_session_persistence_id" {
+		t.Fatalf("AuthSessionPersistenceIDFunc() = %q, want %q", got, "authn_session_persistence_id")
 	}
 }
 

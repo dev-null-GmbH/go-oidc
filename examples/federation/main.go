@@ -297,6 +297,7 @@ func main() {
 func httpClientFunc() goidc.HTTPClientFunc {
 	trustAnchorIDURL, _ := url.Parse(TrustAnchorFedID)
 	clientIDURL, _ := url.Parse(ClientFedID)
+	dialer := &net.Dialer{}
 	return func(ctx context.Context) *http.Client {
 		return &http.Client{
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -304,12 +305,12 @@ func httpClientFunc() goidc.HTTPClientFunc {
 			},
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
-				Dial: func(network, addr string) (net.Conn, error) {
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 					// Forward requests to localhost.
 					if addr == clientIDURL.Hostname()+":443" || addr == trustAnchorIDURL.Hostname()+":443" {
 						addr = "127.0.0.1:443"
 					}
-					return net.Dial(network, addr)
+					return dialer.DialContext(ctx, network, addr)
 				},
 			},
 		}

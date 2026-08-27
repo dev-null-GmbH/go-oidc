@@ -102,6 +102,18 @@ func TestGenerateAuthCodeToken(t *testing.T) {
 			},
 		},
 		{
+			name: "human namespace remains legacy when Human authorization is disabled",
+			setup: func() (oidc.Context, request, *goidc.Client, *goidc.Grant) {
+				ctx, req, client, grant := setup(t)
+				grant.AuthCode = "d0_hac_1_legacy-custom-code"
+				req.code = grant.AuthCode
+				if err := ctx.SaveGrant(grant); err != nil {
+					t.Fatalf("save namespaced legacy grant: %v", err)
+				}
+				return ctx, req, client, grant
+			},
+		},
+		{
 			name: "auth details",
 			setup: func() (oidc.Context, request, *goidc.Client, *goidc.Grant) {
 				ctx, req, c, grant := setup(t)

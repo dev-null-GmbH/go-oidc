@@ -2,8 +2,10 @@ package authorize
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strconv"
 
@@ -58,6 +60,12 @@ const (
 type request struct {
 	ClientID string `json:"client_id"`
 	goidc.AuthorizationParameters
+	AdmissionTransport *requestAdmissionTransport `json:"-"`
+}
+
+type requestAdmissionTransport struct {
+	parameters url.Values
+	parseErr   error
 }
 
 // UnmarshalJSON makes sure the field "requested_expiry" can be unmarshalled
@@ -99,52 +107,54 @@ func (req *request) UnmarshalJSON(data []byte) error {
 }
 
 func newRequest(req *http.Request) request {
+	query, parseErr := url.ParseQuery(req.URL.RawQuery)
 	params := request{
-		ClientID: req.URL.Query().Get("client_id"),
+		ClientID: query.Get("client_id"),
 		AuthorizationParameters: goidc.AuthorizationParameters{
-			RequestURI:              req.URL.Query().Get("request_uri"),
-			RequestObject:           req.URL.Query().Get("request"),
-			RedirectURI:             req.URL.Query().Get("redirect_uri"),
-			ResponseMode:            goidc.ResponseMode(req.URL.Query().Get("response_mode")),
-			ResponseType:            goidc.ResponseType(req.URL.Query().Get("response_type")),
-			Scopes:                  req.URL.Query().Get("scope"),
-			State:                   req.URL.Query().Get("state"),
-			Nonce:                   req.URL.Query().Get("nonce"),
-			CodeChallenge:           req.URL.Query().Get("code_challenge"),
-			CodeChallengeMethod:     goidc.CodeChallengeMethod(req.URL.Query().Get("code_challenge_method")),
-			Prompt:                  goidc.PromptType(req.URL.Query().Get("prompt")),
-			Display:                 goidc.DisplayValue(req.URL.Query().Get("display")),
-			ACRValues:               req.URL.Query().Get("acr_values"),
-			Resources:               req.URL.Query()["resource"],
-			DPoPJKT:                 req.URL.Query().Get("dpop_jkt"),
-			LoginHint:               req.URL.Query().Get("login_hint"),
-			LoginHintToken:          req.URL.Query().Get("login_hint_token"),
-			IDTokenHint:             req.URL.Query().Get("id_token_hint"),
-			ClientNotificationToken: req.URL.Query().Get("client_notification_token"),
-			BindingMessage:          req.URL.Query().Get("binding_message"),
-			UserCode:                req.URL.Query().Get("user_code"),
+			RequestURI:              query.Get("request_uri"),
+			RequestObject:           query.Get("request"),
+			RedirectURI:             query.Get("redirect_uri"),
+			ResponseMode:            goidc.ResponseMode(query.Get("response_mode")),
+			ResponseType:            goidc.ResponseType(query.Get("response_type")),
+			Scopes:                  query.Get("scope"),
+			State:                   query.Get("state"),
+			Nonce:                   query.Get("nonce"),
+			CodeChallenge:           query.Get("code_challenge"),
+			CodeChallengeMethod:     goidc.CodeChallengeMethod(query.Get("code_challenge_method")),
+			Prompt:                  goidc.PromptType(query.Get("prompt")),
+			Display:                 goidc.DisplayValue(query.Get("display")),
+			ACRValues:               query.Get("acr_values"),
+			Resources:               query["resource"],
+			DPoPJKT:                 query.Get("dpop_jkt"),
+			LoginHint:               query.Get("login_hint"),
+			LoginHintToken:          query.Get("login_hint_token"),
+			IDTokenHint:             query.Get("id_token_hint"),
+			ClientNotificationToken: query.Get("client_notification_token"),
+			BindingMessage:          query.Get("binding_message"),
+			UserCode:                query.Get("user_code"),
 		},
+		AdmissionTransport: captureRequestAdmissionTransport(query, parseErr),
 	}
 
-	if maxAge, err := strconv.Atoi(req.URL.Query().Get("max_age")); err == nil {
+	if maxAge, err := strconv.Atoi(query.Get("max_age")); err == nil {
 		params.MaxAuthnAgeSecs = &maxAge
 	}
 
-	if claims := req.URL.Query().Get("claims"); claims != "" {
+	if claims := query.Get("claims"); claims != "" {
 		var claimsObject goidc.ClaimsObject
 		if err := json.Unmarshal([]byte(claims), &claimsObject); err == nil {
 			params.Claims = &claimsObject
 		}
 	}
 
-	if authorizationDetails := req.URL.Query().Get("authorization_details"); authorizationDetails != "" {
+	if authorizationDetails := query.Get("authorization_details"); authorizationDetails != "" {
 		var authorizationDetailsObject []goidc.AuthDetail
 		if err := json.Unmarshal([]byte(authorizationDetails), &authorizationDetailsObject); err == nil {
 			params.AuthDetails = authorizationDetailsObject
 		}
 	}
 
-	if requestedExpiry, err := strconv.Atoi(req.URL.Query().Get("requested_expiry")); err == nil {
+	if requestedExpiry, err := strconv.Atoi(query.Get("requested_expiry")); err == nil {
 		params.RequestedExpiry = &requestedExpiry
 	}
 
@@ -203,6 +213,8 @@ func (resp response) parameters() map[string]string {
 }
 
 func newFormRequest(req *http.Request) request {
+	parseErr := parseRequestForm(req)
+	admissionTransport := captureRequestAdmissionTransport(req.PostForm, parseErr)
 	params := goidc.AuthorizationParameters{
 		RequestURI:              req.PostFormValue("request_uri"),
 		RequestObject:           req.PostFormValue("request"),
@@ -252,7 +264,31 @@ func newFormRequest(req *http.Request) request {
 	return request{
 		ClientID:                req.PostFormValue("client_id"),
 		AuthorizationParameters: params,
+		AdmissionTransport:      admissionTransport,
 	}
+}
+
+func parseRequestForm(req *http.Request) error {
+	// PostFormValue uses the same 32 MiB in-memory multipart threshold. Calling
+	// the parser explicitly preserves that legacy behavior while retaining the
+	// first parse error for strict request admission instead of discarding it.
+	parseErr := req.ParseForm()
+	multipartErr := req.ParseMultipartForm(32 << 20)
+	if parseErr != nil {
+		return parseErr
+	}
+	if errors.Is(multipartErr, http.ErrNotMultipart) {
+		return nil
+	}
+	return multipartErr
+}
+
+func captureRequestAdmissionTransport(values url.Values, parseErr error) *requestAdmissionTransport {
+	parameters := make(url.Values, len(values))
+	for name, members := range values {
+		parameters[name] = append([]string(nil), members...)
+	}
+	return &requestAdmissionTransport{parameters: parameters, parseErr: parseErr}
 }
 
 type parResponse struct {
@@ -269,6 +305,7 @@ type cibaResponse struct {
 func newAuthnSession(ctx oidc.Context, params goidc.AuthorizationParameters, c *goidc.Client) *goidc.AuthnSession {
 	return &goidc.AuthnSession{
 		ID:                      ctx.AuthnSessionID(),
+		PersistenceID:           ctx.AuthnSessionPersistenceID(),
 		Status:                  goidc.StatusPending,
 		ClientID:                c.ID,
 		AuthorizationParameters: params,
