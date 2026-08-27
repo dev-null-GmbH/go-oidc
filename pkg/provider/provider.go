@@ -91,6 +91,14 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 			return nil, err
 		}
 	}
+	if op.config.HumanConfidentialBFFAuthorizationEnabled &&
+		!op.config.AuthnMethodsExplicitlyConfigured &&
+		!slices.Contains(op.config.AuthnMethods, goidc.AuthnMethodSecretPost) {
+		op.config.AuthnMethods = append(
+			[]goidc.AuthnMethod{goidc.AuthnMethodSecretPost},
+			op.config.AuthnMethods...,
+		)
+	}
 
 	if op.config.ResolveClientFunc != nil && op.config.DCREnabled {
 		return nil, errors.New("client resolver cannot be combined with dynamic client registration")
@@ -98,6 +106,45 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 
 	if op.config.ResolveClientFunc != nil && op.config.OpenIDFedEnabled {
 		return nil, errors.New("client resolver cannot be combined with OpenID Federation")
+	}
+	if op.config.HumanConfidentialBFFAuthorizationEnabled {
+		_, validAuthorityClockSkew := oidc.HumanAuthorizationClockSkewSeconds(
+			op.config.JWTLeewayTimeSecs,
+		)
+		if nilInterface(op.config.HumanAuthorizationAuthority) {
+			return nil, errors.New("human authorization authority cannot be nil")
+		}
+		if op.config.ConsumeJTIUseFunc == nil {
+			return nil, errors.New("human confidential-BFF authorization requires a typed JTI consumer")
+		}
+		if !slices.Contains(op.config.IDTokenSigAlgs, goidc.SigAlgPS256) {
+			return nil, errors.New("human confidential-BFF authorization requires PS256 ID tokens")
+		}
+		if !op.config.PAREnabled || !op.config.PKCEEnabled || !op.config.TokenRevocationEnabled ||
+			!slices.Contains(op.config.GrantTypes, goidc.GrantAuthorizationCode) ||
+			!slices.Contains(op.config.GrantTypes, goidc.GrantRefreshToken) ||
+			!slices.Contains(op.config.ResponseTypes, goidc.ResponseTypeCode) ||
+			!slices.Contains(op.config.PKCEChallengeMethods, goidc.CodeChallengeMethodSHA256) ||
+			!slices.Contains(op.config.AuthnMethods, goidc.AuthnMethodPrivateKeyJWT) ||
+			!slices.Contains(op.config.AuthnMethodPrivateKeyJWTSigAlgs, goidc.SigAlgPS256) ||
+			!slices.Contains(op.config.SubIdentifierTypes, goidc.SubIdentifierPairwise) ||
+			!validHumanAuthorizationIssuer(op.config.Host) ||
+			!validHumanIdentityInteractionEndpoint(op.config.HumanIdentityInteractionEndpoint) ||
+			!validHumanIdentityInteractionEndpoint(op.config.HumanIdentityReadyEndpoint) ||
+			!validHumanIdentityEndpointTopology(
+				op.config.Host,
+				op.config.HumanIdentityInteractionEndpoint,
+				op.config.HumanIdentityReadyEndpoint,
+			) ||
+			!validHumanBrowserBindingCookieName(op.config.HumanBrowserBindingCookieName) ||
+			!validHumanAuthorizationResources(op.config.ResourceIndicatorsEnabled, op.config.ResourceIndicators) ||
+			!validHumanAuthorizationACRs(op.config.ACRs) ||
+			!validAuthorityClockSkew ||
+			op.config.HumanAccessTokenLifetimeSecs < 1 || op.config.HumanAccessTokenLifetimeSecs > 600 ||
+			(op.config.IDTokenLifetimeSecs != 0 &&
+				(op.config.IDTokenLifetimeSecs < 1 || op.config.IDTokenLifetimeSecs > 600)) {
+			return nil, errors.New("human confidential-BFF authorization configuration is invalid")
+		}
 	}
 
 	if op.config.AuthnMethodDefault != "" && !slices.Contains(op.config.AuthnMethods, op.config.AuthnMethodDefault) {
@@ -147,15 +194,14 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 	if op.config.AccessTokenClaimsFunc != nil && op.config.OpaqueTokenEnabled {
 		return nil, errors.New("fallible access token claims cannot be combined with opaque tokens")
 	}
-	if op.config.AccessTokenClaimsFunc != nil &&
-		(len(op.config.GrantTypes) != 1 || op.config.GrantTypes[0] != goidc.GrantClientCredentials) {
+	if op.config.AccessTokenClaimsFunc != nil && !fallibleAccessTokenClaimsGrantSurface(op.config) {
 		return nil, errors.New("fallible access token claims require a client_credentials-only provider")
 	}
 	if op.config.OAuthScopesOnly && !op.config.OpenIDConfigurationDisabled {
 		return nil, errors.New("oauth-only scopes require OpenID configuration discovery to be disabled")
 	}
 	if op.config.AccessTokenGrantIDClaimDisabled &&
-		(!op.config.UserInfoDisabled || op.config.TokenIntrospectionEnabled || op.config.TokenRevocationEnabled ||
+		(!op.config.UserInfoDisabled || op.config.TokenIntrospectionEnabled || op.config.LegacyTokenRevocationEnabled ||
 			op.config.VCIEnabled) {
 		return nil, errors.New("grant_id cannot be omitted while a grant-dependent token endpoint is enabled")
 	}
@@ -199,6 +245,10 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 	op.config.ClaimTypes = nonZeroOrDefault(op.config.ClaimTypes, []goidc.ClaimType{goidc.ClaimTypeNormal})
 
 	op.config.IDTokenLifetimeSecs = nonZeroOrDefault(op.config.IDTokenLifetimeSecs, defaultIDTokenLifetimeSecs)
+	if op.config.HumanConfidentialBFFAuthorizationEnabled &&
+		(op.config.IDTokenLifetimeSecs < 1 || op.config.IDTokenLifetimeSecs > 600) {
+		return nil, errors.New("human confidential-BFF ID-token lifetime must be between 1 and 600 seconds")
+	}
 
 	op.config.JWKSEndpoint = nonZeroOrDefault(op.config.JWKSEndpoint, defaultEndpointJSONWebKeySet)
 
@@ -215,23 +265,27 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 	op.config.AuthSessionPersistenceIDFunc = nonZeroOrDefault(op.config.AuthSessionPersistenceIDFunc, defaultAuthnSessionPersistenceIDFunc)
 
 	if slices.Contains(op.config.GrantTypes, goidc.GrantAuthorizationCode) {
-		op.config.AuthManager = nonZeroOrDefault(op.config.AuthManager, goidc.AuthManager(inmemoryManager))
 		if !slices.Contains(op.config.ResponseTypes, goidc.ResponseTypeCode) {
 			op.config.ResponseTypes = append([]goidc.ResponseType{goidc.ResponseTypeCode}, op.config.ResponseTypes...)
 		}
-		op.config.AuthTimeoutSecs = nonZeroOrDefault(op.config.AuthTimeoutSecs, defaultAuthnSessionTimeoutSecs)
-		op.config.AuthCodeLifetimeSecs = nonZeroOrDefault(op.config.AuthCodeLifetimeSecs, defaultAuthorizationCodeLifetimeSecs)
-		op.config.AuthCodeFunc = nonZeroOrDefault(op.config.AuthCodeFunc, defaultAuthCodeFunc)
-		if slices.ContainsFunc(op.config.ResponseTypes, func(rt goidc.ResponseType) bool {
-			return rt.IsImplicit()
-		}) {
-			op.config.GrantTypes = append(op.config.GrantTypes, goidc.GrantImplicit)
+		if op.config.LegacyAuthorizationCodeEnabled {
+			op.config.AuthManager = nonZeroOrDefault(op.config.AuthManager, goidc.AuthManager(inmemoryManager))
+			op.config.AuthTimeoutSecs = nonZeroOrDefault(op.config.AuthTimeoutSecs, defaultAuthnSessionTimeoutSecs)
+			op.config.AuthCodeLifetimeSecs = nonZeroOrDefault(op.config.AuthCodeLifetimeSecs, defaultAuthorizationCodeLifetimeSecs)
+			op.config.AuthCodeFunc = nonZeroOrDefault(op.config.AuthCodeFunc, defaultAuthCodeFunc)
+			if slices.ContainsFunc(op.config.ResponseTypes, func(rt goidc.ResponseType) bool {
+				return rt.IsImplicit()
+			}) {
+				op.config.GrantTypes = append(op.config.GrantTypes, goidc.GrantImplicit)
+			}
+			responseModes := []goidc.ResponseMode{goidc.ResponseModeQuery, goidc.ResponseModeFragment}
+			if slices.Contains(op.config.ResponseModes, goidc.ResponseModeFormPost) {
+				responseModes = append(responseModes, goidc.ResponseModeFormPost)
+			}
+			op.config.ResponseModes = responseModes
+		} else if op.config.HumanConfidentialBFFAuthorizationEnabled {
+			op.config.ResponseModes = []goidc.ResponseMode{goidc.ResponseModeQuery}
 		}
-		responseModes := []goidc.ResponseMode{goidc.ResponseModeQuery, goidc.ResponseModeFragment}
-		if slices.Contains(op.config.ResponseModes, goidc.ResponseModeFormPost) {
-			responseModes = append(responseModes, goidc.ResponseModeFormPost)
-		}
-		op.config.ResponseModes = responseModes
 	}
 
 	op.config.AuthnMethods = nonZeroOrDefault(op.config.AuthnMethods, []goidc.AuthnMethod{goidc.AuthnMethodSecretPost})
@@ -246,11 +300,17 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 	}
 
 	if op.config.PAREnabled {
-		op.config.PARManager = nonZeroOrDefault(op.config.PARManager, goidc.PARManager(inmemoryManager))
-		op.config.PARHandleSessionFunc = nonZeroOrDefault(op.config.PARHandleSessionFunc, goidc.HandleSessionFunc(defaultPARHandleSessionFunc))
-		op.config.PARIDFunc = nonZeroOrDefault(op.config.PARIDFunc, defaultPARIDFunc)
 		op.config.PAREndpoint = nonZeroOrDefault(op.config.PAREndpoint, defaultEndpointPushedAuthorizationRequest)
 		op.config.PARLifetimeSecs = nonZeroOrDefault(op.config.PARLifetimeSecs, defaultPARLifetimeSecs)
+		if op.config.LegacyPAREnabled {
+			op.config.PARManager = nonZeroOrDefault(op.config.PARManager, goidc.PARManager(inmemoryManager))
+			op.config.PARHandleSessionFunc = nonZeroOrDefault(op.config.PARHandleSessionFunc, goidc.HandleSessionFunc(defaultPARHandleSessionFunc))
+			op.config.PARIDFunc = nonZeroOrDefault(op.config.PARIDFunc, defaultPARIDFunc)
+		}
+		if op.config.HumanConfidentialBFFAuthorizationEnabled &&
+			(op.config.PARLifetimeSecs < 1 || op.config.PARLifetimeSecs >= 600) {
+			return nil, errors.New("human confidential-BFF PAR lifetime must be between 1 and 599 seconds")
+		}
 	}
 
 	if op.config.JARMEnabled {
@@ -282,7 +342,7 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 		op.config.CIBAPollingIntervalSecs = nonZeroOrDefault(op.config.CIBAPollingIntervalSecs, defaultCIBAPollingIntervalSecs)
 	}
 
-	if slices.Contains(op.config.GrantTypes, goidc.GrantRefreshToken) {
+	if op.config.LegacyRefreshTokenGrantEnabled {
 		op.config.RefreshTokenManager = nonZeroOrDefault(op.config.RefreshTokenManager, goidc.RefreshTokenManager(inmemoryManager))
 		op.config.RefreshTokenFunc = nonZeroOrDefault(op.config.RefreshTokenFunc, defaultRefreshTokenFunc)
 		op.config.RefreshTokenShouldIssueFunc = nonZeroOrDefault(op.config.RefreshTokenShouldIssueFunc, goidc.RefreshTokenShouldIssueFunc(defaultRefreshTokenShouldIssueFunc))
@@ -446,6 +506,8 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 		}
 
 		if slices.Contains(op.config.GrantTypes, goidc.GrantAuthorizationCode) {
+			atomicHumanOnlyAuthorizationCode := op.config.HumanConfidentialBFFAuthorizationEnabled &&
+				!op.config.LegacyAuthorizationCodeEnabled
 			if slices.ContainsFunc(op.config.ResponseTypes, func(responseType goidc.ResponseType) bool {
 				return responseType != goidc.ResponseTypeCode
 			}) {
@@ -456,11 +518,11 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 				return nil, errors.New("[FAPI 2.0 5.3.1] authorization code lifetime must be less than 60 seconds")
 			}
 
-			if !op.config.PARRequired {
+			if !op.config.PARRequired && !atomicHumanOnlyAuthorizationCode {
 				return nil, errors.New("[FAPI 2.0 5.3.1] pushed authorization request must be required")
 			}
 
-			if !op.config.PKCERequired {
+			if !op.config.PKCERequired && !atomicHumanOnlyAuthorizationCode {
 				return nil, errors.New("[FAPI 2.0 5.3.1] pkce must be required")
 			}
 
@@ -470,7 +532,7 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 				return nil, errors.New("[FAPI 2.0 5.3.1] only pkce S256 code challenge method must be available")
 			}
 
-			if !op.config.IssuerRespParamEnabled {
+			if !op.config.IssuerRespParamEnabled && !atomicHumanOnlyAuthorizationCode {
 				return nil, errors.New("[FAPI 2.0 5.3.1] issuer response parameter must be enabled")
 			}
 
@@ -481,6 +543,58 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 	}
 
 	return op, nil
+}
+
+func fallibleAccessTokenClaimsGrantSurface(config oidc.Configuration) bool {
+	if len(config.GrantTypes) == 1 {
+		return config.GrantTypes[0] == goidc.GrantClientCredentials
+	}
+	if len(config.GrantTypes) != 3 || !config.HumanConfidentialBFFAuthorizationEnabled ||
+		config.LegacyAuthorizationCodeEnabled || config.LegacyRefreshTokenGrantEnabled {
+		return false
+	}
+	return slices.Contains(config.GrantTypes, goidc.GrantClientCredentials) &&
+		slices.Contains(config.GrantTypes, goidc.GrantAuthorizationCode) &&
+		slices.Contains(config.GrantTypes, goidc.GrantRefreshToken)
+}
+
+func validHumanAuthorizationResources(enabled bool, resources []goidc.ResourceIndicator) bool {
+	if !enabled || len(resources) == 0 {
+		return false
+	}
+	for _, resource := range resources {
+		if !validHumanIdentityInteractionEndpoint(resource) {
+			return false
+		}
+	}
+	return true
+}
+
+func validHumanAuthorizationACRs(values []goidc.ACR) bool {
+	if len(values) == 0 || len(values) > 32 {
+		return false
+	}
+	seen := make(map[goidc.ACR]struct{}, len(values))
+	for _, value := range values {
+		text := string(value)
+		if len(text) == 0 || len(text) > 128 {
+			return false
+		}
+		for index := range len(text) {
+			character := text[index]
+			if (character < 'A' || character > 'Z') &&
+				(character < 'a' || character > 'z') &&
+				(character < '0' || character > '9') &&
+				(index == 0 || !strings.ContainsRune("._:/-", rune(character))) {
+				return false
+			}
+		}
+		if _, exists := seen[value]; exists {
+			return false
+		}
+		seen[value] = struct{}{}
+	}
+	return true
 }
 
 func (op *Provider) Issuer() string {

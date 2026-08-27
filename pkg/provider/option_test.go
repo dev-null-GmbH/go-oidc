@@ -316,8 +316,9 @@ func TestTokenRevocationEndpoint(t *testing.T) {
 
 	want := &Provider{
 		config: oidc.Configuration{
-			TokenRevocationEnabled:  true,
-			TokenRevocationEndpoint: "/revoke",
+			TokenRevocationEnabled:       true,
+			LegacyTokenRevocationEnabled: true,
+			TokenRevocationEndpoint:      "/revoke",
 		},
 	}
 	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
@@ -779,6 +780,10 @@ func TestWithRefreshTokenGrant(t *testing.T) {
 	// Then.
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !p.config.LegacyRefreshTokenGrantEnabled {
+		t.Error("legacy refresh grant marker not set")
 	}
 
 	if !slices.Contains(p.config.GrantTypes, goidc.GrantRefreshToken) {
@@ -1654,8 +1659,8 @@ func TestWithTokenRevocation(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !p.config.TokenRevocationEnabled {
-		t.Error("TokenRevocationEnabled should be true")
+	if !p.config.TokenRevocationEnabled || !p.config.LegacyTokenRevocationEnabled {
+		t.Error("legacy token revocation flags should both be true")
 	}
 
 	if p.config.TokenRevocationIsClientAllowedFunc == nil {
@@ -1677,8 +1682,8 @@ func TestTokenRevocationRevokeGrantOnAccessToken(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !p.config.TokenRevocationEnabled {
-		t.Error("TokenRevocationEnabled should be true")
+	if !p.config.TokenRevocationEnabled || !p.config.LegacyTokenRevocationEnabled {
+		t.Error("legacy token revocation flags should both be true")
 	}
 
 	if !p.config.TokenRevocationRevokeGrantOnAccessTokenEnabled {
@@ -1772,7 +1777,9 @@ func TestWithACRs(t *testing.T) {
 	}
 
 	// When.
-	err := WithACRs("0")(p)
+	values := []goidc.ACR{"0"}
+	err := WithACRs(values...)(p)
+	values[0] = "mutated-after-configuration"
 
 	// Then.
 	if err != nil {
