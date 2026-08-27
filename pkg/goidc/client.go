@@ -4,6 +4,11 @@ type Client struct {
 	ID              string `json:"id"`
 	Secret          string `json:"secret,omitempty"`
 	SecretExpiresAt int    `json:"secret_expires_at,omitempty"`
+	// AuthorizationRequestProfile is a server-owned admission profile for
+	// authorization and PAR requests. The zero value preserves the standard
+	// protocol behavior. It is deliberately excluded from client metadata JSON
+	// so a client cannot opt itself into or out of an authority-selected parser.
+	AuthorizationRequestProfile AuthorizationRequestProfile `json:"-"`
 	// PrivateKeyJWTAuthority is a server-authority snapshot that binds each
 	// private_key_jwt verification key to an opaque, authority-owned identity.
 	//
@@ -25,6 +30,21 @@ type Client struct {
 	cachedJWKS *JSONWebKeySet
 	ClientMeta
 }
+
+// AuthorizationRequestProfile selects server-owned, client-qualified request
+// admission behavior. Unknown nonzero values must fail closed at authorization
+// and PAR endpoints.
+type AuthorizationRequestProfile string
+
+const (
+	// AuthorizationRequestProfileDefault preserves the standard authorization
+	// and PAR request behavior.
+	AuthorizationRequestProfileDefault AuthorizationRequestProfile = ""
+	// AuthorizationRequestProfileHumanConfidentialBFF selects the closed
+	// human confidential-BFF surface: mandatory simple PAR and an outer
+	// authorization request containing only client_id and request_uri.
+	AuthorizationRequestProfileHumanConfidentialBFF AuthorizationRequestProfile = "human_confidential_bff"
+)
 
 // PrivateKeyJWTAuthority is an immutable snapshot selected by the server's
 // client authority. SnapshotRevision must be positive. Keys must contain only

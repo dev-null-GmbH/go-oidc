@@ -20,6 +20,10 @@ type AuthnSession struct {
 	// grant and returned in the introspection response.
 	Username string `json:"username,omitempty"`
 	ClientID string `json:"client_id"`
+	// AuthorizationRequestProfile binds the server-owned admission profile that
+	// created this session. It is excluded from protocol JSON so a client cannot
+	// rewrite the parser contract between PAR, authorization, and continuation.
+	AuthorizationRequestProfile AuthorizationRequestProfile `json:"-"`
 	// ClientAssertionAuthority is server-authenticated evidence identifying the
 	// authority snapshot and exact public key that authenticated a private_key_jwt
 	// assertion for this PAR session. Its values are opaque server metadata and

@@ -80,3 +80,31 @@ func TestAuthnSessionClientAssertionAuthorityIsExcludedFromJSON(t *testing.T) {
 		t.Fatalf("client-controlled JSON populated authority evidence: %#v", decoded.ClientAssertionAuthority)
 	}
 }
+
+func TestAuthnSessionAuthorizationRequestProfileIsExcludedFromJSON(t *testing.T) {
+	session := goidc.AuthnSession{
+		ID:                          "authn_session_id",
+		AuthorizationRequestProfile: goidc.AuthorizationRequestProfileHumanConfidentialBFF,
+	}
+
+	encoded, err := json.Marshal(session)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if bytes.Contains(encoded, []byte("authorization_request_profile")) ||
+		bytes.Contains(encoded, []byte(goidc.AuthorizationRequestProfileHumanConfidentialBFF)) {
+		t.Fatalf("session JSON exposes the server-owned admission profile: %s", encoded)
+	}
+
+	var decoded goidc.AuthnSession
+	if err := json.Unmarshal([]byte(`{
+		"id":"authn_session_id",
+		"authorization_request_profile":"human-confidential-bff",
+		"AuthorizationRequestProfile":"human-confidential-bff"
+	}`), &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(AuthnSession) error = %v", err)
+	}
+	if decoded.AuthorizationRequestProfile != goidc.AuthorizationRequestProfileDefault {
+		t.Fatalf("client-controlled JSON populated admission profile: %q", decoded.AuthorizationRequestProfile)
+	}
+}
