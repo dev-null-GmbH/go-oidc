@@ -397,10 +397,11 @@ func TestContinueLogout(t *testing.T) {
 		{
 			name: "success",
 			setup: func(t *testing.T) (oidc.Context, string) {
-				ctx, _ := setup(t)
+				ctx, client := setup(t)
 				session := &goidc.LogoutSession{
 					ID:        "test_session",
 					PolicyID:  "test_policy",
+					ClientID:  client.ID,
 					ExpiresAt: timeutil.TimestampNow() + 60,
 					LogoutParameters: goidc.LogoutParameters{
 						PostLogoutRedirectURI: "https://rp.example.com/post_logout_redirect_uri",
@@ -422,6 +423,56 @@ func TestContinueLogout(t *testing.T) {
 					t.Errorf("expected 1 logout session, got %d", len(sessions))
 				} else if sessions[0].Status != goidc.StatusSuccess {
 					t.Errorf("session status = %q, want %q", sessions[0].Status, goidc.StatusSuccess)
+				}
+			},
+		},
+		{
+			name: "stored post logout redirect uri is not currently registered",
+			setup: func(t *testing.T) (oidc.Context, string) {
+				ctx, client := setup(t)
+				session := &goidc.LogoutSession{
+					ID:        "tampered_redirect_session",
+					PolicyID:  "test_policy",
+					ClientID:  client.ID,
+					ExpiresAt: timeutil.TimestampNow() + 60,
+					LogoutParameters: goidc.LogoutParameters{
+						PostLogoutRedirectURI: "https://attacker.example/callback",
+					},
+				}
+				if err := ctx.SaveLogoutSession(session); err != nil {
+					t.Fatalf("error saving logout session: %v", err)
+				}
+				return ctx, session.ID
+			},
+			wantErr: true,
+			validate: func(t *testing.T, ctx oidc.Context) {
+				if location := ctx.Response.Header().Get("Location"); location != "" {
+					t.Fatalf("Location = %q, want empty", location)
+				}
+			},
+		},
+		{
+			name: "stored post logout redirect client is no longer available",
+			setup: func(t *testing.T) (oidc.Context, string) {
+				ctx, _ := setup(t)
+				session := &goidc.LogoutSession{
+					ID:        "removed_client_session",
+					PolicyID:  "test_policy",
+					ClientID:  "removed_client",
+					ExpiresAt: timeutil.TimestampNow() + 60,
+					LogoutParameters: goidc.LogoutParameters{
+						PostLogoutRedirectURI: "https://rp.example.com/post_logout_redirect_uri",
+					},
+				}
+				if err := ctx.SaveLogoutSession(session); err != nil {
+					t.Fatalf("error saving logout session: %v", err)
+				}
+				return ctx, session.ID
+			},
+			wantErr: true,
+			validate: func(t *testing.T, ctx oidc.Context) {
+				if location := ctx.Response.Header().Get("Location"); location != "" {
+					t.Fatalf("Location = %q, want empty", location)
 				}
 			},
 		},

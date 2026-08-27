@@ -3,8 +3,11 @@ package authorize
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"slices"
+	"strconv"
 
 	"github.com/dev-null-GmbH/go-oidc/internal/client"
 	"github.com/dev-null-GmbH/go-oidc/internal/joseutil"
@@ -37,6 +40,11 @@ func redirectError(ctx oidc.Context, err error, c *goidc.Client) error {
 }
 
 func redirectResponse(ctx oidc.Context, c *goidc.Client, params goidc.AuthorizationParameters, redirectParams response) error {
+	redirectURI, err := currentAuthorizationRedirectURI(c, params.RedirectURI)
+	if err != nil {
+		return err
+	}
+
 	if ctx.IssuerRespParamEnabled {
 		redirectParams.issuer = ctx.Issuer()
 	}
@@ -68,10 +76,10 @@ func redirectResponse(ctx oidc.Context, c *goidc.Client, params goidc.Authorizat
 	redirectParamsMap := redirectParams.parameters()
 	switch responseMode {
 	case goidc.ResponseModeFragment, goidc.ResponseModeFragmentJWT:
-		redirectURL := strutil.URLWithFragmentParams(params.RedirectURI, redirectParamsMap)
+		redirectURL := strutil.URLWithFragmentParams(redirectURI, redirectParamsMap)
 		ctx.Redirect(redirectURL)
 	case goidc.ResponseModeFormPost, goidc.ResponseModeFormPostJWT:
-		redirectParamsMap["redirect_uri"] = params.RedirectURI
+		redirectParamsMap["redirect_uri"] = redirectURI
 		if err := ctx.WriteHTML(formPostResponseTemplate, redirectParamsMap); err != nil {
 			return fmt.Errorf("could not render the html for the form_post response mode: %w", err)
 		}
@@ -80,11 +88,73 @@ func redirectResponse(ctx oidc.Context, c *goidc.Client, params goidc.Authorizat
 			return fmt.Errorf("could not write the json response: %w", err)
 		}
 	default:
-		redirectURL := strutil.URLWithQueryParams(params.RedirectURI, redirectParamsMap)
+		redirectURL := strutil.URLWithQueryParams(redirectURI, redirectParamsMap)
 		ctx.Redirect(redirectURL)
 	}
 
 	return nil
+}
+
+// currentAuthorizationRedirectURI selects the redirect destination from the
+// current server-owned client registration. Native loopback redirects are
+// reconstructed from the registered URI and the request's validated numeric
+// port, as required by RFC 8252, rather than returning the request value.
+func currentAuthorizationRedirectURI(c *goidc.Client, requested string) (string, error) {
+	if c == nil || requested == "" {
+		return "", invalidCurrentAuthorizationRedirectURI()
+	}
+
+	for _, registered := range c.RedirectURIs {
+		if registered == requested {
+			return registered, nil
+		}
+	}
+
+	if c.ApplicationType != goidc.ApplicationTypeNative {
+		return "", invalidCurrentAuthorizationRedirectURI()
+	}
+
+	requestedURL, err := url.ParseRequestURI(requested)
+	if err != nil || requestedURL.Scheme == "" || requestedURL.Host == "" {
+		return "", invalidCurrentAuthorizationRedirectURI()
+	}
+	requestedIP := net.ParseIP(requestedURL.Hostname())
+	if requestedIP == nil || !requestedIP.IsLoopback() {
+		return "", invalidCurrentAuthorizationRedirectURI()
+	}
+	port, err := strconv.ParseUint(requestedURL.Port(), 10, 16)
+	if err != nil {
+		return "", invalidCurrentAuthorizationRedirectURI()
+	}
+
+	normalizedRequestedURL := *requestedURL
+	normalizedRequestedURL.Host = requestedURL.Hostname()
+	if requestedURL.Hostname() == "::1" {
+		normalizedRequestedURL.Host = "[::1]"
+	}
+
+	for _, registered := range c.RedirectURIs {
+		if registered != normalizedRequestedURL.String() {
+			continue
+		}
+
+		registeredURL, parseErr := url.ParseRequestURI(registered)
+		if parseErr != nil || registeredURL.Host == "" {
+			return "", invalidCurrentAuthorizationRedirectURI()
+		}
+		registeredURL.Host = net.JoinHostPort(registeredURL.Hostname(), strconv.FormatUint(port, 10))
+		return registeredURL.String(), nil
+	}
+
+	return "", invalidCurrentAuthorizationRedirectURI()
+}
+
+func invalidCurrentAuthorizationRedirectURI() error {
+	return goidc.WrapError(
+		goidc.ErrorCodeServerError,
+		"server error",
+		errors.New("redirect_uri is not registered for the current client"),
+	)
 }
 
 func createJARMResponse(ctx oidc.Context, c *goidc.Client, redirectParams response) (string, error) {
