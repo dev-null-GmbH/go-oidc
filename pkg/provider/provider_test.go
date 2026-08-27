@@ -716,6 +716,11 @@ func TestNew_ValidationErrors(t *testing.T) {
 		wantErr string
 	}{
 		{
+			name:    "par unregistered redirect uris are disabled",
+			opts:    []Option{Option(WithPAR(nil, WithPARUnregisteredRedirectURIs()))},
+			wantErr: "unregistered PAR redirect_uri values are disabled; pre-register redirect_uri values",
+		},
+		{
 			name:    "jar by-reference unregistered uris are disabled",
 			opts:    []Option{Option(WithJARByReferenceUnregisteredURIs())},
 			wantErr: "unregistered JAR request_uri fetching is disabled; pre-register request_uri values",

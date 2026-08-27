@@ -636,6 +636,10 @@ stored session will reflect the validated JAR content.
 
 The PAR endpoint lifetime can be customized with `provider.PARLifetime(...)`.
 
+PAR redirect URIs must exactly match the authenticated client's registered
+`redirect_uris`, as required by RFC 9126. `WithPARUnregisteredRedirectURIs` is
+retained only for source compatibility and returns a configuration error.
+
 ## Authentication Policies
 
 Authorization requests (starting at `/authorize` by default) are handled by

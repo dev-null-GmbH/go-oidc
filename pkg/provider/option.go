@@ -1161,12 +1161,14 @@ func WithPARLifetime(secs int) PAROption {
 	}
 }
 
-// WithPARUnregisteredRedirectURIs allows clients to inform unregistered
-// redirect URIs during requests to pushed authorization endpoint.
+// WithPARUnregisteredRedirectURIs is retained for source compatibility but
+// always returns an error. RFC 9126 requires a pushed authorization request's
+// redirect_uri to be validated against the authenticated client's registration.
+//
+// Deprecated: pre-register every redirect_uri used with PAR.
 func WithPARUnregisteredRedirectURIs() PAROption {
-	return func(p *Provider) error {
-		p.config.PARUnregisteredRedirectURIEnabled = true
-		return nil
+	return func(*Provider) error {
+		return errors.New("unregistered PAR redirect_uri values are disabled; pre-register redirect_uri values")
 	}
 }
 

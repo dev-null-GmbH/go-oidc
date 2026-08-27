@@ -1059,27 +1059,12 @@ func TestWithPARRequired(t *testing.T) {
 	}
 }
 
-func TestWithUnregisteredRedirectURIsForPAR(t *testing.T) {
-	// Given.
-	p := &Provider{
-		config: oidc.Configuration{},
-	}
-
-	// When.
+func TestWithUnregisteredRedirectURIsForPARRejected(t *testing.T) {
+	p := &Provider{}
 	err := WithPARUnregisteredRedirectURIs()(p)
-
-	// Then.
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	want := &Provider{
-		config: oidc.Configuration{
-			PARUnregisteredRedirectURIEnabled: true,
-		},
-	}
-	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
-		t.Error(diff)
+	if err == nil || err.Error() !=
+		"unregistered PAR redirect_uri values are disabled; pre-register redirect_uri values" {
+		t.Fatalf("WithPARUnregisteredRedirectURIs() error = %v", err)
 	}
 }
 
