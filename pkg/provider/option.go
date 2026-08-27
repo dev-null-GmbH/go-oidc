@@ -1217,7 +1217,13 @@ func WithJARRequired() JAROption {
 // WithJARByReference enables support for request objects referenced by the
 // "request_uri" authorization parameter. The httpClientFunc defines how to
 // generate the HTTP client used to fetch request objects. If nil, the provider
-// falls back to [WithHTTPClientFunc].
+// falls back to [WithHTTPClientFunc]. By-reference fetches accept the default
+// transport or a *http.Transport making a direct connection; configured plain
+// dial hooks are replaced by a bounded guard-owned dialer and proxy settings
+// are disabled so the fetch is always direct. Disabled TLS verification, custom
+// TLS dial/protocol hooks, and arbitrary RoundTrippers fail closed because they
+// cannot preserve the request_uri destination-address policy. The configured
+// client's cookie jar is not used for the fetch.
 func WithJARByReference(httpClientFunc goidc.HTTPClientFunc) JAROption {
 	return func(p *Provider) error {
 		p.config.JARByReferenceEnabled = true

@@ -1,6 +1,7 @@
 package authorize
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ import (
 
 const (
 	maxJARResponseByteSize int64 = 1_000_000 // 1 MB.
+	maxJARNetworkTimeout         = 30 * time.Second
 )
 
 type jarOptions struct {
@@ -27,31 +29,45 @@ type jarOptions struct {
 }
 
 func jarFromRequestURI(ctx oidc.Context, reqURI string, client *goidc.Client) (request, error) {
+	return jarFromRequestURIWithNetworkControl(ctx, reqURI, client, jarNetworkControl{})
+}
+
+func jarFromRequestURIWithNetworkControl(
+	ctx oidc.Context,
+	reqURI string,
+	client *goidc.Client,
+	networkControl jarNetworkControl,
+) (request, error) {
 	registeredURI, err := registeredJARRequestURI(reqURI, client)
 	if err != nil {
 		return request{}, err
-	}
-
-	outboundRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, registeredURI, nil)
-	if err != nil {
-		return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri",
-			fmt.Errorf("could not create the request_uri request: %w", err))
 	}
 	httpClient := ctx.JARHTTPClient()
 	if httpClient == nil {
 		return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri",
 			errors.New("the request_uri HTTP client is not configured"))
 	}
-	// Redirects are separate, unregistered network destinations. Enforce the
-	// registered target even when a deployment supplies a permissive client.
-	jarHTTPClient := &http.Client{
-		Transport: httpClient.Transport,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-		Jar:     httpClient.Jar,
-		Timeout: httpClient.Timeout,
+	networkTimeout := maxJARNetworkTimeout
+	if httpClient.Timeout > 0 && httpClient.Timeout < networkTimeout {
+		networkTimeout = httpClient.Timeout
 	}
+	networkContext, cancelNetwork := context.WithTimeout(ctx, networkTimeout)
+	defer cancelNetwork()
+	target, err := resolveJARNetworkTarget(networkContext, registeredURI, networkControl)
+	if err != nil {
+		return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri", err)
+	}
+
+	outboundRequest, err := http.NewRequestWithContext(networkContext, http.MethodGet, registeredURI, nil)
+	if err != nil {
+		return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri",
+			fmt.Errorf("could not create the request_uri request: %w", err))
+	}
+	jarHTTPClient, jarTransport, err := newGuardedJARHTTPClient(httpClient, target)
+	if err != nil {
+		return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri", err)
+	}
+	defer jarTransport.CloseIdleConnections()
 	resp, err := jarHTTPClient.Do(outboundRequest)
 	if err != nil {
 		return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri",

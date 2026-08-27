@@ -1206,6 +1206,17 @@ Encryption and content encryption algorithms can be configured via `provider.JAR
 
 By-reference JAR fetches require an exact pre-registered HTTPS `request_uri`
 from the resolved client's `request_uris` metadata and never follow redirects.
+The registered hostname must resolve entirely to public addresses: loopback,
+private, shared/CGNAT, link-local, unspecified, multicast, documentation, and
+all other IANA special-purpose ranges (including globally reachable exceptions)
+are rejected. DNS resolution is bounded and performed once per fetch; then
+the validated address is pinned into the direct connection while HTTP `Host`
+and TLS SNI remain the registered hostname, preventing DNS rebinding between
+validation and connection. The configured client must use the default transport
+or a direct `*http.Transport`; the guard replaces plain dial hooks with its own
+bounded dialer and disables any proxy setting so the fetch is always direct.
+Disabled TLS verification, custom TLS dial/protocol hooks, and arbitrary round
+trippers fail closed, and the one-off fetch never inherits a cookie jar.
 Unregistered by-reference fetching is disabled as an SSRF boundary;
 `WithJARByReferenceUnregisteredURIs` is retained only for source compatibility
 and returns a configuration error.
