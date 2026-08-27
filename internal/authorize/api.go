@@ -8,28 +8,64 @@ import (
 	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
 )
 
+const humanAuthorizationMaxFormBytes int64 = 56 * 1024
+
 func RegisterHandlers(router *http.ServeMux, config *oidc.Configuration, middlewares ...goidc.MiddlewareFunc) {
+	if config.HumanConfidentialBFFAuthorizationEnabled {
+		browserRoute := config.EndpointPrefix + humanBrowserInteractionRoute
+		consumeRoute := config.EndpointPrefix + humanConsumeInteractionRoute
+		browserHandler := limitHumanAuthorizationMiddlewareBody(
+			config,
+			goidc.ApplyMiddlewares(
+				oidc.Handler(config, handlerHumanBrowserInteraction), middlewares...,
+			),
+			humanInteractionMaxFormBytes,
+		)
+		consumeHandler := limitHumanAuthorizationMiddlewareBody(
+			config,
+			goidc.ApplyMiddlewares(
+				oidc.Handler(config, handlerHumanConsumeInteraction), middlewares...,
+			),
+			humanInteractionMaxFormBytes,
+		)
+		router.Handle("GET "+browserRoute, browserHandler)
+		router.Handle("POST "+browserRoute, browserHandler)
+		router.Handle(browserRoute, browserHandler)
+		router.Handle("GET "+consumeRoute, consumeHandler)
+		router.Handle("POST "+consumeRoute, consumeHandler)
+		router.Handle(consumeRoute, consumeHandler)
+	}
+
 	if slices.ContainsFunc(config.GrantTypes, func(gt goidc.GrantType) bool {
 		return gt == goidc.GrantAuthorizationCode || gt == goidc.GrantImplicit
 	}) {
-		router.Handle("GET "+config.EndpointPrefix+config.AuthorizationEndpoint,
-			goidc.ApplyMiddlewares(oidc.Handler(config, handler), middlewares...))
-		router.Handle("POST "+config.EndpointPrefix+config.AuthorizationEndpoint,
-			goidc.ApplyMiddlewares(oidc.Handler(config, handler), middlewares...))
+		authorizationHandler := limitHumanAuthorizationMiddlewareBody(
+			config,
+			goidc.ApplyMiddlewares(oidc.Handler(config, handler), middlewares...),
+			humanAuthorizationMaxFormBytes,
+		)
+		router.Handle("GET "+config.EndpointPrefix+config.AuthorizationEndpoint, authorizationHandler)
+		router.Handle("POST "+config.EndpointPrefix+config.AuthorizationEndpoint, authorizationHandler)
 
-		router.Handle("POST "+config.EndpointPrefix+config.AuthorizationEndpoint+"/{callback}",
-			goidc.ApplyMiddlewares(oidc.Handler(config, handlerCallback), middlewares...))
-		router.Handle("GET "+config.EndpointPrefix+config.AuthorizationEndpoint+"/{callback}",
-			goidc.ApplyMiddlewares(oidc.Handler(config, handlerCallback), middlewares...))
-		router.Handle("POST "+config.EndpointPrefix+config.AuthorizationEndpoint+"/{callback}/{callback_path...}",
-			goidc.ApplyMiddlewares(oidc.Handler(config, handlerCallback), middlewares...))
-		router.Handle("GET "+config.EndpointPrefix+config.AuthorizationEndpoint+"/{callback}/{callback_path...}",
-			goidc.ApplyMiddlewares(oidc.Handler(config, handlerCallback), middlewares...))
+		if config.LegacyAuthorizationCodeEnabled {
+			router.Handle("POST "+config.EndpointPrefix+config.AuthorizationEndpoint+"/{callback}",
+				goidc.ApplyMiddlewares(oidc.Handler(config, handlerCallback), middlewares...))
+			router.Handle("GET "+config.EndpointPrefix+config.AuthorizationEndpoint+"/{callback}",
+				goidc.ApplyMiddlewares(oidc.Handler(config, handlerCallback), middlewares...))
+			router.Handle("POST "+config.EndpointPrefix+config.AuthorizationEndpoint+"/{callback}/{callback_path...}",
+				goidc.ApplyMiddlewares(oidc.Handler(config, handlerCallback), middlewares...))
+			router.Handle("GET "+config.EndpointPrefix+config.AuthorizationEndpoint+"/{callback}/{callback_path...}",
+				goidc.ApplyMiddlewares(oidc.Handler(config, handlerCallback), middlewares...))
+		}
 	}
 
 	if config.PAREnabled {
-		router.Handle("POST "+config.EndpointPrefix+config.PAREndpoint,
-			goidc.ApplyMiddlewares(oidc.Handler(config, handlerPAR), middlewares...))
+		parHandler := limitHumanAuthorizationMiddlewareBody(
+			config,
+			goidc.ApplyMiddlewares(oidc.Handler(config, handlerPAR), middlewares...),
+			humanAuthorizationMaxFormBytes,
+		)
+		router.Handle("POST "+config.EndpointPrefix+config.PAREndpoint, parHandler)
 	}
 
 	if slices.Contains(config.GrantTypes, goidc.GrantCIBA) {
@@ -56,6 +92,11 @@ func RegisterHandlers(router *http.ServeMux, config *oidc.Configuration, middlew
 }
 
 func handlerPAR(ctx oidc.Context) {
+	limitHumanAuthorizationFormBody(ctx)
+	if oidc.FormParseFailed(ctx.Request) {
+		ctx.WriteError(goidc.NewError(goidc.ErrorCodeInvalidRequest, "invalid request"))
+		return
+	}
 	if mediaType := ctx.MediaType(); mediaType != "" && mediaType != "application/x-www-form-urlencoded" {
 		ctx.WriteError(goidc.NewError(goidc.ErrorCodeInvalidRequest, "invalid content type").WithStatusCode(http.StatusUnsupportedMediaType))
 		return
@@ -68,6 +109,8 @@ func handlerPAR(ctx oidc.Context) {
 		return
 	}
 
+	ctx.Response.Header().Set("Cache-Control", "no-store")
+	ctx.Response.Header().Set("Pragma", "no-cache")
 	if err := ctx.Write(resp, http.StatusCreated); err != nil {
 		ctx.WriteError(err)
 	}
@@ -76,6 +119,11 @@ func handlerPAR(ctx oidc.Context) {
 func handler(ctx oidc.Context) {
 	var req request
 	if ctx.Request.Method == http.MethodPost {
+		limitHumanAuthorizationFormBody(ctx)
+		if oidc.FormParseFailed(ctx.Request) {
+			ctx.WriteError(goidc.NewError(goidc.ErrorCodeInvalidRequest, "invalid request"))
+			return
+		}
 		if mediaType := ctx.MediaType(); mediaType != "" && mediaType != "application/x-www-form-urlencoded" {
 			ctx.WriteError(goidc.NewError(goidc.ErrorCodeInvalidRequest, "invalid content type").WithStatusCode(http.StatusUnsupportedMediaType))
 			return
@@ -92,6 +140,34 @@ func handler(ctx oidc.Context) {
 		}
 		return
 	}
+}
+
+func limitHumanAuthorizationFormBody(ctx oidc.Context) {
+	// The client profile cannot be resolved safely until after form decoding,
+	// so enabling the strict Human flow deliberately bounds the shared endpoint.
+	if !ctx.HumanConfidentialBFFAuthorizationEnabled || ctx.Request == nil ||
+		ctx.Request.Body == nil || ctx.Request.PostForm != nil {
+		return
+	}
+	ctx.Request.Body = http.MaxBytesReader(
+		ctx.Response,
+		ctx.Request.Body,
+		humanAuthorizationMaxFormBytes,
+	)
+}
+
+func limitHumanAuthorizationMiddlewareBody(
+	config *oidc.Configuration,
+	next http.Handler,
+	maximumBytes int64,
+) http.Handler {
+	if config == nil || !config.HumanConfidentialBFFAuthorizationEnabled {
+		return next
+	}
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		request = oidc.ParseBoundedForm(response, request, maximumBytes)
+		next.ServeHTTP(response, request)
+	})
 }
 
 func handlerCallback(ctx oidc.Context) {

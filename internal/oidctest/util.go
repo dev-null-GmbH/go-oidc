@@ -77,10 +77,12 @@ func NewContext(tb testing.TB) oidc.Context {
 	manager := storage.NewManager(100)
 
 	config := &oidc.Configuration{
-		Profile:      goidc.ProfileOpenID,
-		Host:         "https://example.com",
-		GrantManager: manager,
-		Scopes:       []goidc.Scope{goidc.ScopeOpenID, Scope1, Scope2},
+		Profile:                        goidc.ProfileOpenID,
+		Host:                           "https://example.com",
+		GrantManager:                   manager,
+		LegacyAuthorizationCodeEnabled: true,
+		LegacyPAREnabled:               true,
+		Scopes:                         []goidc.Scope{goidc.ScopeOpenID, Scope1, Scope2},
 		JWKSFunc: func(ctx context.Context) (goidc.JSONWebKeySet, error) {
 			return goidc.JSONWebKeySet{Keys: []goidc.JSONWebKey{jwk}}, nil
 		},

@@ -145,6 +145,42 @@ func TestPARClientAssertionAuthorityFailsClosedOnMissingOrConflictingState(t *te
 	}
 }
 
+func TestClientAssertionAuthorityGeneralizedAPIAndPARAliasesAgree(t *testing.T) {
+	client := authorityModeClient("client")
+	ctx := oidc.NewHTTPContext(
+		httptest.NewRecorder(),
+		httptest.NewRequest(http.MethodPost, "/token", nil),
+		&oidc.Configuration{},
+	).BeginClientAssertionAuthentication()
+	ctx.RecordClientAssertionAuthority(client.ID, &goidc.VerifiedClientAssertionAuthority{
+		SnapshotRevision: 9,
+		KeyAuthorityID:   "authority-key",
+	})
+
+	general, err := ctx.ClientAssertionAuthority(client)
+	if err != nil {
+		t.Fatalf("ClientAssertionAuthority() error = %v", err)
+	}
+	legacy, err := ctx.PARClientAssertionAuthority(client)
+	if err != nil {
+		t.Fatalf("PARClientAssertionAuthority() error = %v", err)
+	}
+	if general == legacy || *general != *legacy {
+		t.Fatalf("general=%p %#v legacy=%p %#v, want equal defensive copies", general, general, legacy, legacy)
+	}
+
+	legacyBegin := oidc.NewHTTPContext(
+		httptest.NewRecorder(),
+		httptest.NewRequest(http.MethodPost, "/par", nil),
+		&oidc.Configuration{},
+	).BeginPARClientAuthentication()
+	legacyBegin.RecordClientAssertionAuthority(client.ID, general)
+	got, err := legacyBegin.ClientAssertionAuthority(client)
+	if err != nil || got == nil || *got != *general {
+		t.Fatalf("legacy BeginPAR alias general read = %#v, %v", got, err)
+	}
+}
+
 func authorityModeClient(id string) *goidc.Client {
 	return &goidc.Client{
 		ID:                     id,

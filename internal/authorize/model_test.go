@@ -3,6 +3,7 @@ package authorize
 import (
 	"bytes"
 	"context"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -65,7 +66,7 @@ func TestNewRequest(t *testing.T) {
 		ClientID:                "random_client_id",
 		AuthorizationParameters: params,
 	}
-	if diff := cmp.Diff(req, want, cmpopts.EquateComparable()); diff != "" {
+	if diff := cmp.Diff(req, want, cmpopts.EquateComparable(), cmpopts.IgnoreFields(request{}, "AdmissionTransport")); diff != "" {
 		t.Error(diff)
 	}
 }
@@ -86,7 +87,36 @@ func TestNewPushedRequest(t *testing.T) {
 		ClientID:                "random_client_id",
 		AuthorizationParameters: params,
 	}
-	if diff := cmp.Diff(req, want, cmpopts.EquateComparable()); diff != "" {
+	if diff := cmp.Diff(req, want, cmpopts.EquateComparable(), cmpopts.IgnoreFields(request{}, "AdmissionTransport")); diff != "" {
+		t.Error(diff)
+	}
+}
+
+func TestNewFormRequestPreservesLegacyMultipartParsing(t *testing.T) {
+	rawParams, params := setUpParams(t)
+	rawParams.Set("client_id", "random_client_id")
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	for name, values := range rawParams {
+		for _, value := range values {
+			if err := writer.WriteField(name, value); err != nil {
+				t.Fatalf("WriteField() error = %v", err)
+			}
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("multipart Close() error = %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	got := newFormRequest(req)
+	want := request{
+		ClientID:                "random_client_id",
+		AuthorizationParameters: params,
+	}
+	if diff := cmp.Diff(got, want, cmpopts.EquateComparable(), cmpopts.IgnoreFields(request{}, "AdmissionTransport")); diff != "" {
 		t.Error(diff)
 	}
 }

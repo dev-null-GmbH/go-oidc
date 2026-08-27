@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/dev-null-GmbH/go-oidc/internal/client"
 	"github.com/dev-null-GmbH/go-oidc/internal/dpop"
@@ -58,9 +59,28 @@ func pushAuth(ctx oidc.Context, req request) (parResponse, error) {
 	if err := parRequestContextError(ctx); err != nil {
 		return parResponse{}, err
 	}
+	c, strictHumanAdmission, err := authorizationAdmissionClient(c)
+	if err != nil {
+		return parResponse{}, err
+	}
+	if strictHumanAdmission {
+		if err := validateHumanConfidentialBFFPushedRequest(ctx, req); err != nil {
+			return parResponse{}, err
+		}
+	}
 	clientAssertionAuthority, err := ctx.PARClientAssertionAuthority(c)
 	if err != nil {
 		return parResponse{}, goidc.WrapError(goidc.ErrorCodeServerError, "server error", err)
+	}
+	if strictHumanAdmission {
+		return pushHumanConfidentialBFFAuthorization(ctx, req, c, clientAssertionAuthority)
+	}
+	if !ctx.LegacyPAREnabled {
+		return parResponse{}, goidc.WrapError(
+			goidc.ErrorCodeServerError,
+			"server error",
+			errors.New("legacy pushed-request persistence is unavailable"),
+		)
 	}
 
 	as, err := func() (*goidc.AuthnSession, error) {
@@ -82,53 +102,110 @@ func pushAuth(ctx oidc.Context, req request) (parResponse, error) {
 			}
 
 			return &goidc.AuthnSession{
-				ID:                       ctx.AuthnSessionID(),
-				PersistenceID:            ctx.AuthnSessionPersistenceID(),
-				Status:                   goidc.StatusPending,
-				PushedAuthReqID:          ctx.PARID(),
-				ClientID:                 c.ID,
-				ClientAssertionAuthority: cloneClientAssertionAuthority(clientAssertionAuthority),
-				AuthorizationParameters:  jar.AuthorizationParameters,
-				CreatedAt:                timeutil.TimestampNow(),
-				ExpiresAt:                timeutil.TimestampNow() + ctx.PARLifetimeSecs,
-				JWKThumbprint:            dpopThumbprintForPAR(ctx, req),
-				ClientCertThumbprint:     tlsThumbprint(ctx),
-				Store:                    make(map[string]any),
+				ID:                          ctx.AuthnSessionID(),
+				PersistenceID:               ctx.AuthnSessionPersistenceID(),
+				Status:                      goidc.StatusPending,
+				PushedAuthReqID:             ctx.PARID(),
+				ClientID:                    c.ID,
+				AuthorizationRequestProfile: c.AuthorizationRequestProfile,
+				ClientAssertionAuthority:    cloneClientAssertionAuthority(clientAssertionAuthority),
+				AuthorizationParameters:     jar.AuthorizationParameters,
+				CreatedAt:                   timeutil.TimestampNow(),
+				ExpiresAt:                   timeutil.TimestampNow() + ctx.PARLifetimeSecs,
+				JWKThumbprint:               dpopThumbprintForPAR(ctx, req),
+				ClientCertThumbprint:        tlsThumbprint(ctx),
+				Store:                       make(map[string]any),
 			}, nil
 		}
 
 		if err := validateSimplePushedRequest(ctx, req, c); err != nil {
 			return nil, err
 		}
+		// The exact outer human request admits only client_id and request_uri,
+		// so every required authorization parameter must be complete at PAR.
+		if strictHumanAdmission {
+			if err := validateParams(ctx, req.AuthorizationParameters, c); err != nil {
+				return nil, err
+			}
+		}
 
+		createdAt := timeutil.TimestampNow()
 		return &goidc.AuthnSession{
-			ID:                       ctx.AuthnSessionID(),
-			PersistenceID:            ctx.AuthnSessionPersistenceID(),
-			Status:                   goidc.StatusPending,
-			PushedAuthReqID:          ctx.PARID(),
-			ClientID:                 c.ID,
-			ClientAssertionAuthority: cloneClientAssertionAuthority(clientAssertionAuthority),
-			AuthorizationParameters:  req.AuthorizationParameters,
-			CreatedAt:                timeutil.TimestampNow(),
-			ExpiresAt:                timeutil.TimestampNow() + ctx.PARLifetimeSecs,
-			JWKThumbprint:            dpopThumbprintForPAR(ctx, req),
-			ClientCertThumbprint:     tlsThumbprint(ctx),
-			Store:                    make(map[string]any),
+			ID:                          ctx.AuthnSessionID(),
+			PersistenceID:               ctx.AuthnSessionPersistenceID(),
+			Status:                      goidc.StatusPending,
+			PushedAuthReqID:             ctx.PARID(),
+			ClientID:                    c.ID,
+			AuthorizationRequestProfile: c.AuthorizationRequestProfile,
+			ClientAssertionAuthority:    cloneClientAssertionAuthority(clientAssertionAuthority),
+			AuthorizationParameters:     req.AuthorizationParameters,
+			CreatedAt:                   createdAt,
+			ExpiresAt:                   createdAt + ctx.PARLifetimeSecs,
+			JWKThumbprint:               dpopThumbprintForPAR(ctx, req),
+			ClientCertThumbprint:        tlsThumbprint(ctx),
+			Store:                       make(map[string]any),
 		}, nil
 	}()
 	if err != nil {
 		return parResponse{}, err
 	}
+	if strictHumanAdmission {
+		if err := validateAuthorizationRequestProfileBinding(ctx, as, c); err != nil {
+			return parResponse{}, err
+		}
+	}
 	if err := parRequestContextError(ctx); err != nil {
 		return parResponse{}, err
 	}
+	var strictAuthorizationParameters *goidc.AuthorizationParameters
+	if strictHumanAdmission {
+		snapshot := cloneHumanConfidentialBFFAuthorizationParameters(as.AuthorizationParameters)
+		strictAuthorizationParameters = &snapshot
+	}
 
-	if err := ctx.PARHandleSession(as, c); err != nil {
+	callbackClient := c
+	callbackSession := as
+	if strictHumanAdmission {
+		callbackClient, err = isolatedHumanConfidentialBFFCallbackClient(c)
+		if err != nil {
+			return parResponse{}, err
+		}
+		callbackSession, err = cloneHumanConfidentialBFFAuthenticationSession(as)
+		if err != nil {
+			return parResponse{}, goidc.WrapError(goidc.ErrorCodeServerError, "server error", err)
+		}
+	}
+	if err := ctx.PARHandleSession(callbackSession, callbackClient); err != nil {
 		var oidcErr goidc.Error
 		if errors.As(err, &oidcErr) {
 			return parResponse{}, oidcErr
 		}
 		return parResponse{}, fmt.Errorf("could not handle the pushed authorization request session: %w", err)
+	}
+	if strictHumanAdmission && !humanConfidentialBFFAuthenticationSessionsEqual(callbackSession, as) {
+		return parResponse{}, goidc.WrapError(
+			goidc.ErrorCodeServerError,
+			"server error",
+			errors.New("the PAR session handler modified the strictly admitted session"),
+		)
+	}
+	if strictHumanAdmission && !humanConfidentialBFFAuthorizationParametersEqual(
+		as.AuthorizationParameters,
+		*strictAuthorizationParameters,
+	) {
+		return parResponse{}, goidc.WrapError(
+			goidc.ErrorCodeServerError,
+			"server error",
+			errors.New("the PAR session handler modified strictly admitted authorization parameters"),
+		)
+	}
+	if strictHumanAdmission &&
+		as.AuthorizationRequestProfile != goidc.AuthorizationRequestProfileHumanConfidentialBFF {
+		return parResponse{}, goidc.WrapError(
+			goidc.ErrorCodeServerError,
+			"server error",
+			errors.New("the PAR session handler modified the authorization request profile binding"),
+		)
 	}
 	if !clientAssertionAuthoritiesEqual(as.ClientAssertionAuthority, clientAssertionAuthority) {
 		return parResponse{}, goidc.WrapError(
@@ -140,8 +217,20 @@ func pushAuth(ctx oidc.Context, req request) (parResponse, error) {
 	// Replace the handler-visible pointer so a retained authority pointer cannot
 	// mutate the evidence subsequently passed to persistence.
 	as.ClientAssertionAuthority = cloneClientAssertionAuthority(clientAssertionAuthority)
+	if strictHumanAdmission {
+		as.AuthorizationRequestProfile = goidc.AuthorizationRequestProfileHumanConfidentialBFF
+		as.AuthorizationParameters = cloneHumanConfidentialBFFAuthorizationParameters(
+			*strictAuthorizationParameters,
+		)
+	}
 	persistedSession := *as
 	persistedSession.ClientAssertionAuthority = cloneClientAssertionAuthority(clientAssertionAuthority)
+	if strictHumanAdmission {
+		persistedSession.AuthorizationRequestProfile = goidc.AuthorizationRequestProfileHumanConfidentialBFF
+		persistedSession.AuthorizationParameters = cloneHumanConfidentialBFFAuthorizationParameters(
+			*strictAuthorizationParameters,
+		)
+	}
 	if err := parRequestContextError(ctx); err != nil {
 		return parResponse{}, err
 	}
@@ -163,6 +252,83 @@ func pushAuth(ctx oidc.Context, req request) (parResponse, error) {
 		RequestURI: parRequestURIPrefix + persistedSession.PushedAuthReqID,
 		ExpiresIn:  ctx.PARLifetimeSecs,
 	}, nil
+}
+
+func pushHumanConfidentialBFFAuthorization(
+	ctx oidc.Context,
+	req request,
+	c *goidc.Client,
+	clientAssertionAuthority *goidc.VerifiedClientAssertionAuthority,
+) (parResponse, error) {
+	if err := validateSimplePushedRequest(ctx, req, c); err != nil {
+		return parResponse{}, err
+	}
+	if err := validateParams(ctx, req.AuthorizationParameters, c); err != nil {
+		return parResponse{}, err
+	}
+	if !humanConfidentialBFFAtomicPARMatchesCurrentAuthority(
+		ctx,
+		req.AuthorizationParameters,
+		c,
+		clientAssertionAuthority,
+	) {
+		return parResponse{}, goidc.WrapError(
+			goidc.ErrorCodeServerError,
+			"server error",
+			errors.New("the strict pushed request is outside current authorization authority"),
+		)
+	}
+
+	acrValues := make([]goidc.ACR, 0, 1)
+	for value := range strings.FieldsSeq(req.ACRValues) {
+		acrValues = append(acrValues, goidc.ACR(value))
+	}
+	input, err := goidc.NewHumanPARInput(goidc.HumanPARInputConfig{
+		ClientID:                 c.ID,
+		ClientAssertionAuthority: *clientAssertionAuthority,
+		RedirectURI:              req.RedirectURI,
+		Scopes:                   strings.Fields(req.Scopes),
+		Resources:                slices.Clone(req.Resources),
+		State:                    req.State,
+		Nonce:                    req.Nonce,
+		CodeChallenge:            req.CodeChallenge,
+		Prompt:                   req.Prompt,
+		MaxAuthenticationAge:     req.MaxAuthnAgeSecs,
+		ACRValues:                acrValues,
+	})
+	if err != nil {
+		return parResponse{}, goidc.WrapError(goidc.ErrorCodeServerError, "server error", err)
+	}
+	if err := parRequestContextError(ctx); err != nil {
+		return parResponse{}, err
+	}
+	decision, err := ctx.HumanStorePAR(input)
+	if err != nil {
+		return parResponse{}, err
+	}
+	if !decision.Valid() {
+		return parResponse{}, goidc.WrapError(
+			goidc.ErrorCodeServerError,
+			"server error",
+			errors.New("the strict pushed-request authority returned a malformed decision"),
+		)
+	}
+	if decision.Outcome() == goidc.HumanPAROutcomeRejected {
+		return parResponse{}, invalidHumanConfidentialBFFRequest("the pushed authorization request was rejected")
+	}
+	receipt, ok := decision.Receipt()
+	if !ok {
+		return parResponse{}, goidc.WrapError(
+			goidc.ErrorCodeServerError,
+			"server error",
+			errors.New("the strict pushed-request authority omitted its committed receipt"),
+		)
+	}
+	requestURI, err := receipt.RequestURI().Render()
+	if err != nil {
+		return parResponse{}, goidc.WrapError(goidc.ErrorCodeServerError, "server error", err)
+	}
+	return parResponse{RequestURI: requestURI, ExpiresIn: receipt.ExpiresInSeconds()}, nil
 }
 
 func parRequestContextError(ctx oidc.Context) error {
