@@ -1055,13 +1055,22 @@ func WithFormPostResponseMode() AuthCodeGrantOption {
 	}
 }
 
+// WithAuthorizationResponseIssuer enables the RFC 9207 "iss" parameter in
+// authorization responses. It can be used with either the strict Human
+// authorization authority or a legacy authorization-code grant.
+func WithAuthorizationResponseIssuer() Option {
+	return enableAuthorizationResponseIssuer
+}
+
+func enableAuthorizationResponseIssuer(p *Provider) error {
+	p.config.IssuerRespParamEnabled = true
+	return nil
+}
+
 // WithIssuerResponseParameter enables the "iss" parameter to be sent in the
-// response of authorization requests.
+// response of authorization requests configured through [WithAuthCodeGrant].
 func WithIssuerResponseParameter() AuthCodeGrantOption {
-	return func(p *Provider) error {
-		p.config.IssuerRespParamEnabled = true
-		return nil
-	}
+	return AuthCodeGrantOption(enableAuthorizationResponseIssuer)
 }
 
 // WithClaimsParameter allows clients to send the "claims" parameter during

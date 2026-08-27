@@ -340,6 +340,7 @@ op, err := provider.New(provider.Config{
   provider.WithJTIUseConsumer(consumeJTI),
   provider.WithResourceIndicators([]goidc.ResourceIndicator{"https://api.example.com/v1"}),
   provider.WithACRs("urn:example:acr:passkey"),
+  provider.WithAuthorizationResponseIssuer(),
   provider.WithHumanConfidentialBFFAuthorizationAuthority(authority,
     provider.WithHumanConfidentialBFFIdentityInteractionEndpoint(
       "https://id.example.com/oidc/interaction/identity",
@@ -351,6 +352,12 @@ op, err := provider.New(provider.Config{
   ),
 )
 ```
+
+`WithAuthorizationResponseIssuer` enables the RFC 9207 `iss` authorization
+response parameter and its discovery flag directly on a strict Human-only
+provider; it does not install the legacy authorization-code grant or its
+persistence managers. Legacy grant configurations can continue to use
+`WithIssuerResponseParameter` inside `WithAuthCodeGrant`.
 
 The provider requires HTTPS, PS256 ID tokens, a typed JTI consumer, configured
 resources and ACRs, and two clean identity endpoints on one origin separate

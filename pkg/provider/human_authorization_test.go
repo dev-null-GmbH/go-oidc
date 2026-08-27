@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -52,6 +53,46 @@ func TestNewHumanConfidentialBFFAuthorizationDoesNotInstallLegacyManagers(t *tes
 		!config.TokenRevocationEnabled || config.LegacyTokenRevocationEnabled ||
 		config.TokenRevocationEndpoint != defaultEndpointTokenRevocation {
 		t.Fatalf("strict protocol configuration incomplete: %#v", config)
+	}
+}
+
+func TestNewHumanConfidentialBFFAuthorizationResponseIssuer(t *testing.T) {
+	provider, err := New(humanAuthorizationProviderConfig(goidc.SigAlgPS256),
+		withHumanAuthorizationJTIUseConsumer(),
+		withHumanAuthorizationResourceIndicators(),
+		withHumanAuthorizationACRs(),
+		WithAuthorizationResponseIssuer(),
+		WithHumanConfidentialBFFAuthorizationAuthority(
+			humanAuthorizationAuthorityProviderStub{},
+			validHumanAuthorizationProviderOptions()...,
+		),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if !provider.config.IssuerRespParamEnabled {
+		t.Fatal("IssuerRespParamEnabled = false, want true")
+	}
+	if provider.config.LegacyAuthorizationCodeEnabled || provider.config.LegacyPAREnabled ||
+		provider.config.AuthManager != nil || provider.config.PARManager != nil ||
+		provider.config.AuthCodeFunc != nil || provider.config.PARIDFunc != nil {
+		t.Fatal("authorization-response issuer option installed legacy authorization state or callbacks")
+	}
+
+	response := httptest.NewRecorder()
+	provider.Handler().ServeHTTP(
+		response,
+		httptest.NewRequest(http.MethodGet, "/.well-known/openid-configuration", nil),
+	)
+	if response.Code != http.StatusOK {
+		t.Fatalf("discovery status = %d, want %d", response.Code, http.StatusOK)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &metadata); err != nil {
+		t.Fatalf("decode discovery metadata: %v", err)
+	}
+	if supported, ok := metadata["authorization_response_iss_parameter_supported"].(bool); !ok || !supported {
+		t.Fatalf("authorization_response_iss_parameter_supported = %#v, want true", metadata["authorization_response_iss_parameter_supported"])
 	}
 }
 

@@ -1315,6 +1315,30 @@ func TestWithIssuerResponseParameter(t *testing.T) {
 	}
 }
 
+func TestWithAuthorizationResponseIssuer(t *testing.T) {
+	// Given.
+	p := &Provider{
+		config: oidc.Configuration{},
+	}
+
+	// When.
+	err := WithAuthorizationResponseIssuer()(p)
+
+	// Then.
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := &Provider{
+		config: oidc.Configuration{
+			IssuerRespParamEnabled: true,
+		},
+	}
+	if diff := cmp.Diff(p, want, cmp.AllowUnexported(Provider{})); diff != "" {
+		t.Error(diff)
+	}
+}
+
 func TestWithFormPostResponseMode(t *testing.T) {
 	// Given.
 	p := &Provider{
