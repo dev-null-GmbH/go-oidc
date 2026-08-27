@@ -231,6 +231,26 @@ func HTTPClient(_ context.Context) *http.Client {
 	}
 }
 
+// JARHTTPClient trusts only the ephemeral certificate shared with the local
+// conformance-suite request_uri endpoint. Production providers should use a
+// normal public or private PKI trust store instead.
+func JARHTTPClient(_ context.Context) *http.Client {
+	roots := x509.NewCertPool()
+	serverCertificate, err := keys.FS.ReadFile("server.crt")
+	if err != nil {
+		panic(fmt.Errorf("read conformance server certificate: %w", err))
+	}
+	if !roots.AppendCertsFromPEM(serverCertificate) {
+		panic("parse conformance server certificate")
+	}
+	return &http.Client{
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			RootCAs:    roots,
+		}},
+	}
+}
+
 func HandleError(ctx context.Context, err error) {
 	log.Printf("error: %s\n", err.Error())
 }

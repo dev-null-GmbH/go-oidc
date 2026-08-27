@@ -52,6 +52,15 @@ func jarFromRequestURIWithNetworkControl(
 	}
 	networkContext, cancelNetwork := context.WithTimeout(ctx, networkTimeout)
 	defer cancelNetwork()
+	if networkControl.allowAddress == nil {
+		origin, originErr := canonicalJARNetworkOrigin(registeredURI)
+		if originErr != nil {
+			return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri", originErr)
+		}
+		if slices.Contains(ctx.JARByReferenceAllowedLoopbackOrigins, origin) {
+			networkControl.allowAddress = loopbackJARIPAddress
+		}
+	}
 	target, err := resolveJARNetworkTarget(networkContext, registeredURI, networkControl)
 	if err != nil {
 		return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri", err)

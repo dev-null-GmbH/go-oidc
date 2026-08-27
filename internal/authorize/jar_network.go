@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -156,6 +157,49 @@ func publicJARIPAddress(address netip.Addr) bool {
 		}
 	}
 	return true
+}
+
+func loopbackJARIPAddress(address netip.Addr) bool {
+	if address.Is4In6() {
+		return false
+	}
+	address = address.Unmap()
+	return address.IsValid() && address.Zone() == "" && address.IsLoopback() &&
+		!address.IsLinkLocalUnicast() && !address.IsLinkLocalMulticast() &&
+		!address.IsUnspecified() && !address.IsMulticast()
+}
+
+func canonicalJARNetworkOrigin(rawURI string) (string, error) {
+	parsed, err := url.Parse(rawURI)
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" {
+		return "", invalidJARRequestURI()
+	}
+
+	hostname := strings.ToLower(parsed.Hostname())
+	isIPv6 := false
+	if address, parseErr := netip.ParseAddr(hostname); parseErr == nil {
+		if address.Zone() != "" {
+			return "", invalidJARRequestURI()
+		}
+		hostname = address.String()
+		isIPv6 = address.Is6()
+	}
+
+	port := parsed.Port()
+	portNumber := 443
+	if port != "" {
+		portNumber, err = strconv.Atoi(port)
+		if err != nil || portNumber < 1 || portNumber > 65535 {
+			return "", invalidJARRequestURI()
+		}
+	}
+	host := hostname
+	if portNumber != 443 {
+		host = net.JoinHostPort(hostname, strconv.Itoa(portNumber))
+	} else if isIPv6 {
+		host = "[" + hostname + "]"
+	}
+	return "https://" + host, nil
 }
 
 func newGuardedJARHTTPClient(

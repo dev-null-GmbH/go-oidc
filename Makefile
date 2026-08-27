@@ -56,7 +56,7 @@ test-benchmark:
 keys:
 	@./scripts/generate-conformance-certificates.sh
 
-run-cs:
+run-cs: keys
 	@docker compose up
 
 cs-oidc-tests:

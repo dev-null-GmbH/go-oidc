@@ -2525,6 +2525,69 @@ func TestJARByReference(t *testing.T) {
 	}
 }
 
+func TestWithJARByReferenceAllowedLoopbackOrigins(t *testing.T) {
+	origins := []string{
+		"HTTPS://LOCALHOST:443",
+		"https://[0:0:0:0:0:0:0:1]:8443",
+		"https://localhost:443",
+	}
+	p := &Provider{config: oidc.Configuration{}}
+	option := WithJARByReferenceAllowedLoopbackOrigins(origins...)
+	origins[0] = "https://mutated-before-apply.example"
+
+	err := option(p)
+	if err != nil {
+		t.Fatalf("WithJARByReferenceAllowedLoopbackOrigins() error = %v", err)
+	}
+	origins[1] = "https://mutated-after-apply.example"
+
+	want := []string{"https://localhost", "https://[::1]:8443"}
+	if diff := cmp.Diff(p.config.JARByReferenceAllowedLoopbackOrigins, want); diff != "" {
+		t.Fatal(diff)
+	}
+}
+
+func TestWithJARByReferenceAllowedLoopbackOriginsRejectsInvalidOriginsAtomically(t *testing.T) {
+	for _, origin := range []string{
+		"",
+		"http://localhost",
+		"https://user@localhost",
+		"https://localhost/",
+		"https://localhost/request.jwt",
+		"https://localhost?query",
+		"https://localhost#fragment",
+		"https://localhost#",
+		"https:///missing-host",
+		"https://*.localhost",
+		"https://localhost:",
+		"https://localhost:0",
+		"https://localhost:65536",
+		"https://[::ffff:127.0.0.1]",
+	} {
+		t.Run(origin, func(t *testing.T) {
+			p := &Provider{config: oidc.Configuration{
+				JARByReferenceAllowedLoopbackOrigins: []string{"https://existing.example"},
+			}}
+
+			err := WithJARByReferenceAllowedLoopbackOrigins("https://localhost", origin)(p)
+			if err == nil {
+				t.Fatal("WithJARByReferenceAllowedLoopbackOrigins() error = nil")
+			}
+			want := []string{"https://existing.example"}
+			if diff := cmp.Diff(p.config.JARByReferenceAllowedLoopbackOrigins, want); diff != "" {
+				t.Fatalf("configuration changed after validation failure (-got +want):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestWithJARByReferenceAllowedLoopbackOriginsRequiresOrigin(t *testing.T) {
+	err := WithJARByReferenceAllowedLoopbackOrigins()(&Provider{})
+	if err == nil {
+		t.Fatal("WithJARByReferenceAllowedLoopbackOrigins() error = nil")
+	}
+}
+
 func TestWithJARByReferenceUnregisteredURIsRejected(t *testing.T) {
 	p := &Provider{}
 	err := WithJARByReferenceUnregisteredURIs()(p)

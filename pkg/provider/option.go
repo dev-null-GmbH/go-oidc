@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/dev-null-GmbH/go-oidc/pkg/goidc"
@@ -1239,6 +1241,101 @@ func WithJARByReference(httpClientFunc goidc.HTTPClientFunc) JAROption {
 		p.config.JARByReferenceHTTPClientFunc = httpClientFunc
 		return nil
 	}
+}
+
+// WithJARByReferenceAllowedLoopbackOrigins opts exact HTTPS origins into
+// loopback-only request_uri resolution. This is intended for local conformance
+// fixtures. Every address returned for an allowlisted origin must be loopback;
+// public, private, link-local, mapped, and mixed DNS answers remain rejected.
+// Origins must not include credentials, paths, queries, or fragments.
+func WithJARByReferenceAllowedLoopbackOrigins(origins ...string) JAROption {
+	configuredOrigins := slices.Clone(origins)
+	return func(p *Provider) error {
+		if len(configuredOrigins) == 0 {
+			return errors.New("at least one loopback origin is required for JAR by-reference fetching")
+		}
+
+		canonicalOrigins := make([]string, 0, len(configuredOrigins))
+		seen := make(map[string]struct{}, len(configuredOrigins))
+		for index, origin := range configuredOrigins {
+			canonical, err := canonicalJARLoopbackOrigin(origin)
+			if err != nil {
+				return fmt.Errorf("invalid JAR by-reference loopback origin at index %d: %w", index, err)
+			}
+			if _, duplicate := seen[canonical]; duplicate {
+				continue
+			}
+			seen[canonical] = struct{}{}
+			canonicalOrigins = append(canonicalOrigins, canonical)
+		}
+
+		p.config.JARByReferenceAllowedLoopbackOrigins = canonicalOrigins
+		return nil
+	}
+}
+
+func canonicalJARLoopbackOrigin(origin string) (string, error) {
+	parsed, err := url.Parse(origin)
+	if err != nil || strings.Contains(origin, "#") || !strings.EqualFold(parsed.Scheme, "https") || parsed.Host == "" ||
+		parsed.Hostname() == "" || parsed.User != nil || parsed.Opaque != "" || parsed.Path != "" ||
+		parsed.RawPath != "" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" ||
+		parsed.RawFragment != "" {
+		return "", errors.New("origin must be an exact HTTPS origin without credentials, path, query, or fragment")
+	}
+
+	port := parsed.Port()
+	portNumber := 443
+	if strings.HasSuffix(parsed.Host, ":") || strings.Contains(parsed.Hostname(), "%") {
+		return "", errors.New("origin host or port is invalid")
+	}
+	if port != "" {
+		var parseErr error
+		portNumber, parseErr = strconv.Atoi(port)
+		if parseErr != nil || portNumber < 1 || portNumber > 65535 {
+			return "", errors.New("origin port must be between 1 and 65535")
+		}
+	}
+
+	hostname := strings.ToLower(parsed.Hostname())
+	isIPv6 := false
+	if address, parseErr := netip.ParseAddr(hostname); parseErr == nil {
+		if address.Is4In6() || address.Zone() != "" {
+			return "", errors.New("origin IP address is not supported")
+		}
+		if !address.IsLoopback() {
+			return "", errors.New("literal origin IP address must be loopback")
+		}
+		hostname = address.String()
+		isIPv6 = address.Is6()
+	} else if !validJAROriginDNSName(hostname) {
+		return "", errors.New("origin hostname is invalid")
+	}
+
+	host := hostname
+	if portNumber != 443 {
+		host = net.JoinHostPort(hostname, strconv.Itoa(portNumber))
+	} else if isIPv6 {
+		host = "[" + hostname + "]"
+	}
+	return "https://" + host, nil
+}
+
+func validJAROriginDNSName(hostname string) bool {
+	if hostname == "" || len(hostname) > 253 || strings.HasSuffix(hostname, ".") {
+		return false
+	}
+	for _, label := range strings.Split(hostname, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for index := range len(label) {
+			character := label[index]
+			if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // WithJARByReferenceUnregisteredURIs is retained for source compatibility but

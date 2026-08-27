@@ -540,6 +540,179 @@ func TestJARFromRequestURIRejectsUnregisteredAndUnsafeTargetsBeforeNetwork(t *te
 	}
 }
 
+func TestJARFromRequestURIRequiresExactRegisteredFragmentBeforeResolution(t *testing.T) {
+	registeredURI := "https://jar-client.example/request.jwt#registered-fragment"
+	for _, requestURI := range []string{
+		"https://jar-client.example/request.jwt",
+		"https://jar-client.example/request.jwt#different-fragment",
+	} {
+		t.Run(requestURI, func(t *testing.T) {
+			resolver := &sequenceJARResolver{answers: [][]netip.Addr{{netip.MustParseAddr("8.8.8.8")}}}
+			clientFuncCalls := 0
+			ctx := oidc.Context{
+				Configuration: &oidc.Configuration{
+					JARByReferenceHTTPClientFunc: func(context.Context) *http.Client {
+						clientFuncCalls++
+						return http.DefaultClient
+					},
+				},
+				Request: httptest.NewRequest(http.MethodGet, "https://server.example.com/authorize", nil),
+			}
+			client := &goidc.Client{ClientMeta: goidc.ClientMeta{RequestURIs: []string{registeredURI}}}
+
+			_, err := jarFromRequestURIWithNetworkControl(
+				ctx,
+				requestURI,
+				client,
+				jarNetworkControl{resolver: resolver},
+			)
+			assertInvalidJARRequestURI(t, err)
+			if resolver.callCount() != 0 || clientFuncCalls != 0 {
+				t.Fatalf("resolver/client calls = %d/%d, want 0/0", resolver.callCount(), clientFuncCalls)
+			}
+		})
+	}
+}
+
+func TestJARFromRequestURIPreservesQueryAndStripsFragmentOnLoopbackOptIn(t *testing.T) {
+	requestCalls := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		requestCalls++
+		if request.URL.Fragment != "" {
+			t.Fatalf("outbound URL fragment = %q, want empty", request.URL.Fragment)
+		}
+		if got, want := request.RequestURI, "/request.jwt?b=two%20words&a=%2F"; got != want {
+			t.Fatalf("outbound RequestURI = %q, want %q", got, want)
+		}
+		response.WriteHeader(http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	registeredURI := server.URL + "/request.jwt?b=two%20words&a=%2F#registered-fragment"
+	ctx := oidc.Context{
+		Configuration: &oidc.Configuration{
+			JARByReferenceAllowedLoopbackOrigins: []string{server.URL},
+			JARByReferenceHTTPClientFunc: func(context.Context) *http.Client {
+				return trustedJARTestHTTPClient(t, server)
+			},
+		},
+		Request: httptest.NewRequest(http.MethodGet, "https://server.example.com/authorize", nil),
+	}
+	client := &goidc.Client{ClientMeta: goidc.ClientMeta{RequestURIs: []string{registeredURI}}}
+
+	_, err := jarFromRequestURI(ctx, registeredURI, client)
+	assertInvalidJARRequestURI(t, err)
+	if requestCalls != 1 {
+		t.Fatalf("loopback request calls = %d, want 1", requestCalls)
+	}
+}
+
+func TestJARLoopbackOptInIsScopedToExactOrigin(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		registeredURI string
+	}{
+		{name: "wrong hostname", registeredURI: "https://other.example:8443/request.jwt"},
+		{name: "subdomain", registeredURI: "https://sub.jar-client.example:8443/request.jwt"},
+		{name: "wrong port", registeredURI: "https://jar-client.example:9443/request.jwt"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			resolver := &sequenceJARResolver{answers: [][]netip.Addr{{netip.MustParseAddr("127.0.0.1")}}}
+			ctx := oidc.Context{
+				Configuration: &oidc.Configuration{
+					JARByReferenceAllowedLoopbackOrigins: []string{"https://jar-client.example:8443"},
+					JARByReferenceHTTPClientFunc: func(context.Context) *http.Client {
+						return http.DefaultClient
+					},
+				},
+				Request: httptest.NewRequest(http.MethodGet, "https://server.example.com/authorize", nil),
+			}
+			client := &goidc.Client{ClientMeta: goidc.ClientMeta{RequestURIs: []string{test.registeredURI}}}
+
+			_, err := jarFromRequestURIWithNetworkControl(
+				ctx,
+				test.registeredURI,
+				client,
+				jarNetworkControl{resolver: resolver},
+			)
+			assertInvalidJARRequestURI(t, err)
+			if !errors.Is(err, errJARProhibitedNetwork) {
+				t.Fatalf("jarFromRequestURI() error = %v, want prohibited network", err)
+			}
+			if resolver.callCount() != 1 {
+				t.Fatalf("resolver calls = %d, want 1", resolver.callCount())
+			}
+		})
+	}
+}
+
+func TestJARLoopbackOptInRejectsNonLoopbackSpecialUseAddresses(t *testing.T) {
+	for _, rawURI := range []string{
+		"https://10.0.0.1/request.jwt",
+		"https://192.168.1.1/request.jwt",
+		"https://[fc00::1]/request.jwt",
+		"https://169.254.169.254/request.jwt",
+		"https://[fe80::1]/request.jwt",
+		"https://[::ffff:127.0.0.1]/request.jwt",
+	} {
+		t.Run(rawURI, func(t *testing.T) {
+			parsed, err := url.Parse(rawURI)
+			if err != nil {
+				t.Fatal(err)
+			}
+			origin := parsed.Scheme + "://" + parsed.Host
+			ctx := oidc.Context{
+				Configuration: &oidc.Configuration{
+					JARByReferenceAllowedLoopbackOrigins: []string{origin},
+					JARByReferenceHTTPClientFunc: func(context.Context) *http.Client {
+						return http.DefaultClient
+					},
+				},
+				Request: httptest.NewRequest(http.MethodGet, "https://server.example.com/authorize", nil),
+			}
+			client := &goidc.Client{ClientMeta: goidc.ClientMeta{RequestURIs: []string{rawURI}}}
+
+			_, err = jarFromRequestURI(ctx, rawURI, client)
+			assertInvalidJARRequestURI(t, err)
+			if !errors.Is(err, errJARProhibitedNetwork) {
+				t.Fatalf("jarFromRequestURI() error = %v, want prohibited network", err)
+			}
+		})
+	}
+}
+
+func TestJARLoopbackOptInRejectsMixedLoopbackAndPublicDNSAnswers(t *testing.T) {
+	rawURI := "https://jar-client.example/request.jwt"
+	resolver := &sequenceJARResolver{answers: [][]netip.Addr{{
+		netip.MustParseAddr("127.0.0.1"),
+		netip.MustParseAddr("8.8.8.8"),
+	}}}
+	ctx := oidc.Context{
+		Configuration: &oidc.Configuration{
+			JARByReferenceAllowedLoopbackOrigins: []string{"https://jar-client.example"},
+			JARByReferenceHTTPClientFunc: func(context.Context) *http.Client {
+				return http.DefaultClient
+			},
+		},
+		Request: httptest.NewRequest(http.MethodGet, "https://server.example.com/authorize", nil),
+	}
+	client := &goidc.Client{ClientMeta: goidc.ClientMeta{RequestURIs: []string{rawURI}}}
+
+	_, err := jarFromRequestURIWithNetworkControl(
+		ctx,
+		rawURI,
+		client,
+		jarNetworkControl{resolver: resolver},
+	)
+	assertInvalidJARRequestURI(t, err)
+	if !errors.Is(err, errJARProhibitedNetwork) {
+		t.Fatalf("jarFromRequestURI() error = %v, want prohibited network", err)
+	}
+	if resolver.callCount() != 1 {
+		t.Fatalf("resolver calls = %d, want 1", resolver.callCount())
+	}
+}
+
 func TestJARFromRequestURIDoesNotFollowRedirects(t *testing.T) {
 	targetCalls := 0
 	server := httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {

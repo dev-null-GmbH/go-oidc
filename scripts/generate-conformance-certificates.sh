@@ -57,7 +57,7 @@ generate_certificate() {
 }
 
 generate_certificate server auth.localhost serverAuth \
-  "DNS:auth.localhost,DNS:matls-auth.localhost,DNS:fed-trust-anchor.localhost,DNS:localhost"
+  "DNS:auth.localhost,DNS:matls-auth.localhost,DNS:fed-trust-anchor.localhost,DNS:localhost,DNS:localhost.emobix.co.uk"
 generate_certificate client_one client_one clientAuth
 generate_certificate client_two client_two clientAuth
 

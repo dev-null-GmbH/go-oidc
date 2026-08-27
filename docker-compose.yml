@@ -15,6 +15,8 @@ services:
      - "8445:8445"
     volumes:
      - ./conformance-suite/src/main/resources/:/usr/share/nginx/html/
+     - ./examples/keys/server.crt:/etc/ssl/certs/nginx-selfsigned.crt:ro
+     - ./examples/keys/server.key:/etc/ssl/private/nginx-selfsigned.key:ro
     depends_on:
      - server
   server:

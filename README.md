@@ -1216,10 +1216,14 @@ from the resolved client's `request_uris` metadata and never follow redirects.
 An exact registered URI fragment is allowed for RFC-compatible client metadata
 matching but is removed before the HTTP request is constructed and never
 crosses the network boundary.
-The registered hostname must resolve entirely to public addresses: loopback,
-private, shared/CGNAT, link-local, unspecified, multicast, documentation, and
-all other IANA special-purpose ranges (including globally reachable exceptions)
-are rejected. DNS resolution is bounded and performed once per fetch; then
+By default, the registered hostname must resolve entirely to public addresses:
+loopback, private, shared/CGNAT, link-local, unspecified, multicast,
+documentation, and all other IANA special-purpose ranges (including globally
+reachable exceptions) are rejected. Local conformance fixtures can opt an
+exact HTTPS origin into loopback-only resolution with
+`provider.WithJARByReferenceAllowedLoopbackOrigins`; every DNS answer for that
+origin must be loopback, and TLS verification remains mandatory. DNS resolution
+is bounded and performed once per fetch; then
 the validated address is pinned into the direct connection while HTTP `Host`
 and TLS SNI remain the registered hostname, preventing DNS rebinding between
 validation and connection. The configured client must use the default transport
