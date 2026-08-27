@@ -1213,6 +1213,9 @@ Encryption and content encryption algorithms can be configured via `provider.JAR
 
 By-reference JAR fetches require an exact pre-registered HTTPS `request_uri`
 from the resolved client's `request_uris` metadata and never follow redirects.
+An exact registered URI fragment is allowed for RFC-compatible client metadata
+matching but is removed before the HTTP request is constructed and never
+crosses the network boundary.
 The registered hostname must resolve entirely to public addresses: loopback,
 private, shared/CGNAT, link-local, unspecified, multicast, documentation, and
 all other IANA special-purpose ranges (including globally reachable exceptions)

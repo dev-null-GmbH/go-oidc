@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -313,17 +314,21 @@ func TestJARFromRequestURI(t *testing.T) {
 	}, privateJWK)
 
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Fragment != "" || strings.Contains(r.RequestURI, "#") {
+			t.Fatalf("network request retained registered fragment: URL = %q, RequestURI = %q", r.URL.String(), r.RequestURI)
+		}
 		if _, err := w.Write([]byte(requestObject)); err != nil {
 			t.Fatal(err)
 		}
 	}))
 	defer server.Close()
-	client.RequestURIs = []string{server.URL}
+	registeredURI := server.URL + "#exact-registered-fragment"
+	client.RequestURIs = []string{registeredURI}
 	ctx.JARByReferenceHTTPClientFunc = func(context.Context) *http.Client {
 		return trustedJARTestHTTPClient(t, server)
 	}
 
-	jar, err := jarFromRequestURIWithNetworkControl(ctx, server.URL, client, allowLoopbackJARNetworkControl())
+	jar, err := jarFromRequestURIWithNetworkControl(ctx, registeredURI, client, allowLoopbackJARNetworkControl())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -485,12 +490,6 @@ func TestJARFromRequestURIRejectsUnregisteredAndUnsafeTargetsBeforeNetwork(t *te
 			name:       "registered URI with credentials",
 			requestURI: "https://user:password@client.example/request.jwt",
 			registered: []string{"https://user:password@client.example/request.jwt"},
-			client:     true,
-		},
-		{
-			name:       "registered URI with fragment",
-			requestURI: "https://client.example/request.jwt#fragment",
-			registered: []string{"https://client.example/request.jwt#fragment"},
 			client:     true,
 		},
 		{

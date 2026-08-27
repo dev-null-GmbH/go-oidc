@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/dev-null-GmbH/go-oidc/internal/client"
@@ -115,10 +114,15 @@ func registeredJARRequestURI(reqURI string, client *goidc.Client) (string, error
 		}
 		parsed, err := url.Parse(registeredURI)
 		if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" ||
-			parsed.User != nil || parsed.Opaque != "" || strings.Contains(registeredURI, "#") {
+			parsed.User != nil || parsed.Opaque != "" {
 			return "", invalidJARRequestURI()
 		}
-		return registeredURI, nil
+		// A fragment may distinguish an exact registered request_uri, but URI
+		// fragments are client-side identifiers and must never reach the HTTP
+		// request target used to fetch the request object.
+		parsed.Fragment = ""
+		parsed.RawFragment = ""
+		return parsed.String(), nil
 	}
 
 	return "", invalidJARRequestURI()
@@ -126,7 +130,7 @@ func registeredJARRequestURI(reqURI string, client *goidc.Client) (string, error
 
 func invalidJARRequestURI() error {
 	return goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri",
-		errors.New("request_uri must be an exact pre-registered HTTPS URI without credentials or a fragment"))
+		errors.New("request_uri must be an exact pre-registered HTTPS URI without credentials"))
 }
 
 func jarFromRequestObject(ctx oidc.Context, reqObject string, c *goidc.Client, opts *jarOptions) (request, error) {
