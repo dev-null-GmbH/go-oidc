@@ -41,6 +41,7 @@ func TestHumanBrowserInteractionGETIsInertAndMintsFreshSuccessor(t *testing.T) {
 			t.Fatal("browser GET minted or changed the browser-binding cookie")
 		}
 		assertHumanInteractionSecurityHeaders(t, response.Header())
+		assertHumanInteractionFormAction(t, response.Header(), "'self' https://id.d0.eu")
 		body := response.Body.String()
 		assertHumanInteractionCSPMatchesPageScript(t, response.Header(), body)
 		if !strings.Contains(body, `action="/oidc/interaction/browser"`) ||
@@ -79,6 +80,7 @@ func TestHumanBrowserInteractionPOSTConfirmsExactCapabilities(t *testing.T) {
 	identityReturn := testHumanCapability("d0_hio_r1_", 3)
 	browserReturn := testHumanCapability("d0_hio_c1_", 4)
 	browserBinding := testHumanCapability("d0_hio_b1_", 5)
+	identityReadyEndpoint := ctx.HumanIdentityReadyEndpoint
 	calls := 0
 	ctx.HumanAuthorizationAuthority = humanInteractionAuthorityStub{
 		confirm: func(_ context.Context, input goidc.HumanContinuationInput) (goidc.HumanContinuationDecision, error) {
@@ -86,6 +88,7 @@ func TestHumanBrowserInteractionPOSTConfirmsExactCapabilities(t *testing.T) {
 			assertRenderedHumanCapability(t, input.IdentityReturnCapability().Render, identityReturn)
 			assertRenderedHumanCapability(t, input.BrowserReturnCapability().Render, browserReturn)
 			assertRenderedHumanCapability(t, input.BrowserBindingCapability().Render, browserBinding)
+			ctx.HumanIdentityReadyEndpoint = "https://attacker.invalid/oidc/interaction/ready"
 			return mustHumanContinuationDecision(t, goidc.HumanContinuationOutcomeConfirmed, browserReturn), nil
 		},
 	}
@@ -102,11 +105,13 @@ func TestHumanBrowserInteractionPOSTConfirmsExactCapabilities(t *testing.T) {
 			"X-Forwarded-Proto": "https",
 			"Traceparent":       "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
 		})
+	ctx.HumanIdentityReadyEndpoint = identityReadyEndpoint
 	if calls != 1 {
 		t.Fatalf("ConfirmBrowser calls = %d, want 1", calls)
 	}
 	if response.Code != http.StatusSeeOther ||
-		response.Header().Get("Location") != ctx.HumanIdentityReadyEndpoint+"#"+browserReturn ||
+		response.Header().Get("Location") != identityReadyEndpoint+"#"+browserReturn ||
+		strings.Contains(response.Header().Get("Location"), "attacker.invalid") ||
 		response.Body.Len() != 0 {
 		t.Fatalf("browser POST response = status %d, location %q, body %q",
 			response.Code, response.Header().Get("Location"), response.Body.String())
@@ -487,6 +492,7 @@ func TestHumanConsumeInteractionGETKeepsReadyCapabilityOutOfDocument(t *testing.
 		t.Fatalf("consume GET status = %d, want 200", response.Code)
 	}
 	assertHumanInteractionSecurityHeaders(t, response.Header())
+	assertHumanInteractionFormAction(t, response.Header(), "'self' https://human-bff.example.invalid")
 	body := response.Body.String()
 	assertHumanInteractionCSPMatchesPageScript(t, response.Header(), body)
 	if !strings.Contains(body, `action="/oidc/interaction/consume"`) ||
@@ -497,6 +503,52 @@ func TestHumanConsumeInteractionGETKeepsReadyCapabilityOutOfDocument(t *testing.
 		strings.Contains(body, "https://") {
 		t.Fatalf("consume GET is not a closed inert page: %q", body)
 	}
+}
+
+func TestHumanInteractionPagesIgnoreForwardedFormActionOrigins(t *testing.T) {
+	t.Parallel()
+
+	ctx, _, _ := newStrictOuterAuthorizationContext(t)
+	configureHumanInteractionTestContext(ctx)
+	router := http.NewServeMux()
+	RegisterHandlers(router, ctx.Configuration)
+	headers := map[string]string{
+		"Forwarded":         "host=attacker.invalid;proto=https",
+		"X-Forwarded-Host":  "attacker.invalid",
+		"X-Forwarded-Proto": "https",
+	}
+	for _, test := range []struct {
+		path string
+		want string
+	}{
+		{path: humanBrowserInteractionPath, want: "'self' https://id.d0.eu"},
+		{path: humanConsumeInteractionPath, want: "'self' https://human-bff.example.invalid"},
+	} {
+		response := serveHumanInteraction(t, router, http.MethodGet, test.path, nil, headers)
+		if response.Code != http.StatusOK ||
+			strings.Contains(response.Header().Get("Content-Security-Policy"), "attacker.invalid") {
+			t.Fatalf("forwarded authority changed %s response", test.path)
+		}
+		assertHumanInteractionFormAction(t, response.Header(), test.want)
+	}
+}
+
+func TestHumanInteractionConfigurationRejectsInjectedBrowserOrigin(t *testing.T) {
+	t.Parallel()
+
+	ctx, _, _ := newStrictOuterAuthorizationContext(t)
+	configureHumanInteractionTestContext(ctx)
+	ctx.HumanBrowserOrigin = "https://app.d0.eu; form-action *"
+	router := http.NewServeMux()
+	RegisterHandlers(router, ctx.Configuration)
+	response := serveHumanInteraction(t, router, http.MethodGet, humanConsumeInteractionPath, nil, nil)
+
+	if response.Code != http.StatusInternalServerError || response.Body.String() != humanInteractionServerBody ||
+		strings.Contains(response.Header().Get("Content-Security-Policy"), "app.d0.eu") ||
+		strings.Contains(response.Header().Get("Content-Security-Policy"), "*") {
+		t.Fatalf("injected browser origin changed bounded error response")
+	}
+	assertHumanInteractionFormAction(t, response.Header(), "'self'")
 }
 
 func TestHumanConsumeInteractionPOSTCompletesAgainstFreshClientAuthority(t *testing.T) {
@@ -552,6 +604,48 @@ func TestHumanConsumeInteractionPOSTCompletesAgainstFreshClientAuthority(t *test
 			response.Code, response.Header().Get("Location"), response.Body.String())
 	}
 	assertHumanInteractionSecurityHeaders(t, response.Header())
+	assertHumanBrowserBindingCleared(t, response.Result(), ctx.HumanBrowserBindingCookieName)
+}
+
+func TestHumanConsumeInteractionRejectsRegisteredRedirectOutsideConfiguredBrowserOrigin(t *testing.T) {
+	t.Parallel()
+
+	ctx, client, _ := newStrictOuterAuthorizationContext(t)
+	configureHumanInteractionTestContext(ctx)
+	ctx.HumanBrowserOrigin = "https://attacker.invalid"
+	ready := testHumanCapability("d0_hio_s1_", 34)
+	browserBinding := testHumanCapability("d0_hio_b1_", 35)
+	authorizationCode := testHumanCapability("d0_hac_1_", 36)
+	ctx.HumanAuthorizationAuthority = humanInteractionAuthorityStub{
+		complete: func(context.Context, goidc.HumanCompletionInput) (goidc.HumanCompletionDecision, error) {
+			ctx.HumanBrowserOrigin = "https://human-bff.example.invalid"
+			return mustHumanCompletionDecision(t, goidc.HumanCompletionDecisionConfig{
+				Outcome:                 goidc.HumanCompletionOutcomeCompleted,
+				Profile:                 goidc.AuthorizationRequestProfileHumanConfidentialBFF,
+				ClientID:                client.ID,
+				ClientSnapshotRevision:  client.PrivateKeyJWTAuthority.SnapshotRevision,
+				AdmissionKeyAuthorityID: client.PrivateKeyJWTAuthority.Keys[0].KeyAuthorityID,
+				AuthorizationCode:       mustHumanAuthorizationCode(t, authorizationCode),
+				RedirectURI:             client.RedirectURIs[0],
+				State:                   "opaque-client-state-value",
+				CodeExpiresInSeconds:    60,
+			}), nil
+		},
+	}
+	router := http.NewServeMux()
+	RegisterHandlers(router, ctx.Configuration)
+
+	response := serveHumanInteraction(t, router, http.MethodPost, humanConsumeInteractionPath,
+		url.Values{"ready": {ready}},
+		map[string]string{"Origin": ctx.Host, "Referer": ctx.Host + humanConsumeInteractionPath, "Cookie": ctx.HumanBrowserBindingCookieName + "=" + browserBinding})
+	if response.Code != http.StatusInternalServerError || response.Header().Get("Location") != "" ||
+		response.Body.String() != humanInteractionServerBody ||
+		strings.Contains(response.Header().Get("Content-Security-Policy"), "attacker.invalid") ||
+		strings.Contains(response.Body.String(), authorizationCode) {
+		t.Fatalf("cross-browser-origin completion = status %d, location %q, body %q",
+			response.Code, response.Header().Get("Location"), response.Body.String())
+	}
+	assertHumanInteractionFormAction(t, response.Header(), "'self'")
 	assertHumanBrowserBindingCleared(t, response.Result(), ctx.HumanBrowserBindingCookieName)
 }
 
@@ -726,6 +820,7 @@ func serveHumanInteraction(
 
 func configureHumanInteractionTestContext(ctx oidc.Context) {
 	ctx.HumanIdentityReadyEndpoint = "https://id.d0.eu/oidc/interaction/ready"
+	ctx.HumanBrowserOrigin = "https://human-bff.example.invalid"
 	ctx.IssuerRespParamEnabled = true
 }
 
@@ -750,6 +845,48 @@ func assertHumanInteractionCSPMatchesPageScript(t *testing.T, header http.Header
 	if !strings.Contains(header.Get("Content-Security-Policy"), want) {
 		t.Fatalf("CSP does not authorize only the rendered script: want %s in %q", want,
 			header.Get("Content-Security-Policy"))
+	}
+}
+
+func assertHumanInteractionFormAction(t *testing.T, header http.Header, want string) {
+	t.Helper()
+	directives := make(map[string]string)
+	for _, directive := range strings.Split(header.Get("Content-Security-Policy"), ";") {
+		directive = strings.TrimSpace(directive)
+		name, value, found := strings.Cut(directive, " ")
+		if !found || name == "" || value == "" {
+			t.Fatalf("invalid CSP directive %q", directive)
+		}
+		if _, duplicate := directives[name]; duplicate {
+			t.Fatalf("duplicate CSP directive %q", name)
+		}
+		directives[name] = value
+	}
+	if got := directives["form-action"]; got != want {
+		t.Fatalf("form-action = %q, want %q", got, want)
+	}
+	fixed := map[string]string{
+		"default-src":     "'none'",
+		"style-src":       "'none'",
+		"img-src":         "'none'",
+		"font-src":        "'none'",
+		"media-src":       "'none'",
+		"connect-src":     "'none'",
+		"object-src":      "'none'",
+		"base-uri":        "'none'",
+		"frame-ancestors": "'none'",
+	}
+	if len(directives) != len(fixed)+2 {
+		t.Fatalf("CSP directive count = %d, want %d", len(directives), len(fixed)+2)
+	}
+	for name, value := range fixed {
+		if directives[name] != value {
+			t.Fatalf("%s = %q, want %q", name, directives[name], value)
+		}
+	}
+	if script := directives["script-src"]; script != "'none'" &&
+		(!strings.HasPrefix(script, "'sha256-") || !strings.HasSuffix(script, "'")) {
+		t.Fatalf("script-src = %q, want none or one SHA-256 source", script)
 	}
 }
 

@@ -40,6 +40,7 @@ type Configuration struct {
 	HumanAuthorizationAuthority              goidc.HumanAuthorizationAuthority
 	HumanIdentityInteractionEndpoint         string
 	HumanIdentityReadyEndpoint               string
+	HumanBrowserOrigin                       string
 	HumanBrowserBindingCookieName            string
 	HumanAccessTokenLifetimeSecs             int
 

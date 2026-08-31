@@ -99,6 +99,7 @@ func TestHumanConfidentialBFFProviderEndToEndFlow(t *testing.T) {
 		WithHumanConfidentialBFFAuthorizationAuthority(authority,
 			WithHumanConfidentialBFFIdentityInteractionEndpoint("https://id.d0.eu/oidc/interaction/identity"),
 			WithHumanConfidentialBFFIdentityReadyEndpoint("https://id.d0.eu/oidc/interaction/ready"),
+			WithHumanConfidentialBFFBrowserOrigin("https://dashboard.d0.eu"),
 			WithHumanConfidentialBFFBrowserBindingCookieName(humanFlowCookieName),
 		),
 	)
@@ -158,6 +159,8 @@ func TestHumanConfidentialBFFProviderEndToEndFlow(t *testing.T) {
 
 	browserPage := humanFlowRequest(t, handler, http.MethodGet, "/oidc/interaction/browser", nil, nil)
 	if browserPage.Code != http.StatusOK || browserPage.Header().Get("Set-Cookie") != "" ||
+		!strings.Contains(browserPage.Header().Get("Content-Security-Policy"),
+			"form-action 'self' https://id.d0.eu") ||
 		!strings.Contains(browserPage.Body.String(), `action="/oidc/interaction/browser"`) {
 		t.Fatalf("browser page = status %d headers %#v body %q",
 			browserPage.Code, browserPage.Header(), browserPage.Body.String())
@@ -181,6 +184,8 @@ func TestHumanConfidentialBFFProviderEndToEndFlow(t *testing.T) {
 
 	consumePage := humanFlowRequest(t, handler, http.MethodGet, "/oidc/interaction/consume", nil, nil)
 	if consumePage.Code != http.StatusOK ||
+		!strings.Contains(consumePage.Header().Get("Content-Security-Policy"),
+			"form-action 'self' https://dashboard.d0.eu") ||
 		!strings.Contains(consumePage.Body.String(), `action="/oidc/interaction/consume"`) {
 		t.Fatalf("consume page = status %d headers %#v body %q",
 			consumePage.Code, consumePage.Header(), consumePage.Body.String())
