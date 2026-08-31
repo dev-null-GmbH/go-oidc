@@ -71,7 +71,7 @@ func handleHumanBrowserInteractionGET(ctx oidc.Context) {
 		writeHumanInteractionError(ctx, http.StatusInternalServerError, humanInteractionServerBody)
 		return
 	}
-	body := `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Continue sign-in</title></head><body><main><h1>Continue sign-in</h1><p>Confirm to continue this sign-in in the current browser.</p><form id="human-interaction" method="post" action="` + html.EscapeString(humanInteractionRoute(ctx, humanBrowserInteractionRoute)) + `"><input id="identity-return" type="hidden" name="identity_return" value=""><input type="hidden" name="browser_return" value="` + html.EscapeString(browserReturn) + `"><button type="submit">Continue</button></form></main><script>` + humanBrowserInteractionScript + `</script></body></html>`
+	body := `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="same-origin"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Continue sign-in</title></head><body><main><h1>Continue sign-in</h1><p>Confirm to continue this sign-in in the current browser.</p><form id="human-interaction" method="post" action="` + html.EscapeString(humanInteractionRoute(ctx, humanBrowserInteractionRoute)) + `"><input id="identity-return" type="hidden" name="identity_return" value=""><input type="hidden" name="browser_return" value="` + html.EscapeString(browserReturn) + `"><button type="submit">Continue</button></form></main><script>` + humanBrowserInteractionScript + `</script></body></html>`
 	writeHumanInteractionPage(ctx, body, humanBrowserInteractionScript)
 }
 
@@ -141,7 +141,7 @@ func handleHumanConsumeInteractionGET(ctx oidc.Context) {
 		writeHumanInteractionError(ctx, http.StatusBadRequest, humanInteractionRejectedBody)
 		return
 	}
-	body := `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Finish sign-in</title></head><body><main><h1>Finish sign-in</h1><p>Confirm to return to the application.</p><form id="human-interaction" method="post" action="` + html.EscapeString(humanInteractionRoute(ctx, humanConsumeInteractionRoute)) + `"><input id="ready" type="hidden" name="ready" value=""><button type="submit">Finish sign-in</button></form></main><script>` + humanConsumeInteractionScript + `</script></body></html>`
+	body := `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="same-origin"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Finish sign-in</title></head><body><main><h1>Finish sign-in</h1><p>Confirm to return to the application.</p><form id="human-interaction" method="post" action="` + html.EscapeString(humanInteractionRoute(ctx, humanConsumeInteractionRoute)) + `"><input id="ready" type="hidden" name="ready" value=""><button type="submit">Finish sign-in</button></form></main><script>` + humanConsumeInteractionScript + `</script></body></html>`
 	writeHumanInteractionPage(ctx, body, humanConsumeInteractionScript)
 }
 
@@ -264,6 +264,10 @@ func validHumanInteractionPOSTTransport(request *http.Request, path, issuer stri
 	wantOrigin := issuerURL.Scheme + "://" + issuerURL.Host
 	origins, originPresent := humanInteractionHeaderValues(request.Header, "Origin")
 	if !originPresent || len(origins) != 1 || origins[0] != wantOrigin {
+		return false
+	}
+	referers, refererPresent := humanInteractionHeaderValues(request.Header, "Referer")
+	if !refererPresent || len(referers) != 1 || referers[0] != wantOrigin+path {
 		return false
 	}
 	return humanFetchMetadataIsSameOriginNavigation(request.Header)
@@ -474,7 +478,7 @@ func writeHumanInteractionError(ctx oidc.Context, status int, body string) {
 func setHumanInteractionSecurityHeaders(header http.Header, script string) {
 	header.Set("Cache-Control", "no-store")
 	header.Set("Pragma", "no-cache")
-	header.Set("Referrer-Policy", "no-referrer")
+	header.Set("Referrer-Policy", "same-origin")
 	header.Set("X-Content-Type-Options", "nosniff")
 	header.Set("X-Frame-Options", "DENY")
 	header.Set("Cross-Origin-Opener-Policy", "same-origin")

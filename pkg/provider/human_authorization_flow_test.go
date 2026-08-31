@@ -167,8 +167,9 @@ func TestHumanConfidentialBFFProviderEndToEndFlow(t *testing.T) {
 		"identity_return": {authority.identityReturn},
 		"browser_return":  {browserReturn},
 	}, map[string]string{
-		"Cookie": browserBindingCookie.Name + "=" + browserBindingCookie.Value,
-		"Origin": humanFlowIssuer,
+		"Cookie":  browserBindingCookie.Name + "=" + browserBindingCookie.Value,
+		"Origin":  humanFlowIssuer,
+		"Referer": humanFlowIssuer + "/oidc/interaction/browser",
 	})
 	if browserResponse.Code != http.StatusSeeOther ||
 		browserResponse.Header().Get("Location") !=
@@ -185,8 +186,9 @@ func TestHumanConfidentialBFFProviderEndToEndFlow(t *testing.T) {
 			consumePage.Code, consumePage.Header(), consumePage.Body.String())
 	}
 	consumeHeaders := map[string]string{
-		"Cookie": browserBindingCookie.Name + "=" + browserBindingCookie.Value,
-		"Origin": humanFlowIssuer,
+		"Cookie":  browserBindingCookie.Name + "=" + browserBindingCookie.Value,
+		"Origin":  humanFlowIssuer,
+		"Referer": humanFlowIssuer + "/oidc/interaction/consume",
 	}
 	completionResponse := humanFlowFormRequest(t, handler, "/oidc/interaction/consume", url.Values{
 		"ready": {authority.ready},
