@@ -136,6 +136,12 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 				op.config.HumanIdentityInteractionEndpoint,
 				op.config.HumanIdentityReadyEndpoint,
 			) ||
+			!validHumanBrowserOrigin(op.config.HumanBrowserOrigin) ||
+			!validHumanBrowserOriginTopology(
+				op.config.Host,
+				op.config.HumanIdentityInteractionEndpoint,
+				op.config.HumanBrowserOrigin,
+			) ||
 			!validHumanBrowserBindingCookieName(op.config.HumanBrowserBindingCookieName) ||
 			!validHumanAuthorizationResources(op.config.ResourceIndicatorsEnabled, op.config.ResourceIndicators) ||
 			!validHumanAuthorizationACRs(op.config.ACRs) ||

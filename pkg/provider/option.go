@@ -54,6 +54,9 @@ func WithHumanConfidentialBFFAuthorizationAuthority(
 		if p.config.HumanIdentityReadyEndpoint == "" {
 			return errors.New("human identity ready endpoint is required")
 		}
+		if p.config.HumanBrowserOrigin == "" {
+			return errors.New("human browser origin is required")
+		}
 		if p.config.HumanBrowserBindingCookieName == "" {
 			return errors.New("human browser-binding cookie name is required")
 		}
@@ -124,6 +127,20 @@ func WithHumanConfidentialBFFIdentityReadyEndpoint(endpoint string) HumanConfide
 	}
 }
 
+// WithHumanConfidentialBFFBrowserOrigin pins the exact application origin to
+// which this provider may complete a browser authorization. The completion
+// handler still revalidates the exact registered redirect URI and requires its
+// origin to equal this value before redirecting.
+func WithHumanConfidentialBFFBrowserOrigin(origin string) HumanConfidentialBFFAuthorizationOption {
+	return func(p *Provider) error {
+		if !validHumanBrowserOrigin(origin) {
+			return errors.New("invalid human browser origin")
+		}
+		p.config.HumanBrowserOrigin = origin
+		return nil
+	}
+}
+
 // WithHumanConfidentialBFFBrowserBindingCookieName pins the host-only cookie
 // name. Handlers always apply Secure, HttpOnly, Path=/, and SameSite=Strict.
 func WithHumanConfidentialBFFBrowserBindingCookieName(name string) HumanConfidentialBFFAuthorizationOption {
@@ -159,6 +176,11 @@ func validHumanIdentityInteractionEndpoint(endpoint string) bool {
 		validHumanInteractionPath(parsed.Path) && parsed.String() == endpoint
 }
 
+func validHumanBrowserOrigin(origin string) bool {
+	parsed, err := url.ParseRequestURI(origin)
+	return err == nil && parsed.Path == "" && validHumanAuthorizationIssuer(origin)
+}
+
 func validHumanAuthorizationIssuer(issuer string) bool {
 	parsed, err := url.ParseRequestURI(issuer)
 	return err == nil && len(issuer) <= 512 && providerHumanASCII(issuer) &&
@@ -177,6 +199,15 @@ func validHumanIdentityEndpointTopology(issuer, interaction, ready string) bool 
 	return issuerErr == nil && interactionErr == nil && readyErr == nil &&
 		interactionURL.Scheme == readyURL.Scheme && interactionURL.Host == readyURL.Host &&
 		interactionURL.Hostname() != issuerURL.Hostname() && readyURL.Hostname() != issuerURL.Hostname()
+}
+
+func validHumanBrowserOriginTopology(issuer, identity, browser string) bool {
+	issuerURL, issuerErr := url.ParseRequestURI(issuer)
+	identityURL, identityErr := url.ParseRequestURI(identity)
+	browserURL, browserErr := url.ParseRequestURI(browser)
+	return issuerErr == nil && identityErr == nil && browserErr == nil &&
+		browserURL.Hostname() != issuerURL.Hostname() &&
+		browserURL.Hostname() != identityURL.Hostname()
 }
 
 func validHumanBrowserBindingCookieName(name string) bool {

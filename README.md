@@ -348,6 +348,7 @@ op, err := provider.New(provider.Config{
     provider.WithHumanConfidentialBFFIdentityReadyEndpoint(
       "https://id.example.com/oidc/interaction/ready",
     ),
+    provider.WithHumanConfidentialBFFBrowserOrigin("https://app.example.com"),
     provider.WithHumanConfidentialBFFBrowserBindingCookieName("__Host-human-oidc"),
   ),
 )
@@ -359,9 +360,17 @@ provider; it does not install the legacy authorization-code grant or its
 persistence managers. Legacy grant configurations can continue to use
 `WithIssuerResponseParameter` inside `WithAuthCodeGrant`.
 
+Starting with fork release `v0.25.1-d0.5`,
+`WithHumanConfidentialBFFBrowserOrigin` is mandatory. Deployments upgrading
+from `v0.25.1-d0.4` must configure the exact browser application origin.
+
 The provider requires HTTPS, PS256 ID tokens, a typed JTI consumer, configured
-resources and ACRs, and two clean identity endpoints on one origin separate
-from the issuer. Its client resolver must classify eligible clients with
+resources and ACRs, two clean identity endpoints on one origin, and one exact
+browser application origin; all three origins are distinct. Interaction-page
+CSP permits form redirects only to the corresponding configured origin, and
+completion additionally requires the freshly resolved registered redirect URI
+to have the exact configured browser origin. Its client resolver must classify
+eligible clients with
 `goidc.AuthorizationRequestProfileHumanConfidentialBFF` and supply a
 server-owned `goidc.PrivateKeyJWTAuthority`; these fields cannot be selected
 through client metadata. The profile admits only simple PAR, an outer
