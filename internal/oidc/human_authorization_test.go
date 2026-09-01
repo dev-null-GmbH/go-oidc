@@ -26,8 +26,14 @@ func TestHumanAuthorizationContextWrappersValidateEveryAuthorityDecision(t *test
 		redeem: func(context.Context, goidc.HumanCodeRedemptionInput) (goidc.HumanCodeRedemptionDecision, error) {
 			return fixtures.redemptionDecision, nil
 		},
-		rotate: func(context.Context, goidc.HumanRefreshRotationInput) (goidc.HumanRefreshRotationDecision, error) {
-			return fixtures.rotationDecision, nil
+		prepare: func(context.Context, goidc.HumanRefreshDeliveryPrepareInput) (goidc.HumanRefreshDeliveryPrepareDecision, error) {
+			return fixtures.prepareDecision, nil
+		},
+		activate: func(context.Context, goidc.HumanRefreshDeliveryActivateInput) (goidc.HumanRefreshDeliveryActivateDecision, error) {
+			return fixtures.activateDecision, nil
+		},
+		abort: func(context.Context, goidc.HumanRefreshDeliveryAbortInput) (goidc.HumanRefreshDeliveryAbortDecision, error) {
+			return fixtures.abortDecision, nil
 		},
 		revoke: func(context.Context, goidc.HumanRefreshRevocationInput) error {
 			return nil
@@ -49,14 +55,20 @@ func TestHumanAuthorizationContextWrappersValidateEveryAuthorityDecision(t *test
 	if decision, err := ctx.HumanRedeemAuthorizationCode(fixtures.redemptionInput); err != nil || !decision.Valid() {
 		t.Fatalf("HumanRedeemAuthorizationCode() = %#v, %v", decision, err)
 	}
-	if decision, err := ctx.HumanRotateRefreshToken(fixtures.rotationInput); err != nil || !decision.Valid() {
-		t.Fatalf("HumanRotateRefreshToken() = %#v, %v", decision, err)
+	if decision, err := ctx.HumanPrepareRefreshDelivery(fixtures.prepareInput); err != nil || !decision.Valid() {
+		t.Fatalf("HumanPrepareRefreshDelivery() = %#v, %v", decision, err)
+	}
+	if decision, err := ctx.HumanActivateRefreshDelivery(fixtures.activateInput); err != nil || !decision.Valid() {
+		t.Fatalf("HumanActivateRefreshDelivery() = %#v, %v", decision, err)
+	}
+	if decision, err := ctx.HumanAbortRefreshDelivery(fixtures.abortInput); err != nil || !decision.Valid() {
+		t.Fatalf("HumanAbortRefreshDelivery() = %#v, %v", decision, err)
 	}
 	if err := ctx.HumanRevokeRefreshToken(fixtures.revocationInput); err != nil {
 		t.Fatalf("HumanRevokeRefreshToken() = %v", err)
 	}
-	if authority.calls != 7 {
-		t.Fatalf("authority calls = %d, want 7", authority.calls)
+	if authority.calls != 9 {
+		t.Fatalf("authority calls = %d, want 9", authority.calls)
 	}
 }
 
@@ -193,38 +205,38 @@ func TestHumanAuthorizationContextWrappersContainPanicsCancellationAndInvalidOut
 		}
 	})
 
-	t.Run("refresh rotation binding substitution", func(t *testing.T) {
-		mismatched := fixtures.rotationDecisionConfig
+	t.Run("refresh activation binding substitution", func(t *testing.T) {
+		mismatched := fixtures.activateDecisionConfig
 		mismatched.ClientAssertionAuthority.KeyAuthorityID = "0199303d-5b4d-7d68-8806-60acc8861799"
-		decision, err := goidc.NewHumanRefreshRotationDecision(mismatched)
+		decision, err := goidc.NewHumanRefreshDeliveryActivateDecision(mismatched)
 		if err != nil {
 			t.Fatal(err)
 		}
 		authority := &humanAuthorizationContextAuthority{
-			rotate: func(context.Context, goidc.HumanRefreshRotationInput) (goidc.HumanRefreshRotationDecision, error) {
+			activate: func(context.Context, goidc.HumanRefreshDeliveryActivateInput) (goidc.HumanRefreshDeliveryActivateDecision, error) {
 				return decision, nil
 			},
 		}
 		ctx := NewContext(t.Context(), &Configuration{HumanAuthorizationAuthority: authority})
-		got, gotErr := ctx.HumanRotateRefreshToken(fixtures.rotationInput)
+		got, gotErr := ctx.HumanActivateRefreshDelivery(fixtures.activateInput)
 		assertHumanAuthorizationServerError(t, got.Valid(), gotErr)
 	})
 
 	t.Run("ordinary refresh rejection", func(t *testing.T) {
-		rejected, err := goidc.NewHumanRefreshRotationDecision(goidc.HumanRefreshRotationDecisionConfig{
-			Outcome: goidc.HumanRefreshRotationOutcomeRejected,
+		rejected, err := goidc.NewHumanRefreshDeliveryActivateDecision(goidc.HumanRefreshDeliveryActivateDecisionConfig{
+			Outcome: goidc.HumanRefreshDeliveryActivateOutcomeRejected,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		authority := &humanAuthorizationContextAuthority{
-			rotate: func(context.Context, goidc.HumanRefreshRotationInput) (goidc.HumanRefreshRotationDecision, error) {
+			activate: func(context.Context, goidc.HumanRefreshDeliveryActivateInput) (goidc.HumanRefreshDeliveryActivateDecision, error) {
 				return rejected, nil
 			},
 		}
 		ctx := NewContext(t.Context(), &Configuration{HumanAuthorizationAuthority: authority})
-		got, gotErr := ctx.HumanRotateRefreshToken(fixtures.rotationInput)
-		if gotErr != nil || got.Outcome() != goidc.HumanRefreshRotationOutcomeRejected {
+		got, gotErr := ctx.HumanActivateRefreshDelivery(fixtures.activateInput)
+		if gotErr != nil || got.Outcome() != goidc.HumanRefreshDeliveryActivateOutcomeRejected {
 			t.Fatalf("ordinary refresh rejection = %#v, %v", got, gotErr)
 		}
 	})
@@ -246,7 +258,9 @@ type humanAuthorizationContextAuthority struct {
 	confirmBrowser func(context.Context, goidc.HumanContinuationInput) (goidc.HumanContinuationDecision, error)
 	complete       func(context.Context, goidc.HumanCompletionInput) (goidc.HumanCompletionDecision, error)
 	redeem         func(context.Context, goidc.HumanCodeRedemptionInput) (goidc.HumanCodeRedemptionDecision, error)
-	rotate         func(context.Context, goidc.HumanRefreshRotationInput) (goidc.HumanRefreshRotationDecision, error)
+	prepare        func(context.Context, goidc.HumanRefreshDeliveryPrepareInput) (goidc.HumanRefreshDeliveryPrepareDecision, error)
+	activate       func(context.Context, goidc.HumanRefreshDeliveryActivateInput) (goidc.HumanRefreshDeliveryActivateDecision, error)
+	abort          func(context.Context, goidc.HumanRefreshDeliveryAbortInput) (goidc.HumanRefreshDeliveryAbortDecision, error)
 	revoke         func(context.Context, goidc.HumanRefreshRevocationInput) error
 }
 
@@ -270,9 +284,17 @@ func (authority *humanAuthorizationContextAuthority) RedeemAuthorizationCode(ctx
 	authority.calls++
 	return authority.redeem(ctx, input)
 }
-func (authority *humanAuthorizationContextAuthority) RotateRefreshToken(ctx context.Context, input goidc.HumanRefreshRotationInput) (goidc.HumanRefreshRotationDecision, error) {
+func (authority *humanAuthorizationContextAuthority) PrepareHumanRefreshDelivery(ctx context.Context, input goidc.HumanRefreshDeliveryPrepareInput) (goidc.HumanRefreshDeliveryPrepareDecision, error) {
 	authority.calls++
-	return authority.rotate(ctx, input)
+	return authority.prepare(ctx, input)
+}
+func (authority *humanAuthorizationContextAuthority) ActivateHumanRefreshDelivery(ctx context.Context, input goidc.HumanRefreshDeliveryActivateInput) (goidc.HumanRefreshDeliveryActivateDecision, error) {
+	authority.calls++
+	return authority.activate(ctx, input)
+}
+func (authority *humanAuthorizationContextAuthority) AbortHumanRefreshDelivery(ctx context.Context, input goidc.HumanRefreshDeliveryAbortInput) (goidc.HumanRefreshDeliveryAbortDecision, error) {
+	authority.calls++
+	return authority.abort(ctx, input)
 }
 func (authority *humanAuthorizationContextAuthority) RevokeRefreshToken(ctx context.Context, input goidc.HumanRefreshRevocationInput) error {
 	authority.calls++
@@ -291,9 +313,13 @@ type humanAuthorizationContextFixtures struct {
 	redemptionInput          goidc.HumanCodeRedemptionInput
 	redemptionDecision       goidc.HumanCodeRedemptionDecision
 	redemptionDecisionConfig goidc.HumanCodeRedemptionDecisionConfig
-	rotationInput            goidc.HumanRefreshRotationInput
-	rotationDecision         goidc.HumanRefreshRotationDecision
-	rotationDecisionConfig   goidc.HumanRefreshRotationDecisionConfig
+	prepareInput             goidc.HumanRefreshDeliveryPrepareInput
+	prepareDecision          goidc.HumanRefreshDeliveryPrepareDecision
+	activateInput            goidc.HumanRefreshDeliveryActivateInput
+	activateDecision         goidc.HumanRefreshDeliveryActivateDecision
+	activateDecisionConfig   goidc.HumanRefreshDeliveryActivateDecisionConfig
+	abortInput               goidc.HumanRefreshDeliveryAbortInput
+	abortDecision            goidc.HumanRefreshDeliveryAbortDecision
 	revocationInput          goidc.HumanRefreshRevocationInput
 }
 
@@ -366,11 +392,6 @@ func newHumanAuthorizationContextFixtures(t *testing.T) humanAuthorizationContex
 	must(err)
 	refreshToken, err := goidc.NewHumanRefreshToken("d0_hrt_1_BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc")
 	must(err)
-	rotationInput, err := goidc.NewHumanRefreshRotationInput(goidc.HumanRefreshRotationInputConfig{
-		RefreshToken: refreshToken, ClientID: "dashboard.d0.eu",
-		ClientAssertionAuthority: goidc.VerifiedClientAssertionAuthority{SnapshotRevision: 7, KeyAuthorityID: "0199303d-5b4d-7d68-8806-60acc886178e"},
-	})
-	must(err)
 	revocationInput, err := goidc.NewHumanRefreshRevocationInput(goidc.HumanRefreshRevocationInputConfig{
 		RefreshToken: refreshToken, ClientID: "dashboard.d0.eu",
 		ClientAssertionAuthority: goidc.VerifiedClientAssertionAuthority{SnapshotRevision: 7, KeyAuthorityID: "0199303d-5b4d-7d68-8806-60acc886178e"},
@@ -378,8 +399,32 @@ func newHumanAuthorizationContextFixtures(t *testing.T) humanAuthorizationContex
 	must(err)
 	successor, err := goidc.NewHumanRefreshToken("d0_hrt_1_CwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc")
 	must(err)
-	rotationConfig := goidc.HumanRefreshRotationDecisionConfig{
-		Outcome: goidc.HumanRefreshRotationOutcomeRotated, RefreshToken: successor,
+	deliveryReceipt, err := goidc.NewHumanRefreshDeliveryReceipt("d0_hrd_1_DwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc")
+	must(err)
+	authority := goidc.VerifiedClientAssertionAuthority{SnapshotRevision: 7, KeyAuthorityID: "0199303d-5b4d-7d68-8806-60acc886178e"}
+	prepareInput, err := goidc.NewHumanRefreshDeliveryPrepareInput(goidc.HumanRefreshDeliveryPrepareInputConfig{
+		PredecessorRefreshToken: refreshToken, SuccessorRefreshToken: successor,
+		DeliveryReceipt: deliveryReceipt, ClientID: "dashboard.d0.eu", ClientAssertionAuthority: authority,
+	})
+	must(err)
+	activateInput, err := goidc.NewHumanRefreshDeliveryActivateInput(goidc.HumanRefreshDeliveryActivateInputConfig{
+		SuccessorRefreshToken: successor, DeliveryReceipt: deliveryReceipt,
+		ClientID: "dashboard.d0.eu", ClientAssertionAuthority: authority,
+	})
+	must(err)
+	abortInput, err := goidc.NewHumanRefreshDeliveryAbortInput(goidc.HumanRefreshDeliveryAbortInputConfig{
+		SuccessorRefreshToken: successor, DeliveryReceipt: deliveryReceipt,
+		ClientID: "dashboard.d0.eu", ClientAssertionAuthority: authority,
+	})
+	must(err)
+	prepareDecision, err := goidc.NewHumanRefreshDeliveryPrepareDecision(goidc.HumanRefreshDeliveryPrepareDecisionConfig{
+		Outcome:  goidc.HumanRefreshDeliveryPrepareOutcomePending,
+		ClientID: "dashboard.d0.eu", ClientAssertionAuthority: authority,
+		CreatedAt: 1_787_580_100, ExpiresAt: 1_787_580_400,
+	})
+	must(err)
+	activateConfig := goidc.HumanRefreshDeliveryActivateDecisionConfig{
+		Outcome:               goidc.HumanRefreshDeliveryActivateOutcomeActivated,
 		RefreshTokenExpiresAt: 1_787_666_400, GrantID: "0199303d-5b4d-7d68-8806-60acc886178f",
 		Subject: "pairwise-subject-0123456789abcdef", OrganizationID: "0199303d-5b4d-7d68-8806-60acc8861790",
 		MembershipID: "0199303d-5b4d-7d68-8806-60acc8861791", MembershipRevision: 4, ClientID: "dashboard.d0.eu",
@@ -388,7 +433,12 @@ func newHumanAuthorizationContextFixtures(t *testing.T) humanAuthorizationContex
 		AuthenticationTime: 1_787_580_000, AuthenticationContext: "urn:d0:acr:passkey",
 		AuthenticationMethods: []string{"passkey"}, CreatedAt: 1_787_580_100, ExpiresAt: 1_787_580_160,
 	}
-	rotationDecision, err := goidc.NewHumanRefreshRotationDecision(rotationConfig)
+	activateDecision, err := goidc.NewHumanRefreshDeliveryActivateDecision(activateConfig)
+	must(err)
+	abortDecision, err := goidc.NewHumanRefreshDeliveryAbortDecision(goidc.HumanRefreshDeliveryAbortDecisionConfig{
+		Outcome:  goidc.HumanRefreshDeliveryAbortOutcomeAborted,
+		ClientID: "dashboard.d0.eu", ClientAssertionAuthority: authority,
+	})
 	must(err)
 	return humanAuthorizationContextFixtures{
 		parInput: parInput, parDecision: parDecision, startInput: startInput, startDecision: startDecision,
@@ -396,9 +446,11 @@ func newHumanAuthorizationContextFixtures(t *testing.T) humanAuthorizationContex
 		completionInput: completionInput, completionDecision: completionDecision,
 		redemptionInput: redemptionInput, redemptionDecision: redemptionDecision,
 		redemptionDecisionConfig: redemptionConfig,
-		rotationInput:            rotationInput, rotationDecision: rotationDecision,
-		rotationDecisionConfig: rotationConfig,
-		revocationInput:        revocationInput,
+		prepareInput:             prepareInput, prepareDecision: prepareDecision,
+		activateInput: activateInput, activateDecision: activateDecision,
+		activateDecisionConfig: activateConfig,
+		abortInput:             abortInput, abortDecision: abortDecision,
+		revocationInput: revocationInput,
 	}
 }
 

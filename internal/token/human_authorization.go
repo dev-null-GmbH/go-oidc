@@ -177,93 +177,6 @@ func generateHumanAuthorizationCodeToken(
 	}, nil
 }
 
-// generateHumanRefreshToken rotates the authority-owned capability before
-// signing. It never loads or mutates a generic Grant and deliberately omits an
-// ID token so nonce and authorization-response state cannot be replayed.
-func generateHumanRefreshToken(
-	ctx oidc.Context,
-	req request,
-	client *goidc.Client,
-) (resp response, err error) {
-	defer func() {
-		if recover() != nil {
-			resp = response{}
-			err = humanAuthorizationServerError()
-		}
-	}()
-
-	policy, err := humanTokenPolicy(ctx, client)
-	if err != nil {
-		return response{}, humanAuthorizationServerError()
-	}
-	if !validHumanRefreshTokenForm(ctx.Request, req, client.ID) {
-		return response{}, humanAuthorizationInvalidRequest()
-	}
-
-	authority, err := ctx.ClientAssertionAuthority(client)
-	if err != nil || !humanTokenAuthorityMatchesClient(authority, client) {
-		return response{}, humanAuthorizationServerError()
-	}
-	refreshToken, err := goidc.NewHumanRefreshToken(req.refreshToken)
-	if err != nil {
-		return response{}, humanRefreshInvalidGrant()
-	}
-	input, err := goidc.NewHumanRefreshRotationInput(goidc.HumanRefreshRotationInputConfig{
-		RefreshToken:             refreshToken,
-		ClientID:                 client.ID,
-		ClientAssertionAuthority: *authority,
-	})
-	if err != nil {
-		return response{}, humanRefreshInvalidGrant()
-	}
-
-	decision, err := ctx.HumanRotateRefreshToken(input)
-	if err != nil {
-		return response{}, humanAuthorizationServerError()
-	}
-	if decision.Outcome() == goidc.HumanRefreshRotationOutcomeRejected {
-		return response{}, humanRefreshInvalidGrant()
-	}
-	now := timeutil.TimestampNow()
-	if !validRotatedHumanAuthorization(decision, client, policy, int64(now)) {
-		return response{}, humanAuthorizationServerError()
-	}
-
-	scopes := decision.Scopes()
-	resources := decision.Resources()
-	accessToken, err := issueHumanAccessToken(ctx, policy, humanAccessTokenFacts{
-		grantID: decision.GrantID(), subject: decision.Subject(),
-		organizationID: decision.OrganizationID(), membershipID: decision.MembershipID(),
-		membershipRevision: decision.MembershipRevision(), clientID: decision.ClientID(),
-		scopes: scopes, resources: resources,
-	}, now)
-	if err != nil {
-		return response{}, humanAuthorizationServerError()
-	}
-	successor, ok := decision.RefreshToken()
-	refreshTokenValue, refreshTokenExpiresIn, err := humanRefreshTokenResponse(
-		successor,
-		ok,
-		decision.RefreshTokenExpiresAt(),
-		int64(now),
-		policy.authorityClockSkewSeconds,
-	)
-	if err != nil {
-		return response{}, humanAuthorizationServerError()
-	}
-
-	return response{
-		AccessToken:           accessToken,
-		RefreshToken:          refreshTokenValue,
-		RefreshTokenExpiresIn: refreshTokenExpiresIn,
-		ExpiresIn:             policy.accessTokenLifetimeSeconds,
-		TokenType:             goidc.TokenTypeBearer,
-		Scopes:                strings.Join(scopes, " "),
-		Resources:             goidc.Resources(resources),
-		noStore:               true,
-	}, nil
-}
-
 type humanAccessTokenFacts struct {
 	grantID            string
 	subject            string
@@ -779,39 +692,6 @@ func validRedeemedHumanAuthorization(
 		len(resources) != 0 && policy.resourceIndicatorsEnabled &&
 		humanTokenSortedSubset(resources, policy.resourceIndicators) &&
 		slices.Contains(policy.authenticationContexts, decision.AuthenticationContext()) &&
-		validHumanAuthorityDecisionWindow(
-			decision.CreatedAt(),
-			decision.ExpiresAt(),
-			now,
-			policy.authorityClockSkewSeconds,
-		)
-}
-
-func validRotatedHumanAuthorization(
-	decision goidc.HumanRefreshRotationDecision,
-	client *goidc.Client,
-	policy humanTokenIssuancePolicy,
-	now int64,
-) bool {
-	if !decision.Valid() || decision.Outcome() != goidc.HumanRefreshRotationOutcomeRotated {
-		return false
-	}
-	scopes := decision.Scopes()
-	resources := decision.Resources()
-	refreshToken, hasRefreshToken := decision.RefreshToken()
-	return client != nil && decision.ClientID() == client.ID &&
-		hasRefreshToken && refreshToken.Valid() && slices.Contains(scopes, goidc.ScopeOfflineAccess.ID) &&
-		humanAuthorityTimestampNotExpired(
-			decision.RefreshTokenExpiresAt(),
-			now,
-			policy.authorityClockSkewSeconds,
-		) &&
-		humanTokenSortedSubset(scopes, strings.Split(client.ScopeIDs, " ")) &&
-		humanTokenSortedSubset(scopes, policy.scopeIDs) &&
-		len(resources) != 0 && policy.resourceIndicatorsEnabled &&
-		humanTokenSortedSubset(resources, policy.resourceIndicators) &&
-		slices.Contains(policy.authenticationContexts, decision.AuthenticationContext()) &&
-		decision.AuthenticationTime() <= decision.CreatedAt() &&
 		validHumanAuthorityDecisionWindow(
 			decision.CreatedAt(),
 			decision.ExpiresAt(),

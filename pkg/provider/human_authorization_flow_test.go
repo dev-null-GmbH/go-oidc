@@ -248,12 +248,41 @@ func TestHumanConfidentialBFFProviderEndToEndFlow(t *testing.T) {
 	codeReplay := humanFlowFormRequest(t, handler, "/token", codeReplayValues, nil)
 	humanFlowAssertOAuthError(t, codeReplay, http.StatusBadRequest, goidc.ErrorCodeInvalidGrant)
 
-	refreshValues := humanFlowRefreshValues(t, clientKey, authority.refreshOne, "human-flow-refresh")
-	refreshResponse := humanFlowFormRequest(t, handler, "/token", refreshValues, nil)
+	legacyRefresh := humanFlowFormRequest(t, handler, "/token",
+		humanFlowRefreshValues(t, clientKey, authority.refreshOne, "human-flow-legacy-refresh"), nil)
+	humanFlowAssertOAuthError(t, legacyRefresh, http.StatusBadRequest, goidc.ErrorCodeInvalidGrant)
+
+	prepareValues := humanFlowDeliveryValues(t, clientKey, "human-flow-prepare", true)
+	prepareResponse := humanFlowFormRequest(
+		t,
+		handler,
+		goidc.HumanRefreshDeliveryPrepareRoute,
+		prepareValues,
+		nil,
+	)
+	humanFlowAssertDeliveryStatus(t, prepareResponse, http.StatusOK, "delivery_pending")
+	prepareReplayValues := humanFlowDeliveryValues(t, clientKey, "human-flow-prepare-replay", true)
+	prepareReplay := humanFlowFormRequest(
+		t,
+		handler,
+		goidc.HumanRefreshDeliveryPrepareRoute,
+		prepareReplayValues,
+		nil,
+	)
+	humanFlowAssertDeliveryStatus(t, prepareReplay, http.StatusOK, "delivery_pending")
+
+	activateValues := humanFlowDeliveryValues(t, clientKey, "human-flow-activate", false)
+	refreshResponse := humanFlowFormRequest(
+		t,
+		handler,
+		goidc.HumanRefreshDeliveryActivateRoute,
+		activateValues,
+		nil,
+	)
 	refreshTokens := humanFlowDecodeTokenResponse(t, refreshResponse, false)
 	if refreshTokens.RefreshToken != authority.refreshTwo || refreshTokens.IDToken != "" ||
 		refreshTokens.RefreshToken == codeTokens.RefreshToken {
-		t.Fatalf("refresh token response = %#v", refreshTokens)
+		t.Fatal("refresh delivery response is incoherent")
 	}
 	refreshClaims := humanFlowTokenClaims(t, refreshTokens.AccessToken, serverKey, "at+jwt")
 	humanFlowAssertAccessToken(t, refreshClaims)
@@ -261,9 +290,40 @@ func TestHumanConfidentialBFFProviderEndToEndFlow(t *testing.T) {
 		t.Fatalf("refresh access token replayed nonce: %#v", refreshClaims)
 	}
 
-	refreshReplayValues := humanFlowRefreshValues(t, clientKey, authority.refreshOne, "human-flow-refresh-replay")
-	refreshReplay := humanFlowFormRequest(t, handler, "/token", refreshReplayValues, nil)
-	humanFlowAssertOAuthError(t, refreshReplay, http.StatusBadRequest, goidc.ErrorCodeInvalidGrant)
+	terminalPrepareValues := humanFlowDeliveryValues(t, clientKey, "human-flow-terminal-prepare", true)
+	terminalPrepare := humanFlowFormRequest(
+		t,
+		handler,
+		goidc.HumanRefreshDeliveryPrepareRoute,
+		terminalPrepareValues,
+		nil,
+	)
+	humanFlowAssertDeliveryStatus(t, terminalPrepare, http.StatusOK, "activated")
+
+	activateReplayValues := humanFlowDeliveryValues(t, clientKey, "human-flow-activate-replay", false)
+	activateReplay := humanFlowFormRequest(
+		t,
+		handler,
+		goidc.HumanRefreshDeliveryActivateRoute,
+		activateReplayValues,
+		nil,
+	)
+	activateReplayTokens := humanFlowDecodeTokenResponse(t, activateReplay, false)
+	if activateReplayTokens.RefreshToken != authority.refreshTwo ||
+		activateReplayTokens.AccessToken == refreshTokens.AccessToken ||
+		activateReplayTokens.RefreshTokenExpiresIn > refreshTokens.RefreshTokenExpiresIn {
+		t.Fatal("activated replay rotated or extended the refresh family")
+	}
+
+	abortActivatedValues := humanFlowDeliveryValues(t, clientKey, "human-flow-abort-activated", false)
+	abortActivated := humanFlowFormRequest(
+		t,
+		handler,
+		goidc.HumanRefreshDeliveryAbortRoute,
+		abortActivatedValues,
+		nil,
+	)
+	humanFlowAssertDeliveryStatus(t, abortActivated, http.StatusConflict, "activated_conflict")
 
 	revocationResponse := humanFlowFormRequest(t, handler, "/revoke", url.Values{
 		"token":                 {authority.refreshTwo},
@@ -279,9 +339,14 @@ func TestHumanConfidentialBFFProviderEndToEndFlow(t *testing.T) {
 			revocationResponse.Code, revocationResponse.Header(), revocationResponse.Body.String())
 	}
 
-	revokedRefresh := humanFlowFormRequest(t, handler, "/token",
-		humanFlowRefreshValues(t, clientKey, authority.refreshTwo, "human-flow-refresh-revoked"), nil)
-	humanFlowAssertOAuthError(t, revokedRefresh, http.StatusBadRequest, goidc.ErrorCodeInvalidGrant)
+	revokedActivate := humanFlowFormRequest(
+		t,
+		handler,
+		goidc.HumanRefreshDeliveryActivateRoute,
+		humanFlowDeliveryValues(t, clientKey, "human-flow-activate-revoked", false),
+		nil,
+	)
+	humanFlowAssertOAuthError(t, revokedActivate, http.StatusBadRequest, goidc.ErrorCodeInvalidGrant)
 	authority.assertFinished(t)
 }
 
@@ -298,15 +363,22 @@ type humanFlowAuthority struct {
 	authorizationCode string
 	refreshOne        string
 	refreshTwo        string
+	deliveryReceipt   string
 
-	parStored        bool
-	parConsumed      bool
-	browserConfirmed bool
-	completed        bool
-	codeConsumed     bool
-	refreshConsumed  map[string]bool
-	revoked          map[string]bool
-	calls            []string
+	parStored                bool
+	parConsumed              bool
+	browserConfirmed         bool
+	completed                bool
+	codeConsumed             bool
+	refreshConsumed          map[string]bool
+	deliveryPrepared         bool
+	deliveryActivated        bool
+	deliveryAborted          bool
+	deliveryPreparedAt       int64
+	deliveryPendingExpiresAt int64
+	refreshFamilyExpiresAt   int64
+	revoked                  map[string]bool
+	calls                    []string
 }
 
 func newHumanFlowAuthority(t *testing.T) *humanFlowAuthority {
@@ -321,6 +393,7 @@ func newHumanFlowAuthority(t *testing.T) *humanFlowAuthority {
 		authorizationCode: "d0_hac_1_" + humanFlowEntropy(6),
 		refreshOne:        "d0_hrt_1_" + humanFlowEntropy(7),
 		refreshTwo:        "d0_hrt_1_" + humanFlowEntropy(8),
+		deliveryReceipt:   "d0_hrd_1_" + humanFlowEntropy(9),
 		refreshConsumed:   make(map[string]bool),
 		revoked:           make(map[string]bool),
 	}
@@ -471,6 +544,7 @@ func (authority *humanFlowAuthority) RedeemAuthorizationCode(
 	}
 	authority.codeConsumed = true
 	now := time.Now().Unix()
+	authority.refreshFamilyExpiresAt = now + 3600
 	refresh, err := goidc.NewHumanRefreshToken(authority.refreshOne)
 	if err != nil {
 		return goidc.HumanCodeRedemptionDecision{}, err
@@ -478,7 +552,7 @@ func (authority *humanFlowAuthority) RedeemAuthorizationCode(
 	return goidc.NewHumanCodeRedemptionDecision(goidc.HumanCodeRedemptionDecisionConfig{
 		Outcome:                  goidc.HumanCodeRedemptionOutcomeRedeemed,
 		RefreshToken:             refresh,
-		RefreshTokenExpiresAt:    now + 3600,
+		RefreshTokenExpiresAt:    authority.refreshFamilyExpiresAt,
 		GrantID:                  humanFlowGrantID,
 		Subject:                  humanFlowSubject,
 		OrganizationID:           humanFlowOrganizationID,
@@ -497,34 +571,76 @@ func (authority *humanFlowAuthority) RedeemAuthorizationCode(
 	})
 }
 
-func (authority *humanFlowAuthority) RotateRefreshToken(
+func (authority *humanFlowAuthority) PrepareHumanRefreshDelivery(
 	_ context.Context,
-	input goidc.HumanRefreshRotationInput,
-) (goidc.HumanRefreshRotationDecision, error) {
+	input goidc.HumanRefreshDeliveryPrepareInput,
+) (goidc.HumanRefreshDeliveryPrepareDecision, error) {
 	authority.mu.Lock()
 	defer authority.mu.Unlock()
-	authority.calls = append(authority.calls, "rotate")
-	presented, err := input.RefreshToken().Render()
-	if err != nil || !input.Valid() || input.ClientID() != humanFlowClientID ||
+	authority.calls = append(authority.calls, "prepare")
+	predecessor, predecessorErr := input.PredecessorRefreshToken().Render()
+	successor, successorErr := input.SuccessorRefreshToken().Render()
+	receipt, receiptErr := input.DeliveryReceipt().Render()
+	if predecessorErr != nil || successorErr != nil || receiptErr != nil || !input.Valid() ||
+		input.ClientID() != humanFlowClientID ||
 		input.ClientAssertionAuthority() != humanFlowVerifiedAuthority() {
-		return goidc.HumanRefreshRotationDecision{}, errors.New("unexpected refresh rotation input")
+		return goidc.HumanRefreshDeliveryPrepareDecision{}, errors.New("unexpected refresh prepare input")
 	}
-	if authority.refreshConsumed[presented] || authority.revoked[presented] ||
-		presented != authority.refreshOne {
-		return goidc.NewHumanRefreshRotationDecision(goidc.HumanRefreshRotationDecisionConfig{
-			Outcome: goidc.HumanRefreshRotationOutcomeRejected,
+	if predecessor != authority.refreshOne || successor != authority.refreshTwo ||
+		receipt != authority.deliveryReceipt || authority.revoked[successor] {
+		return goidc.NewHumanRefreshDeliveryPrepareDecision(goidc.HumanRefreshDeliveryPrepareDecisionConfig{
+			Outcome: goidc.HumanRefreshDeliveryPrepareOutcomeRejected,
 		})
 	}
-	authority.refreshConsumed[presented] = true
-	now := time.Now().Unix()
-	successor, err := goidc.NewHumanRefreshToken(authority.refreshTwo)
-	if err != nil {
-		return goidc.HumanRefreshRotationDecision{}, err
+	if !authority.deliveryPrepared {
+		now := time.Now().Unix()
+		authority.deliveryPrepared = true
+		authority.deliveryPreparedAt = now
+		authority.deliveryPendingExpiresAt = now + 300
 	}
-	return goidc.NewHumanRefreshRotationDecision(goidc.HumanRefreshRotationDecisionConfig{
-		Outcome:                  goidc.HumanRefreshRotationOutcomeRotated,
-		RefreshToken:             successor,
-		RefreshTokenExpiresAt:    now + 3600,
+	outcome := goidc.HumanRefreshDeliveryPrepareOutcomePending
+	if authority.deliveryActivated {
+		outcome = goidc.HumanRefreshDeliveryPrepareOutcomeActivated
+	} else if authority.deliveryAborted {
+		outcome = goidc.HumanRefreshDeliveryPrepareOutcomeAborted
+	}
+	return goidc.NewHumanRefreshDeliveryPrepareDecision(goidc.HumanRefreshDeliveryPrepareDecisionConfig{
+		Outcome:                  outcome,
+		ClientID:                 humanFlowClientID,
+		ClientAssertionAuthority: humanFlowVerifiedAuthority(),
+		CreatedAt:                authority.deliveryPreparedAt,
+		ExpiresAt:                authority.deliveryPendingExpiresAt,
+	})
+}
+
+func (authority *humanFlowAuthority) ActivateHumanRefreshDelivery(
+	_ context.Context,
+	input goidc.HumanRefreshDeliveryActivateInput,
+) (goidc.HumanRefreshDeliveryActivateDecision, error) {
+	authority.mu.Lock()
+	defer authority.mu.Unlock()
+	authority.calls = append(authority.calls, "activate")
+	successor, successorErr := input.SuccessorRefreshToken().Render()
+	receipt, receiptErr := input.DeliveryReceipt().Render()
+	if successorErr != nil || receiptErr != nil || !input.Valid() ||
+		input.ClientID() != humanFlowClientID ||
+		input.ClientAssertionAuthority() != humanFlowVerifiedAuthority() {
+		return goidc.HumanRefreshDeliveryActivateDecision{}, errors.New("unexpected refresh activation input")
+	}
+	if !authority.deliveryPrepared || authority.deliveryAborted || successor != authority.refreshTwo ||
+		receipt != authority.deliveryReceipt || authority.revoked[successor] {
+		return goidc.NewHumanRefreshDeliveryActivateDecision(goidc.HumanRefreshDeliveryActivateDecisionConfig{
+			Outcome: goidc.HumanRefreshDeliveryActivateOutcomeRejected,
+		})
+	}
+	if !authority.deliveryActivated {
+		authority.deliveryActivated = true
+		authority.refreshConsumed[authority.refreshOne] = true
+	}
+	now := time.Now().Unix()
+	return goidc.NewHumanRefreshDeliveryActivateDecision(goidc.HumanRefreshDeliveryActivateDecisionConfig{
+		Outcome:                  goidc.HumanRefreshDeliveryActivateOutcomeActivated,
+		RefreshTokenExpiresAt:    authority.refreshFamilyExpiresAt,
 		GrantID:                  humanFlowGrantID,
 		Subject:                  humanFlowSubject,
 		OrganizationID:           humanFlowOrganizationID,
@@ -539,6 +655,38 @@ func (authority *humanFlowAuthority) RotateRefreshToken(
 		AuthenticationMethods:    []string{"passkey"},
 		CreatedAt:                now,
 		ExpiresAt:                now + 60,
+	})
+}
+
+func (authority *humanFlowAuthority) AbortHumanRefreshDelivery(
+	_ context.Context,
+	input goidc.HumanRefreshDeliveryAbortInput,
+) (goidc.HumanRefreshDeliveryAbortDecision, error) {
+	authority.mu.Lock()
+	defer authority.mu.Unlock()
+	authority.calls = append(authority.calls, "abort")
+	successor, successorErr := input.SuccessorRefreshToken().Render()
+	receipt, receiptErr := input.DeliveryReceipt().Render()
+	if successorErr != nil || receiptErr != nil || !input.Valid() ||
+		input.ClientID() != humanFlowClientID ||
+		input.ClientAssertionAuthority() != humanFlowVerifiedAuthority() {
+		return goidc.HumanRefreshDeliveryAbortDecision{}, errors.New("unexpected refresh abort input")
+	}
+	if !authority.deliveryPrepared || successor != authority.refreshTwo || receipt != authority.deliveryReceipt {
+		return goidc.NewHumanRefreshDeliveryAbortDecision(goidc.HumanRefreshDeliveryAbortDecisionConfig{
+			Outcome: goidc.HumanRefreshDeliveryAbortOutcomeRejected,
+		})
+	}
+	outcome := goidc.HumanRefreshDeliveryAbortOutcomeAborted
+	if authority.deliveryActivated {
+		outcome = goidc.HumanRefreshDeliveryAbortOutcomeActivatedConflict
+	} else {
+		authority.deliveryAborted = true
+	}
+	return goidc.NewHumanRefreshDeliveryAbortDecision(goidc.HumanRefreshDeliveryAbortDecisionConfig{
+		Outcome:                  outcome,
+		ClientID:                 humanFlowClientID,
+		ClientAssertionAuthority: humanFlowVerifiedAuthority(),
 	})
 }
 
@@ -565,10 +713,12 @@ func (authority *humanFlowAuthority) assertFinished(t *testing.T) {
 	defer authority.mu.Unlock()
 	wantCalls := []string{
 		"par", "start", "confirm", "complete", "complete", "redeem", "redeem",
-		"rotate", "rotate", "revoke", "rotate",
+		"prepare", "prepare", "activate", "prepare", "activate", "abort", "revoke", "activate",
 	}
 	if !authority.parStored || !authority.parConsumed || !authority.browserConfirmed ||
-		!authority.completed || !authority.codeConsumed || !authority.refreshConsumed[authority.refreshOne] ||
+		!authority.completed || !authority.codeConsumed || !authority.deliveryPrepared ||
+		!authority.deliveryActivated || authority.deliveryAborted ||
+		!authority.refreshConsumed[authority.refreshOne] ||
 		!authority.revoked[authority.refreshTwo] || !slices.Equal(authority.calls, wantCalls) {
 		t.Fatalf("authority state incomplete: calls=%v par=%t/%t browser=%t completed=%t code=%t refresh=%v revoked=%v",
 			authority.calls, authority.parStored, authority.parConsumed, authority.browserConfirmed,
@@ -777,6 +927,45 @@ func humanFlowRefreshValues(
 		"client_id":             {humanFlowClientID},
 		"client_assertion":      {humanFlowClientAssertion(t, clientKey, assertionID)},
 		"client_assertion_type": {string(goidc.AssertionTypeJWTBearer)},
+	}
+}
+
+func humanFlowDeliveryValues(
+	t *testing.T,
+	clientKey goidc.JSONWebKey,
+	assertionID string,
+	includePredecessor bool,
+) url.Values {
+	t.Helper()
+	values := url.Values{
+		"successor_refresh_token": {goidc.HumanRefreshTokenPrefix + humanFlowEntropy(8)},
+		"delivery_receipt":        {goidc.HumanRefreshDeliveryReceiptPrefix + humanFlowEntropy(9)},
+		"client_id":               {humanFlowClientID},
+		"client_assertion":        {humanFlowClientAssertion(t, clientKey, assertionID)},
+		"client_assertion_type":   {string(goidc.AssertionTypeJWTBearer)},
+	}
+	if includePredecessor {
+		values.Set("refresh_token", goidc.HumanRefreshTokenPrefix+humanFlowEntropy(7))
+	}
+	return values
+}
+
+func humanFlowAssertDeliveryStatus(
+	t *testing.T,
+	response *httptest.ResponseRecorder,
+	wantHTTPStatus int,
+	wantDeliveryStatus string,
+) {
+	t.Helper()
+	var payload struct {
+		Status string `json:"status"`
+	}
+	humanFlowDecodeJSON(t, response, &payload)
+	if response.Code != wantHTTPStatus || payload.Status != wantDeliveryStatus ||
+		response.Header().Get("Cache-Control") != "no-store" ||
+		response.Header().Get("Pragma") != "no-cache" {
+		t.Fatalf("delivery response = status %d body %q, want %d/%s",
+			response.Code, response.Body.String(), wantHTTPStatus, wantDeliveryStatus)
 	}
 }
 

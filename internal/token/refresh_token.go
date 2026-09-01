@@ -34,11 +34,11 @@ func generateRefreshToken(ctx oidc.Context, req request) (response, error) {
 	}
 	switch c.AuthorizationRequestProfile {
 	case goidc.AuthorizationRequestProfileHumanConfidentialBFF:
-		isolatedClient, isolateErr := isolateHumanTokenClient(c)
-		if isolateErr != nil {
-			return response{}, humanAuthorizationServerError()
-		}
-		return generateHumanRefreshToken(ctx, req, isolatedClient)
+		// Strict human refresh capabilities are never consumed by the legacy
+		// one-response token endpoint. The recoverable delivery endpoints keep
+		// the predecessor active until the caller explicitly activates its
+		// client-generated successor.
+		return response{}, humanRefreshInvalidGrant()
 	case goidc.AuthorizationRequestProfileDefault:
 		if ctx.HumanConfidentialBFFAuthorizationEnabled && isHumanRefreshToken(req.refreshToken) {
 			return response{}, humanRefreshInvalidGrant()

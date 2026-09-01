@@ -16,6 +16,35 @@ func RegisterHandlers(router *http.ServeMux, config *oidc.Configuration, middlew
 		goidc.ApplyMiddlewares(oidc.Handler(config, handleCreate), middlewares...),
 	)
 	router.Handle("POST "+config.EndpointPrefix+config.TokenEndpoint, createHandler)
+	if config.HumanConfidentialBFFAuthorizationEnabled {
+		router.Handle(
+			"POST "+config.EndpointPrefix+goidc.HumanRefreshDeliveryPrepareRoute,
+			limitHumanRefreshDeliveryMiddlewareBody(
+				goidc.ApplyMiddlewares(
+					oidc.Handler(config, handleHumanRefreshDeliveryPrepare),
+					middlewares...,
+				),
+			),
+		)
+		router.Handle(
+			"POST "+config.EndpointPrefix+goidc.HumanRefreshDeliveryActivateRoute,
+			limitHumanRefreshDeliveryMiddlewareBody(
+				goidc.ApplyMiddlewares(
+					oidc.Handler(config, handleHumanRefreshDeliveryActivate),
+					middlewares...,
+				),
+			),
+		)
+		router.Handle(
+			"POST "+config.EndpointPrefix+goidc.HumanRefreshDeliveryAbortRoute,
+			limitHumanRefreshDeliveryMiddlewareBody(
+				goidc.ApplyMiddlewares(
+					oidc.Handler(config, handleHumanRefreshDeliveryAbort),
+					middlewares...,
+				),
+			),
+		)
+	}
 
 	if config.TokenIntrospectionEnabled {
 		router.Handle("POST "+config.EndpointPrefix+config.TokenIntrospectionEndpoint,

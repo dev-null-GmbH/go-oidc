@@ -365,11 +365,25 @@ func (*stubHumanAuthorizationAuthority) RedeemAuthorizationCode(
 	return goidc.HumanCodeRedemptionDecision{}, errors.New("unexpected RedeemAuthorizationCode call")
 }
 
-func (*stubHumanAuthorizationAuthority) RotateRefreshToken(
+func (*stubHumanAuthorizationAuthority) PrepareHumanRefreshDelivery(
 	context.Context,
-	goidc.HumanRefreshRotationInput,
-) (goidc.HumanRefreshRotationDecision, error) {
-	return goidc.HumanRefreshRotationDecision{}, errors.New("unexpected RotateRefreshToken call")
+	goidc.HumanRefreshDeliveryPrepareInput,
+) (goidc.HumanRefreshDeliveryPrepareDecision, error) {
+	return goidc.HumanRefreshDeliveryPrepareDecision{}, errors.New("unexpected PrepareHumanRefreshDelivery call")
+}
+
+func (*stubHumanAuthorizationAuthority) ActivateHumanRefreshDelivery(
+	context.Context,
+	goidc.HumanRefreshDeliveryActivateInput,
+) (goidc.HumanRefreshDeliveryActivateDecision, error) {
+	return goidc.HumanRefreshDeliveryActivateDecision{}, errors.New("unexpected ActivateHumanRefreshDelivery call")
+}
+
+func (*stubHumanAuthorizationAuthority) AbortHumanRefreshDelivery(
+	context.Context,
+	goidc.HumanRefreshDeliveryAbortInput,
+) (goidc.HumanRefreshDeliveryAbortDecision, error) {
+	return goidc.HumanRefreshDeliveryAbortDecision{}, errors.New("unexpected AbortHumanRefreshDelivery call")
 }
 
 func (*stubHumanAuthorizationAuthority) RevokeRefreshToken(
