@@ -848,18 +848,49 @@ func (ctx Context) HumanRedeemAuthorizationCode(input goidc.HumanCodeRedemptionI
 		})
 }
 
-// HumanRotateRefreshToken invokes the strict atomic refresh authority and
-// rejects any successful decision that is not bound to the freshly verified
-// client assertion authority supplied in the input.
-func (ctx Context) HumanRotateRefreshToken(
-	input goidc.HumanRefreshRotationInput,
-) (goidc.HumanRefreshRotationDecision, error) {
+// HumanPrepareRefreshDelivery invokes the prepare transition through the
+// panic-safe authority boundary and correlates it to current client authority.
+func (ctx Context) HumanPrepareRefreshDelivery(
+	input goidc.HumanRefreshDeliveryPrepareInput,
+) (goidc.HumanRefreshDeliveryPrepareDecision, error) {
 	return callHumanAuthorizationAuthority(ctx, input,
-		func(authority goidc.HumanAuthorizationAuthority, callbackContext context.Context, candidate goidc.HumanRefreshRotationInput) (goidc.HumanRefreshRotationDecision, error) {
-			return authority.RotateRefreshToken(callbackContext, candidate)
+		func(authority goidc.HumanAuthorizationAuthority, callbackContext context.Context, candidate goidc.HumanRefreshDeliveryPrepareInput) (goidc.HumanRefreshDeliveryPrepareDecision, error) {
+			return authority.PrepareHumanRefreshDelivery(callbackContext, candidate)
 		},
-		func(candidate goidc.HumanRefreshRotationInput, decision goidc.HumanRefreshRotationDecision) bool {
-			return decision.Outcome() == goidc.HumanRefreshRotationOutcomeRejected ||
+		func(candidate goidc.HumanRefreshDeliveryPrepareInput, decision goidc.HumanRefreshDeliveryPrepareDecision) bool {
+			return decision.Outcome() == goidc.HumanRefreshDeliveryPrepareOutcomeRejected ||
+				decision.ClientID() == candidate.ClientID() &&
+					decision.ClientAssertionAuthority() == candidate.ClientAssertionAuthority()
+		})
+}
+
+// HumanActivateRefreshDelivery invokes the atomic activation transition. A
+// successful or replayed activation is correlated before any signing occurs.
+func (ctx Context) HumanActivateRefreshDelivery(
+	input goidc.HumanRefreshDeliveryActivateInput,
+) (goidc.HumanRefreshDeliveryActivateDecision, error) {
+	return callHumanAuthorizationAuthority(ctx, input,
+		func(authority goidc.HumanAuthorizationAuthority, callbackContext context.Context, candidate goidc.HumanRefreshDeliveryActivateInput) (goidc.HumanRefreshDeliveryActivateDecision, error) {
+			return authority.ActivateHumanRefreshDelivery(callbackContext, candidate)
+		},
+		func(candidate goidc.HumanRefreshDeliveryActivateInput, decision goidc.HumanRefreshDeliveryActivateDecision) bool {
+			return decision.Outcome() == goidc.HumanRefreshDeliveryActivateOutcomeRejected ||
+				decision.ClientID() == candidate.ClientID() &&
+					decision.ClientAssertionAuthority() == candidate.ClientAssertionAuthority()
+		})
+}
+
+// HumanAbortRefreshDelivery invokes the fail-closed abort transition and
+// correlates an aborted replay to current client authority.
+func (ctx Context) HumanAbortRefreshDelivery(
+	input goidc.HumanRefreshDeliveryAbortInput,
+) (goidc.HumanRefreshDeliveryAbortDecision, error) {
+	return callHumanAuthorizationAuthority(ctx, input,
+		func(authority goidc.HumanAuthorizationAuthority, callbackContext context.Context, candidate goidc.HumanRefreshDeliveryAbortInput) (goidc.HumanRefreshDeliveryAbortDecision, error) {
+			return authority.AbortHumanRefreshDelivery(callbackContext, candidate)
+		},
+		func(candidate goidc.HumanRefreshDeliveryAbortInput, decision goidc.HumanRefreshDeliveryAbortDecision) bool {
+			return decision.Outcome() == goidc.HumanRefreshDeliveryAbortOutcomeRejected ||
 				decision.ClientID() == candidate.ClientID() &&
 					decision.ClientAssertionAuthority() == candidate.ClientAssertionAuthority()
 		})

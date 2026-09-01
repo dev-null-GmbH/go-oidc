@@ -375,8 +375,36 @@ eligible clients with
 server-owned `goidc.PrivateKeyJWTAuthority`; these fields cannot be selected
 through client metadata. The profile admits only simple PAR, an outer
 `client_id` plus `request_uri` authorization request, PKCE S256,
-`private_key_jwt` PS256, authorization-code redemption, refresh rotation, and
-refresh-token revocation.
+`private_key_jwt` PS256, authorization-code redemption, recoverable refresh
+delivery, and refresh-token revocation. The ordinary `refresh_token` grant at
+the token endpoint never consumes a strict Human refresh capability.
+
+Recurring refresh uses three fixed routes below the provider's
+`EndpointPrefix`. Every request is an exact
+`application/x-www-form-urlencoded` POST with a fresh `private_key_jwt`
+assertion, and every response is JSON with `Cache-Control: no-store` and
+`Pragma: no-cache`:
+
+- `HumanRefreshDeliveryPrepareRoute` accepts `refresh_token`,
+  `successor_refresh_token`, `delivery_receipt`, `client_id`,
+  `client_assertion_type`, and `client_assertion`. It leaves the predecessor
+  active and returns `delivery_pending`, `activated`, or `aborted` plus the
+  remaining original pending deadline.
+- `HumanRefreshDeliveryActivateRoute` accepts the successor, receipt, and
+  client-authentication fields. It atomically activates or exactly replays the
+  caller-owned successor before signing a fresh access token. The response
+  confirms that same successor and never extends the refresh-family deadline.
+- `HumanRefreshDeliveryAbortRoute` accepts the same fields as activation. It
+  returns `aborted`, or the terminal `activated_conflict` response when an
+  activated tuple cannot be rolled back.
+
+Clients generate 32 random bytes independently for the successor and receipt,
+encode them with unpadded base64url, and prepend `HumanRefreshTokenPrefix` or
+`HumanRefreshDeliveryReceiptPrefix`. The exported entropy/payload-size
+constants and constructors define the canonical framing. Keep predecessor,
+successor, and receipt durably encrypted until activation or confirmed abort;
+authority implementations store only purpose-separated digests and bindings,
+never their raw rendered values.
 
 `HumanAuthorizationAuthority` replaces the legacy authorization, PAR, grant,
 and refresh managers for this profile. Its methods must persist transitions
@@ -391,8 +419,9 @@ persistence honor that context; the library does not add a hidden fixed
 persistence timeout. Because the client profile is selected only after form
 decoding, enabling this flow applies a 56 KiB pre-parse limit to the shared
 PAR, POST authorization, token, and revocation endpoints, including co-hosted
-legacy or machine requests. Deploy a separate provider surface if another
-profile requires larger encoded forms.
+legacy or machine requests. The three refresh-delivery routes additionally
+enforce a 16 KiB pre-parse limit and exact field sets. Deploy a separate
+provider surface if another profile requires larger encoded forms.
 
 The interaction handlers derive their origin only from the configured issuer
 and the canonical request `Host`; they never trust forwarding headers. A

@@ -25,8 +25,8 @@ const (
 	humanBrowserReturnPrefix         = "d0_hio_c1_"
 	humanReadyCapabilityPrefix       = "d0_hio_s1_"
 	humanAuthorizationCodePrefix     = "d0_hac_1_"
-	humanRefreshCapabilityPrefix     = "d0_hrt_1_"
-	humanCapabilityPayloadBytes      = 43
+	humanRefreshCapabilityPrefix     = HumanRefreshTokenPrefix
+	humanCapabilityPayloadBytes      = HumanRefreshCapabilityPayloadBytes
 	maxHumanAuthorizationOpaqueBytes = 512
 	maxHumanAuthorizationURIBytes    = 512
 	maxHumanAuthorizationScopes      = 32
@@ -69,7 +69,27 @@ type HumanAuthorizationAuthority interface {
 	ConfirmBrowser(context.Context, HumanContinuationInput) (HumanContinuationDecision, error)
 	CompleteAuthorization(context.Context, HumanCompletionInput) (HumanCompletionDecision, error)
 	RedeemAuthorizationCode(context.Context, HumanCodeRedemptionInput) (HumanCodeRedemptionDecision, error)
-	RotateRefreshToken(context.Context, HumanRefreshRotationInput) (HumanRefreshRotationDecision, error)
+	// PrepareHumanRefreshDelivery creates or exactly replays one pending,
+	// client-generated successor while leaving the predecessor active.
+	PrepareHumanRefreshDelivery(
+		context.Context,
+		HumanRefreshDeliveryPrepareInput,
+	) (HumanRefreshDeliveryPrepareDecision, error)
+	// ActivateHumanRefreshDelivery atomically promotes the prepared successor
+	// and rotates its predecessor. Exact activated replays revalidate the active
+	// successor and return a fresh issuance snapshot so a lost response can be
+	// signed again safely. Replay must preserve the original absolute refresh-
+	// family deadline and remain available after the pending delivery deadline.
+	ActivateHumanRefreshDelivery(
+		context.Context,
+		HumanRefreshDeliveryActivateInput,
+	) (HumanRefreshDeliveryActivateDecision, error)
+	// AbortHumanRefreshDelivery terminally abandons a pending successor and
+	// leaves its predecessor active. It must never roll back activation.
+	AbortHumanRefreshDelivery(
+		context.Context,
+		HumanRefreshDeliveryAbortInput,
+	) (HumanRefreshDeliveryAbortDecision, error)
 	// RevokeRefreshToken atomically revokes the family selected by a refresh
 	// capability. Unknown, expired, already revoked, and client-mismatched
 	// capabilities are acknowledged with nil so the RFC 7009 response never
@@ -236,9 +256,10 @@ func (value HumanAuthorizationCode) Render() (string, error) {
 	return renderHumanCapability(value.state, humanAuthorizationCodePrefix)
 }
 
-// HumanRefreshToken is an authority-minted, one-use refresh capability.
-// Render is the sole raw transport accessor. Every successful rotation must
-// replace it with a new capability before returning.
+// HumanRefreshToken is a purpose-separated refresh capability. Initial values
+// are authority-minted; recoverable delivery successors are client-generated.
+// Render is the sole raw transport accessor. Authorities must store only a
+// purpose-separated digest of the rendered value.
 type HumanRefreshToken struct {
 	humanAuthorizationRedaction
 	state *humanRenderedValueState
@@ -1191,65 +1212,6 @@ func (decision HumanCodeRedemptionDecision) ExpiresAt() int64 {
 	return decision.state.expiresAt
 }
 
-// HumanRefreshRotationInputConfig binds a one-use refresh capability to the
-// freshly authenticated confidential client authority at the token endpoint.
-type HumanRefreshRotationInputConfig struct {
-	RefreshToken             HumanRefreshToken
-	ClientID                 string
-	ClientAssertionAuthority VerifiedClientAssertionAuthority
-}
-
-type humanRefreshRotationInputState struct {
-	refreshToken             HumanRefreshToken
-	clientID                 string
-	clientAssertionAuthority VerifiedClientAssertionAuthority
-}
-
-// HumanRefreshRotationInput is the sealed input to atomic refresh rotation.
-// Unsupported refresh grant parameters have no representation in this type.
-type HumanRefreshRotationInput struct {
-	humanAuthorizationRedaction
-	state *humanRefreshRotationInputState
-}
-
-func NewHumanRefreshRotationInput(config HumanRefreshRotationInputConfig) (HumanRefreshRotationInput, error) {
-	input := HumanRefreshRotationInput{state: &humanRefreshRotationInputState{
-		refreshToken: config.RefreshToken, clientID: config.ClientID,
-		clientAssertionAuthority: config.ClientAssertionAuthority,
-	}}
-	if !input.Valid() {
-		return HumanRefreshRotationInput{}, ErrInvalidHumanAuthorizationValue
-	}
-	return input, nil
-}
-
-func (input HumanRefreshRotationInput) Valid() bool {
-	return input.state != nil && input.state.refreshToken.Valid() &&
-		validHumanClientID(input.state.clientID) &&
-		validHumanClientAssertionAuthority(input.state.clientAssertionAuthority)
-}
-
-func (input HumanRefreshRotationInput) RefreshToken() HumanRefreshToken {
-	if input.state == nil {
-		return HumanRefreshToken{}
-	}
-	return input.state.refreshToken
-}
-
-func (input HumanRefreshRotationInput) ClientID() string {
-	if input.state == nil {
-		return ""
-	}
-	return input.state.clientID
-}
-
-func (input HumanRefreshRotationInput) ClientAssertionAuthority() VerifiedClientAssertionAuthority {
-	if input.state == nil {
-		return VerifiedClientAssertionAuthority{}
-	}
-	return input.state.clientAssertionAuthority
-}
-
 // HumanRefreshRevocationInputConfig binds an RFC 7009 refresh-family
 // revocation to the freshly authenticated confidential client authority.
 type HumanRefreshRevocationInputConfig struct {
@@ -1309,238 +1271,6 @@ func (input HumanRefreshRevocationInput) ClientAssertionAuthority() VerifiedClie
 		return VerifiedClientAssertionAuthority{}
 	}
 	return input.state.clientAssertionAuthority
-}
-
-// HumanRefreshRotationOutcome deliberately collapses replay, expiry,
-// revocation, inactive identity state, and client-authority mismatch into one
-// protocol rejection.
-type HumanRefreshRotationOutcome string
-
-const (
-	HumanRefreshRotationOutcomeRotated  HumanRefreshRotationOutcome = "rotated"
-	HumanRefreshRotationOutcomeRejected HumanRefreshRotationOutcome = "rejected"
-)
-
-// HumanRefreshRotationDecisionConfig contains an authority-owned successor and
-// a short-lived immutable issuance snapshot. RefreshTokenExpiresAt is the
-// refresh family's absolute deadline and is independent from ExpiresAt, which
-// bounds only the freshness of this access-token issuance decision.
-type HumanRefreshRotationDecisionConfig struct {
-	Outcome                  HumanRefreshRotationOutcome
-	RefreshToken             HumanRefreshToken
-	RefreshTokenExpiresAt    int64
-	GrantID                  string
-	Subject                  string
-	OrganizationID           string
-	MembershipID             string
-	MembershipRevision       int64
-	ClientID                 string
-	ClientAssertionAuthority VerifiedClientAssertionAuthority
-	Scopes                   []string
-	Resources                []string
-	AuthenticationTime       int64
-	AuthenticationContext    string
-	AuthenticationMethods    []string
-	CreatedAt                int64
-	ExpiresAt                int64
-}
-
-type humanRefreshRotationDecisionState struct {
-	outcome                  HumanRefreshRotationOutcome
-	refreshToken             HumanRefreshToken
-	refreshTokenExpiresAt    int64
-	grantID                  string
-	subject                  string
-	organizationID           string
-	membershipID             string
-	membershipRevision       int64
-	clientID                 string
-	clientAssertionAuthority VerifiedClientAssertionAuthority
-	scopes                   []string
-	resources                []string
-	authenticationTime       int64
-	authenticationContext    string
-	authenticationMethods    []string
-	createdAt                int64
-	expiresAt                int64
-}
-
-// HumanRefreshRotationDecision is returned only after the authority has
-// atomically consumed the presented token and installed its successor.
-type HumanRefreshRotationDecision struct {
-	humanAuthorizationRedaction
-	state *humanRefreshRotationDecisionState
-}
-
-func NewHumanRefreshRotationDecision(
-	config HumanRefreshRotationDecisionConfig,
-) (HumanRefreshRotationDecision, error) {
-	decision := HumanRefreshRotationDecision{state: &humanRefreshRotationDecisionState{
-		outcome: config.Outcome, refreshToken: config.RefreshToken,
-		refreshTokenExpiresAt: config.RefreshTokenExpiresAt,
-		grantID:               config.GrantID, subject: config.Subject,
-		organizationID: config.OrganizationID, membershipID: config.MembershipID,
-		membershipRevision: config.MembershipRevision, clientID: config.ClientID,
-		clientAssertionAuthority: config.ClientAssertionAuthority,
-		scopes:                   slices.Clone(config.Scopes), resources: slices.Clone(config.Resources),
-		authenticationTime:    config.AuthenticationTime,
-		authenticationContext: config.AuthenticationContext,
-		authenticationMethods: slices.Clone(config.AuthenticationMethods),
-		createdAt:             config.CreatedAt, expiresAt: config.ExpiresAt,
-	}}
-	if !decision.Valid() {
-		return HumanRefreshRotationDecision{}, ErrInvalidHumanAuthorizationValue
-	}
-	return decision, nil
-}
-
-func (decision HumanRefreshRotationDecision) Valid() bool {
-	if decision.state == nil {
-		return false
-	}
-	state := decision.state
-	if state.outcome == HumanRefreshRotationOutcomeRejected {
-		return !state.refreshToken.Valid() && state.refreshTokenExpiresAt == 0 &&
-			state.grantID == "" && state.subject == "" && state.organizationID == "" &&
-			state.membershipID == "" && state.membershipRevision == 0 && state.clientID == "" &&
-			state.clientAssertionAuthority == (VerifiedClientAssertionAuthority{}) &&
-			len(state.scopes) == 0 && len(state.resources) == 0 && state.authenticationTime == 0 &&
-			state.authenticationContext == "" && len(state.authenticationMethods) == 0 &&
-			state.createdAt == 0 && state.expiresAt == 0
-	}
-	return state.outcome == HumanRefreshRotationOutcomeRotated && state.refreshToken.Valid() &&
-		validHumanRefreshTokenExpiry(state.createdAt, state.refreshTokenExpiresAt) &&
-		humanAuthorizationHandlePattern.MatchString(state.grantID) &&
-		validHumanOpaqueParameter(state.subject) && validHumanClientID(state.clientID) &&
-		humanAuthorizationHandlePattern.MatchString(state.organizationID) &&
-		humanAuthorizationHandlePattern.MatchString(state.membershipID) && state.membershipRevision > 0 &&
-		validHumanClientAssertionAuthority(state.clientAssertionAuthority) &&
-		validHumanStringSet(state.scopes, maxHumanAuthorizationScopes, humanAuthorizationScopePattern.MatchString) &&
-		slices.Contains(state.scopes, ScopeOpenID.ID) && slices.Contains(state.scopes, ScopeOfflineAccess.ID) &&
-		validHumanStringSet(state.resources, maxHumanAuthorizationResources, validHumanAbsoluteHTTPSURI) &&
-		state.authenticationTime > 0 && state.authenticationTime <= state.createdAt &&
-		humanAuthorizationAssurancePattern.MatchString(state.authenticationContext) &&
-		validHumanStringSet(state.authenticationMethods, 8, humanAuthorizationMethodPattern.MatchString) &&
-		state.createdAt > 0 && state.expiresAt > state.createdAt && state.expiresAt-state.createdAt <= 600
-}
-
-func (decision HumanRefreshRotationDecision) Outcome() HumanRefreshRotationOutcome {
-	if decision.state == nil {
-		return ""
-	}
-	return decision.state.outcome
-}
-
-func (decision HumanRefreshRotationDecision) RefreshToken() (HumanRefreshToken, bool) {
-	if decision.state == nil || !decision.state.refreshToken.Valid() {
-		return HumanRefreshToken{}, false
-	}
-	return decision.state.refreshToken, true
-}
-
-func (decision HumanRefreshRotationDecision) RefreshTokenExpiresAt() int64 {
-	if decision.state == nil {
-		return 0
-	}
-	return decision.state.refreshTokenExpiresAt
-}
-
-func (decision HumanRefreshRotationDecision) GrantID() string {
-	if decision.state == nil {
-		return ""
-	}
-	return decision.state.grantID
-}
-
-func (decision HumanRefreshRotationDecision) Subject() string {
-	if decision.state == nil {
-		return ""
-	}
-	return decision.state.subject
-}
-
-func (decision HumanRefreshRotationDecision) OrganizationID() string {
-	if decision.state == nil {
-		return ""
-	}
-	return decision.state.organizationID
-}
-
-func (decision HumanRefreshRotationDecision) MembershipID() string {
-	if decision.state == nil {
-		return ""
-	}
-	return decision.state.membershipID
-}
-
-func (decision HumanRefreshRotationDecision) MembershipRevision() int64 {
-	if decision.state == nil {
-		return 0
-	}
-	return decision.state.membershipRevision
-}
-
-func (decision HumanRefreshRotationDecision) ClientID() string {
-	if decision.state == nil {
-		return ""
-	}
-	return decision.state.clientID
-}
-
-func (decision HumanRefreshRotationDecision) ClientAssertionAuthority() VerifiedClientAssertionAuthority {
-	if decision.state == nil {
-		return VerifiedClientAssertionAuthority{}
-	}
-	return decision.state.clientAssertionAuthority
-}
-
-func (decision HumanRefreshRotationDecision) Scopes() []string {
-	if decision.state == nil {
-		return nil
-	}
-	return slices.Clone(decision.state.scopes)
-}
-
-func (decision HumanRefreshRotationDecision) Resources() []string {
-	if decision.state == nil {
-		return nil
-	}
-	return slices.Clone(decision.state.resources)
-}
-
-func (decision HumanRefreshRotationDecision) AuthenticationTime() int64 {
-	if decision.state == nil {
-		return 0
-	}
-	return decision.state.authenticationTime
-}
-
-func (decision HumanRefreshRotationDecision) AuthenticationContext() string {
-	if decision.state == nil {
-		return ""
-	}
-	return decision.state.authenticationContext
-}
-
-func (decision HumanRefreshRotationDecision) AuthenticationMethods() []string {
-	if decision.state == nil {
-		return nil
-	}
-	return slices.Clone(decision.state.authenticationMethods)
-}
-
-func (decision HumanRefreshRotationDecision) CreatedAt() int64 {
-	if decision.state == nil {
-		return 0
-	}
-	return decision.state.createdAt
-}
-
-func (decision HumanRefreshRotationDecision) ExpiresAt() int64 {
-	if decision.state == nil {
-		return 0
-	}
-	return decision.state.expiresAt
 }
 
 func validHumanRefreshTokenExpiry(createdAt, refreshTokenExpiresAt int64) bool {

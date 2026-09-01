@@ -467,8 +467,14 @@ func (humanAuthorizationAuthorityProviderStub) CompleteAuthorization(context.Con
 func (humanAuthorizationAuthorityProviderStub) RedeemAuthorizationCode(context.Context, goidc.HumanCodeRedemptionInput) (goidc.HumanCodeRedemptionDecision, error) {
 	return goidc.HumanCodeRedemptionDecision{}, nil
 }
-func (humanAuthorizationAuthorityProviderStub) RotateRefreshToken(context.Context, goidc.HumanRefreshRotationInput) (goidc.HumanRefreshRotationDecision, error) {
-	return goidc.HumanRefreshRotationDecision{}, nil
+func (humanAuthorizationAuthorityProviderStub) PrepareHumanRefreshDelivery(context.Context, goidc.HumanRefreshDeliveryPrepareInput) (goidc.HumanRefreshDeliveryPrepareDecision, error) {
+	return goidc.HumanRefreshDeliveryPrepareDecision{}, nil
+}
+func (humanAuthorizationAuthorityProviderStub) ActivateHumanRefreshDelivery(context.Context, goidc.HumanRefreshDeliveryActivateInput) (goidc.HumanRefreshDeliveryActivateDecision, error) {
+	return goidc.HumanRefreshDeliveryActivateDecision{}, nil
+}
+func (humanAuthorizationAuthorityProviderStub) AbortHumanRefreshDelivery(context.Context, goidc.HumanRefreshDeliveryAbortInput) (goidc.HumanRefreshDeliveryAbortDecision, error) {
+	return goidc.HumanRefreshDeliveryAbortDecision{}, nil
 }
 func (humanAuthorizationAuthorityProviderStub) RevokeRefreshToken(context.Context, goidc.HumanRefreshRevocationInput) error {
 	return nil

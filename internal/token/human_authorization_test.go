@@ -816,12 +816,16 @@ func (manager *humanTokenGrantManagerSpy) Grant(context.Context, string) (*goidc
 }
 
 type humanTokenAuthorityStub struct {
-	redeem      func(context.Context, goidc.HumanCodeRedemptionInput) (goidc.HumanCodeRedemptionDecision, error)
-	redeemCalls int
-	rotate      func(context.Context, goidc.HumanRefreshRotationInput) (goidc.HumanRefreshRotationDecision, error)
-	rotateCalls int
-	revoke      func(context.Context, goidc.HumanRefreshRevocationInput) error
-	revokeCalls int
+	redeem        func(context.Context, goidc.HumanCodeRedemptionInput) (goidc.HumanCodeRedemptionDecision, error)
+	redeemCalls   int
+	prepare       func(context.Context, goidc.HumanRefreshDeliveryPrepareInput) (goidc.HumanRefreshDeliveryPrepareDecision, error)
+	prepareCalls  int
+	activate      func(context.Context, goidc.HumanRefreshDeliveryActivateInput) (goidc.HumanRefreshDeliveryActivateDecision, error)
+	activateCalls int
+	abort         func(context.Context, goidc.HumanRefreshDeliveryAbortInput) (goidc.HumanRefreshDeliveryAbortDecision, error)
+	abortCalls    int
+	revoke        func(context.Context, goidc.HumanRefreshRevocationInput) error
+	revokeCalls   int
 }
 
 func (*humanTokenAuthorityStub) StorePAR(context.Context, goidc.HumanPARInput) (goidc.HumanPARDecision, error) {
@@ -846,15 +850,35 @@ func (authority *humanTokenAuthorityStub) RedeemAuthorizationCode(
 	}
 	return authority.redeem(ctx, input)
 }
-func (authority *humanTokenAuthorityStub) RotateRefreshToken(
+func (authority *humanTokenAuthorityStub) PrepareHumanRefreshDelivery(
 	ctx context.Context,
-	input goidc.HumanRefreshRotationInput,
-) (goidc.HumanRefreshRotationDecision, error) {
-	authority.rotateCalls++
-	if authority.rotate == nil {
-		panic("unexpected RotateRefreshToken")
+	input goidc.HumanRefreshDeliveryPrepareInput,
+) (goidc.HumanRefreshDeliveryPrepareDecision, error) {
+	authority.prepareCalls++
+	if authority.prepare == nil {
+		panic("unexpected PrepareHumanRefreshDelivery")
 	}
-	return authority.rotate(ctx, input)
+	return authority.prepare(ctx, input)
+}
+func (authority *humanTokenAuthorityStub) ActivateHumanRefreshDelivery(
+	ctx context.Context,
+	input goidc.HumanRefreshDeliveryActivateInput,
+) (goidc.HumanRefreshDeliveryActivateDecision, error) {
+	authority.activateCalls++
+	if authority.activate == nil {
+		panic("unexpected ActivateHumanRefreshDelivery")
+	}
+	return authority.activate(ctx, input)
+}
+func (authority *humanTokenAuthorityStub) AbortHumanRefreshDelivery(
+	ctx context.Context,
+	input goidc.HumanRefreshDeliveryAbortInput,
+) (goidc.HumanRefreshDeliveryAbortDecision, error) {
+	authority.abortCalls++
+	if authority.abort == nil {
+		panic("unexpected AbortHumanRefreshDelivery")
+	}
+	return authority.abort(ctx, input)
 }
 func (authority *humanTokenAuthorityStub) RevokeRefreshToken(
 	ctx context.Context,
