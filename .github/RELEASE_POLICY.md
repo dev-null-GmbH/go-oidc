@@ -13,7 +13,11 @@ exposed a permission-filtered GitHub REST field. The `.2` preparation passed
 qualification, governance, payload generation, attestations, and staged-asset
 verification, then failed before draft creation because the release CLI tried
 to discover a repository outside a checkout. Both tags are retained and
-retracted rather than moved or deleted. The first publishable release based on
+retracted rather than moved or deleted. The `.7` preparation passed read-only
+qualification, then failed before draft creation because the nested VCI module
+still declared the prior fork version and the SBOM generator correctly rejected
+that mismatched local replacement. That tag is also retained and retracted; the
+correction is `v0.25.1-d0.8`. The first publishable release based on
 upstream `v0.25.0` is `v0.25.1-d0.3`. The fork has a distinct module path, so
 it does not collide with upstream under Minimal Version Selection. However,
 `v0.25.1-d0.3` is a prerelease, while the copied upstream `v0.25.0` tag is
