@@ -3,6 +3,7 @@ module github.com/dev-null-GmbH/go-oidc
 go 1.26.6
 
 retract (
+	v0.25.1-d0.7 // Draft preparation failed; use v0.25.1-d0.8.
 	v0.25.1-d0.2 // Draft creation failed; use v0.25.1-d0.3.
 	v0.25.1-d0.1 // Governance audit failed; use v0.25.1-d0.3.
 )
