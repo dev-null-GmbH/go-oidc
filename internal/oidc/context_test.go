@@ -1624,7 +1624,7 @@ type testSigner struct {
 }
 
 func (s testSigner) Public() crypto.PublicKey {
-	return s.signer.PublicKey
+	return s.signer.Public()
 }
 
 func (s testSigner) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {

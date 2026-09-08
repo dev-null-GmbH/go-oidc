@@ -5,14 +5,14 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 suite_dir="${1:-$repo_root/conformance-suite}"
 
-readonly expected_commit="321bc5bc53601b9690b54c023c0cbfac0f0230f2"
+readonly expected_commit="ab35a8df4864da35b49eff11483e204e01aa7961"
 readonly expected_requirements_sha256="05176cbcaf1a221a8943f8534d14d70c45237b3f28d055f3a55d0633d63a3085"
 readonly expected_nginx_dockerfile_sha256="25c8f9a1cff410eaccfe98c460e96adb5e772d0cf1f20f9d1bb02815e7ed9f20"
 readonly expected_server_dockerfile_sha256="bf8149a12accc809d2d55f6faf67859dbb59340076bb5819efd21343d5d53035"
-readonly pinned_nginx_dockerfile_sha256="ca80ada40974398576c2f8f0e17466023f368f0eaa3c0d7ef1939002b0e6eb95"
-readonly pinned_server_dockerfile_sha256="37969f1def503093970455de848c2b115483149f0ea160f98d614f29eb80d9e3"
-readonly nginx_image="nginx:1.27.3@sha256:bc2f6a7c8ddbccf55bdb19659ce3b0a92ca6559e86d42677a5a02ef6bda2fcef"
-readonly temurin_image="eclipse-temurin:21@sha256:efd34b940f2d5a621605c8531c2afb7759c936b6c2ef637a69aa3bf3e1e789d1"
+readonly pinned_nginx_dockerfile_sha256="3282bc953da1148d1b8cb9f2bb3f532f8e8e22699a6827c2126aa4843f9393a1"
+readonly pinned_server_dockerfile_sha256="c5b560e429286131f89f5c6261b757a71d4cb891e765532f83b1b55fba9c9761"
+readonly nginx_image="nginx:1.31.5@sha256:05b8cb60c354a44ab824ea6e7dc69b46d50762cdbe728a347a5b656e6fb3d7c4"
+readonly temurin_image="eclipse-temurin:21@sha256:85f00967bcc624fc19fa9c2cf124ea426a5363898e267141726f31f358c2e14b"
 
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then

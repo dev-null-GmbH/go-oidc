@@ -1,6 +1,6 @@
 module github.com/dev-null-GmbH/go-oidc
 
-go 1.26.6
+go 1.27.1
 
 retract (
 	v0.25.1-d0.7 // Draft preparation failed; use v0.25.1-d0.8.
@@ -9,7 +9,7 @@ retract (
 )
 
 require (
-	github.com/go-jose/go-jose/v4 v4.1.4
+	github.com/go-jose/go-jose/v4 v4.1.5
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
 )
