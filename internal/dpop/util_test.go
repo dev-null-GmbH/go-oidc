@@ -748,7 +748,7 @@ func TestJWT_NonCanonical(t *testing.T) {
 	ctx := oidc.Context{
 		Request: &http.Request{Header: map[string][]string{}},
 	}
-	ctx.Request.Header.Set("dpOp", "dpop_jwt")
+	ctx.Request.Header.Set("dpOp", "dpop_jwt") //nolint:canonicalheader // Exercise noncanonical input.
 
 	// When.
 	dpopJWT, ok := dpop.JWT(ctx)
@@ -786,7 +786,7 @@ func TestJWT_MoreThanOneValue(t *testing.T) {
 		Request: &http.Request{Header: map[string][]string{}},
 	}
 	ctx.Request.Header.Add(goidc.HeaderDPoP, "dpop_jwt")
-	ctx.Request.Header.Add("dpOp", "dpop_jwt")
+	ctx.Request.Header.Add("dpOp", "dpop_jwt") //nolint:canonicalheader // Reject duplicates with mixed casing.
 
 	// When.
 	_, ok := dpop.JWT(ctx)

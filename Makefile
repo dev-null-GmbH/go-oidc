@@ -1,8 +1,8 @@
-CS_VERSION = release-v5.2.2
-CS_COMMIT = 321bc5bc53601b9690b54c023c0cbfac0f0230f2
-CS_MAVEN_IMAGE = maven:3.9.16-eclipse-temurin-21@sha256:c07f7ccfb8ca6c9fa29ee523f00afa7d2ca6132c92f8652c4aebb5ee3491f502
-GOLANGCI_LINT_VERSION = v2.12.2
-PKGSITE_VERSION = v0.3.0
+CS_VERSION = release-v5.2.4
+CS_COMMIT = ab35a8df4864da35b49eff11483e204e01aa7961
+CS_MAVEN_IMAGE = maven:3.9.16-eclipse-temurin-21@sha256:8f6ac126f7810bb5549c4cd122d2bf0e9cda5bdeb0838aa928f09e779fd8bef8
+GOLANGCI_LINT_VERSION = v2.13.2
+PKGSITE_VERSION = v0.4.0
 
 setup-dev:
 	@make setup-cs
