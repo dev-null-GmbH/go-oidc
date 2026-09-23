@@ -23,7 +23,7 @@ const (
 	humanConsumeInteractionPath = "/oidc/interaction/consume"
 )
 
-func TestHumanBrowserInteractionGETIsInertAndMintsFreshSuccessor(t *testing.T) {
+func TestHumanBrowserInteractionGETMintsFreshSuccessorForOneNativePOST(t *testing.T) {
 	t.Parallel()
 
 	ctx, _, _ := newStrictOuterAuthorizationContext(t)
@@ -47,13 +47,20 @@ func TestHumanBrowserInteractionGETIsInertAndMintsFreshSuccessor(t *testing.T) {
 		if !strings.Contains(body, `action="/oidc/interaction/browser"`) ||
 			!strings.Contains(body, `<meta name="referrer" content="same-origin">`) ||
 			!strings.Contains(body, `name="identity_return" value=""`) ||
-			!strings.Contains(body, "event.isTrusted") ||
+			!strings.Contains(body, `^d0_hio_r1_[A-Za-z0-9_-]{43}$`) ||
+			!strings.Contains(body, "form.submit()") ||
+			!strings.Contains(body, `addEventListener("pagehide"`) ||
+			strings.Contains(body, `<button`) || strings.Contains(body, "fetch(") ||
 			strings.Contains(body, "localStorage") || strings.Contains(body, "sessionStorage") ||
 			strings.Contains(body, "http://") || strings.Contains(body, "https://") {
-			t.Fatalf("browser GET is not a closed inert page: %q", body)
+			t.Fatal("browser GET is not a closed native navigation page")
 		}
 		if strings.Index(body, `name="browser_return"`) > strings.Index(body, "location.hash") {
 			t.Fatal("browser successor was not generated before fragment handling script")
+		}
+		if strings.Index(body, "history.replaceState") > strings.Index(body, "form.submit()") ||
+			strings.Index(body, `^d0_hio_r1_[A-Za-z0-9_-]{43}$`) > strings.Index(body, "form.submit()") {
+			t.Fatal("browser form submits before fragment clearing or validation")
 		}
 	}
 	firstCapability := browserReturnFromPage(t, first.Body.String())
@@ -218,6 +225,35 @@ func TestHumanInteractionPOSTTransportRequiresCanonicalSameOriginReferer(t *test
 				issuer,
 			); got != test.want {
 				t.Fatalf("transport accepted = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestHumanInteractionAutomaticNavigationRequiresSameOriginMetadata(t *testing.T) {
+	t.Parallel()
+	const issuer = "https://auth.d0.eu"
+	for _, path := range []string{humanBrowserInteractionPath, humanConsumeInteractionPath} {
+		t.Run(path, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, issuer+path, strings.NewReader("ready=x"))
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			request.Header.Set("Origin", issuer)
+			request.Header.Set("Referer", issuer+path)
+			request.Header.Set("Sec-Fetch-Dest", "document")
+			request.Header.Set("Sec-Fetch-Mode", "navigate")
+			request.Header.Set("Sec-Fetch-Site", "same-origin")
+			// Native form.submit() has no user activation, so Sec-Fetch-User is absent.
+			if !validHumanInteractionPOSTTransport(request, path, issuer) {
+				t.Fatal("same-origin automatic form navigation was rejected")
+			}
+			request.Header.Set("Sec-Fetch-Site", "cross-site")
+			if validHumanInteractionPOSTTransport(request, path, issuer) {
+				t.Fatal("cross-site automatic form navigation was accepted")
+			}
+			request.Header.Set("Sec-Fetch-Site", "same-origin")
+			request.Header.Set("Sec-Fetch-Mode", "cors")
+			if validHumanInteractionPOSTTransport(request, path, issuer) {
+				t.Fatal("fetch-style request was accepted as navigation")
 			}
 		})
 	}
@@ -498,10 +534,18 @@ func TestHumanConsumeInteractionGETKeepsReadyCapabilityOutOfDocument(t *testing.
 	if !strings.Contains(body, `action="/oidc/interaction/consume"`) ||
 		!strings.Contains(body, `<meta name="referrer" content="same-origin">`) ||
 		!strings.Contains(body, `name="ready" value=""`) ||
-		!strings.Contains(body, "event.isTrusted") || strings.Contains(body, "localStorage") ||
+		!strings.Contains(body, `^d0_hio_s1_[A-Za-z0-9_-]{43}$`) ||
+		!strings.Contains(body, "form.submit()") ||
+		!strings.Contains(body, `addEventListener("pagehide"`) ||
+		strings.Contains(body, `<button`) || strings.Contains(body, "fetch(") ||
+		strings.Contains(body, "localStorage") ||
 		strings.Contains(body, "sessionStorage") || strings.Contains(body, "http://") ||
 		strings.Contains(body, "https://") {
-		t.Fatalf("consume GET is not a closed inert page: %q", body)
+		t.Fatalf("consume GET is not a closed native navigation page: %q", body)
+	}
+	if strings.Index(body, "history.replaceState") > strings.Index(body, "form.submit()") ||
+		strings.Index(body, `^d0_hio_s1_[A-Za-z0-9_-]{43}$`) > strings.Index(body, "form.submit()") {
+		t.Fatal("consume form submits before fragment clearing or validation")
 	}
 }
 
