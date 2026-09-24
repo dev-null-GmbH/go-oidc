@@ -44,6 +44,7 @@ func TestHumanBrowserInteractionGETMintsFreshSuccessorForOneNativePOST(t *testin
 		assertHumanInteractionFormAction(t, response.Header(), "'self' https://id.d0.eu")
 		body := response.Body.String()
 		assertHumanInteractionCSPMatchesPageScript(t, response.Header(), body)
+		assertHumanInteractionCSPMatchesPageStyle(t, response.Header(), body)
 		if !strings.Contains(body, `action="/oidc/interaction/browser"`) ||
 			!strings.Contains(body, `<meta name="referrer" content="same-origin">`) ||
 			!strings.Contains(body, `name="identity_return" value=""`) ||
@@ -531,6 +532,7 @@ func TestHumanConsumeInteractionGETKeepsReadyCapabilityOutOfDocument(t *testing.
 	assertHumanInteractionFormAction(t, response.Header(), "'self' https://human-bff.example.invalid")
 	body := response.Body.String()
 	assertHumanInteractionCSPMatchesPageScript(t, response.Header(), body)
+	assertHumanInteractionCSPMatchesPageStyle(t, response.Header(), body)
 	if !strings.Contains(body, `action="/oidc/interaction/consume"`) ||
 		!strings.Contains(body, `<meta name="referrer" content="same-origin">`) ||
 		!strings.Contains(body, `name="ready" value=""`) ||
@@ -892,6 +894,30 @@ func assertHumanInteractionCSPMatchesPageScript(t *testing.T, header http.Header
 	}
 }
 
+func assertHumanInteractionCSPMatchesPageStyle(t *testing.T, header http.Header, body string) {
+	t.Helper()
+	match := regexp.MustCompile(`(?s)<style>(.*?)</style>`).FindStringSubmatch(body)
+	if len(match) != 2 {
+		t.Fatal("interaction page style missing")
+	}
+	digest := sha256.Sum256([]byte(match[1]))
+	want := "'sha256-" + base64.StdEncoding.EncodeToString(digest[:]) + "'"
+	if got := cspDirective(header.Get("Content-Security-Policy"), "style-src"); got != want {
+		t.Fatalf("style-src = %q, want exact page style hash %q", got, want)
+	}
+}
+
+func cspDirective(policy, name string) string {
+	for _, directive := range strings.Split(policy, ";") {
+		directive = strings.TrimSpace(directive)
+		got, value, ok := strings.Cut(directive, " ")
+		if ok && got == name {
+			return value
+		}
+	}
+	return ""
+}
+
 func assertHumanInteractionFormAction(t *testing.T, header http.Header, want string) {
 	t.Helper()
 	directives := make(map[string]string)
@@ -911,7 +937,6 @@ func assertHumanInteractionFormAction(t *testing.T, header http.Header, want str
 	}
 	fixed := map[string]string{
 		"default-src":     "'none'",
-		"style-src":       "'none'",
 		"img-src":         "'none'",
 		"font-src":        "'none'",
 		"media-src":       "'none'",
@@ -920,13 +945,17 @@ func assertHumanInteractionFormAction(t *testing.T, header http.Header, want str
 		"base-uri":        "'none'",
 		"frame-ancestors": "'none'",
 	}
-	if len(directives) != len(fixed)+2 {
-		t.Fatalf("CSP directive count = %d, want %d", len(directives), len(fixed)+2)
+	if len(directives) != len(fixed)+3 {
+		t.Fatalf("CSP directive count = %d, want %d", len(directives), len(fixed)+3)
 	}
 	for name, value := range fixed {
 		if directives[name] != value {
 			t.Fatalf("%s = %q, want %q", name, directives[name], value)
 		}
+	}
+	style := directives["style-src"]
+	if style != "'none'" && (!strings.HasPrefix(style, "'sha256-") || !strings.HasSuffix(style, "'")) {
+		t.Fatalf("style-src = %q, want none or one SHA-256 source", style)
 	}
 	if script := directives["script-src"]; script != "'none'" &&
 		(!strings.HasPrefix(script, "'sha256-") || !strings.HasSuffix(script, "'")) {
