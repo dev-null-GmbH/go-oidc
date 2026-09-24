@@ -16,7 +16,7 @@ concurrency:
 jobs:
   qualify:
     name: Read-only release qualification
-    runs-on: ubuntu-24.04
+    runs-on: d0-trusted
     timeout-minutes: 20
     permissions:
       actions: read
@@ -167,7 +167,7 @@ jobs:
     name: Prepare draft release
     needs: qualify
     if: needs.qualify.outputs.operation == 'prepare'
-    runs-on: ubuntu-24.04
+    runs-on: d0-trusted
     timeout-minutes: 30
     permissions:
       actions: read
@@ -336,7 +336,7 @@ jobs:
     name: Verify and publish draft release
     needs: qualify
     if: needs.qualify.outputs.operation == 'publish'
-    runs-on: ubuntu-24.04
+    runs-on: d0-trusted
     timeout-minutes: 30
     environment: governed-release
     permissions:

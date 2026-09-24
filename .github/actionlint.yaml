@@ -1,0 +1,4 @@
+self-hosted-runner:
+  labels:
+    - d0-trusted
+    - d0-untrusted

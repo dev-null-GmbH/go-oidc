@@ -24,7 +24,11 @@ env:
 jobs:
   prepare-suite:
     name: Prime conformance dependency cache
-    runs-on: ubuntu-24.04
+    runs-on: >-
+      ${{ github.repository == 'dev-null-GmbH/go-oidc' &&
+          github.ref == 'refs/heads/main' &&
+          github.event_name != 'pull_request' &&
+          'd0-trusted' || 'd0-untrusted' }}
     timeout-minutes: 30
     steps:
       - name: Check out repository
@@ -116,7 +120,11 @@ jobs:
 
   run-tests:
     name: ${{ matrix.profile }}
-    runs-on: ubuntu-24.04
+    runs-on: >-
+      ${{ github.repository == 'dev-null-GmbH/go-oidc' &&
+          github.ref == 'refs/heads/main' &&
+          github.event_name != 'pull_request' &&
+          'd0-trusted' || 'd0-untrusted' }}
     timeout-minutes: 60
     needs: prepare-suite
 
@@ -323,7 +331,11 @@ jobs:
 
   all-tests-succeeded:
     name: All conformance profiles passed
-    runs-on: ubuntu-24.04
+    runs-on: >-
+      ${{ github.repository == 'dev-null-GmbH/go-oidc' &&
+          github.ref == 'refs/heads/main' &&
+          github.event_name != 'pull_request' &&
+          'd0-trusted' || 'd0-untrusted' }}
     timeout-minutes: 5
     needs: run-tests
     if: always()

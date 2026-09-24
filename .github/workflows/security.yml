@@ -20,7 +20,7 @@ jobs:
   dependency-review:
     name: Dependency review
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: d0-untrusted
     timeout-minutes: 10
     steps:
       - name: Check out repository
@@ -38,7 +38,11 @@ jobs:
 
   govulncheck:
     name: Go vulnerability analysis
-    runs-on: ubuntu-24.04
+    runs-on: >-
+      ${{ github.repository == 'dev-null-GmbH/go-oidc' &&
+          github.ref == 'refs/heads/main' &&
+          github.event_name != 'pull_request' &&
+          'd0-trusted' || 'd0-untrusted' }}
     timeout-minutes: 15
     steps:
       - name: Check out repository
@@ -64,7 +68,11 @@ jobs:
 
   vci-govulncheck:
     name: Nested VCI vulnerability analysis
-    runs-on: ubuntu-24.04
+    runs-on: >-
+      ${{ github.repository == 'dev-null-GmbH/go-oidc' &&
+          github.ref == 'refs/heads/main' &&
+          github.event_name != 'pull_request' &&
+          'd0-trusted' || 'd0-untrusted' }}
     timeout-minutes: 15
     defaults:
       run:
