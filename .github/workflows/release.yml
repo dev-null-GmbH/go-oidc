@@ -16,7 +16,7 @@ concurrency:
 jobs:
   qualify:
     name: Read-only release qualification
-    runs-on: ubuntu-24.04
+    runs-on: d0-trusted
     timeout-minutes: 20
     permissions:
       actions: read
@@ -89,6 +89,13 @@ jobs:
           path: trusted
           persist-credentials: false
           ref: ${{ github.sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: trusted/go.mod
+          cache-dependency-path: trusted/go.sum
+          cache: true
 
       - name: Verify trusted workflow source
         env:
@@ -167,7 +174,7 @@ jobs:
     name: Prepare draft release
     needs: qualify
     if: needs.qualify.outputs.operation == 'prepare'
-    runs-on: ubuntu-24.04
+    runs-on: d0-trusted
     timeout-minutes: 30
     permissions:
       actions: read
@@ -336,7 +343,7 @@ jobs:
     name: Verify and publish draft release
     needs: qualify
     if: needs.qualify.outputs.operation == 'publish'
-    runs-on: ubuntu-24.04
+    runs-on: d0-trusted
     timeout-minutes: 30
     environment: governed-release
     permissions:

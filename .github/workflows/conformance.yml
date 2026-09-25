@@ -24,13 +24,23 @@ env:
 jobs:
   prepare-suite:
     name: Prime conformance dependency cache
-    runs-on: ubuntu-24.04
+    runs-on: >-
+      ${{ github.repository == 'dev-null-GmbH/go-oidc' &&
+          github.ref == 'refs/heads/main' &&
+          github.event_name != 'pull_request' &&
+          'd0-trusted' || 'd0-untrusted' }}
     timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -116,7 +126,11 @@ jobs:
 
   run-tests:
     name: ${{ matrix.profile }}
-    runs-on: ubuntu-24.04
+    runs-on: >-
+      ${{ github.repository == 'dev-null-GmbH/go-oidc' &&
+          github.ref == 'refs/heads/main' &&
+          github.event_name != 'pull_request' &&
+          'd0-trusted' || 'd0-untrusted' }}
     timeout-minutes: 60
     needs: prepare-suite
 
@@ -264,7 +278,7 @@ jobs:
         run: |
           set -euo pipefail
           go_binary="$(go env GOROOT)/bin/go"
-          sudo "$go_binary" run \
+          "$go_binary" run \
             "examples/${PROFILE_FOLDER}/main.go" \
             > "$RUNNER_TEMP/auth-server.log" 2>&1 &
           printf '%s\n' "$!" > "$RUNNER_TEMP/auth-server.pid"
@@ -317,13 +331,17 @@ jobs:
         run: |
           if [[ -f "$RUNNER_TEMP/auth-server.pid" ]]; then
             IFS= read -r auth_server_pid < "$RUNNER_TEMP/auth-server.pid"
-            sudo kill "$auth_server_pid" 2>/dev/null || true
+            kill "$auth_server_pid" 2>/dev/null || true
           fi
           docker compose down --volumes --remove-orphans
 
   all-tests-succeeded:
     name: All conformance profiles passed
-    runs-on: ubuntu-24.04
+    runs-on: >-
+      ${{ github.repository == 'dev-null-GmbH/go-oidc' &&
+          github.ref == 'refs/heads/main' &&
+          github.event_name != 'pull_request' &&
+          'd0-trusted' || 'd0-untrusted' }}
     timeout-minutes: 5
     needs: run-tests
     if: always()

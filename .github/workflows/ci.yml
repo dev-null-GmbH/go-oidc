@@ -17,7 +17,11 @@ concurrency:
 jobs:
   ci:
     name: Go quality gates
-    runs-on: ubuntu-24.04
+    runs-on: >-
+      ${{ github.repository == 'dev-null-GmbH/go-oidc' &&
+          github.ref == 'refs/heads/main' &&
+          github.event_name != 'pull_request' &&
+          'd0-trusted' || 'd0-untrusted' }}
     timeout-minutes: 30
 
     steps:
@@ -51,13 +55,10 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Test full module
-        run: go test -shuffle=on -count=1 ./...
-
-      - name: Test with race detector
+      - name: Test full module with race detector
         run: >-
           go test -race -shuffle=on -count=1 -covermode=atomic
-          -coverprofile=coverage.out ./pkg/... ./internal/...
+          -coverprofile=coverage.out ./...
 
       - name: Check coverage quality gate
         env:
@@ -87,7 +88,11 @@ jobs:
 
   vci-module:
     name: Nested VCI module
-    runs-on: ubuntu-24.04
+    runs-on: >-
+      ${{ github.repository == 'dev-null-GmbH/go-oidc' &&
+          github.ref == 'refs/heads/main' &&
+          github.event_name != 'pull_request' &&
+          'd0-trusted' || 'd0-untrusted' }}
     timeout-minutes: 20
     defaults:
       run:

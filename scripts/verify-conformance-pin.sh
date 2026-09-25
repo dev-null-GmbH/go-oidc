@@ -131,8 +131,8 @@ suite_start_line="$(
     .github/workflows/conformance.yml | cut -d: -f1
 )"
 server_start_line="$(
-  grep -nF 'sudo "$go_binary" run' .github/workflows/conformance.yml |
-    cut -d: -f1
+  grep -nE '^[[:space:]]*"\$go_binary" run[[:space:]]*\\$' \
+    .github/workflows/conformance.yml | cut -d: -f1 || true
 )"
 test_start_line="$(
   grep -nF 'run: make "cs-${{ matrix.profile }}-tests"' \
