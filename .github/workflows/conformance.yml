@@ -272,7 +272,7 @@ jobs:
         run: |
           set -euo pipefail
           go_binary="$(go env GOROOT)/bin/go"
-          sudo "$go_binary" run \
+          "$go_binary" run \
             "examples/${PROFILE_FOLDER}/main.go" \
             > "$RUNNER_TEMP/auth-server.log" 2>&1 &
           printf '%s\n' "$!" > "$RUNNER_TEMP/auth-server.pid"
@@ -325,7 +325,7 @@ jobs:
         run: |
           if [[ -f "$RUNNER_TEMP/auth-server.pid" ]]; then
             IFS= read -r auth_server_pid < "$RUNNER_TEMP/auth-server.pid"
-            sudo kill "$auth_server_pid" 2>/dev/null || true
+            kill "$auth_server_pid" 2>/dev/null || true
           fi
           docker compose down --volumes --remove-orphans
 
