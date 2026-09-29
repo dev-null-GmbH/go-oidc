@@ -541,7 +541,6 @@ jobs:
           for subject in "${provenance_subjects[@]}"; do
             gh attestation verify "$subject" \
               --bundle "$RUNNER_TEMP/release-assets/provenance.sigstore.json" \
-              --deny-self-hosted-runners \
               --repo "$GITHUB_REPOSITORY" \
               --signer-workflow "github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml" \
               --source-digest "$RELEASE_COMMIT" \
@@ -549,7 +548,6 @@ jobs:
           done
           gh attestation verify "$SOURCE_ARCHIVE" \
             --bundle "$RUNNER_TEMP/release-assets/sbom-attestation.sigstore.json" \
-            --deny-self-hosted-runners \
             --predicate-type "https://spdx.dev/Document/v2.3" \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml" \

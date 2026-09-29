@@ -5,10 +5,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -51,9 +54,12 @@ func TestHumanBrowserInteractionGETMintsFreshSuccessorForOneNativePOST(t *testin
 			!strings.Contains(body, `^d0_hio_r1_[A-Za-z0-9_-]{43}$`) ||
 			!strings.Contains(body, "form.submit()") ||
 			!strings.Contains(body, `addEventListener("pagehide"`) ||
+			!strings.Contains(body, `<a id="human-interaction-restart" href="https://human-bff.example.invalid/login" hidden>`) ||
+			!strings.Contains(body, `restart.hidden=false`) ||
+			strings.Count(body, `href="https://`) != 1 ||
 			strings.Contains(body, `<button`) || strings.Contains(body, "fetch(") ||
 			strings.Contains(body, "localStorage") || strings.Contains(body, "sessionStorage") ||
-			strings.Contains(body, "http://") || strings.Contains(body, "https://") {
+			strings.Contains(body, `src="https://`) {
 			t.Fatal("browser GET is not a closed native navigation page")
 		}
 		if strings.Index(body, `name="browser_return"`) > strings.Index(body, "location.hash") {
@@ -78,6 +84,57 @@ func TestHumanBrowserInteractionGETMintsFreshSuccessorForOneNativePOST(t *testin
 		t.Fatalf("browser GET with query status = %d, want 400", query.Code)
 	}
 	assertHumanInteractionSecurityHeaders(t, query.Header())
+}
+
+func TestHumanInteractionDesignFontIsSameOriginAndExact(t *testing.T) {
+	t.Parallel()
+
+	ctx, _, _ := newStrictOuterAuthorizationContext(t)
+	configureHumanInteractionTestContext(ctx)
+	router := http.NewServeMux()
+	RegisterHandlers(router, ctx.Configuration)
+	fontPath := humanInteractionFontRoute
+	response := serveHumanInteraction(t, router, http.MethodGet, fontPath, nil, nil)
+	if response.Code != http.StatusOK || !bytes.Equal(response.Body.Bytes(), humanDesignFont) ||
+		response.Header().Get("Content-Type") != "font/woff2" ||
+		response.Header().Get("X-Content-Type-Options") != "nosniff" ||
+		response.Header().Get("Cross-Origin-Resource-Policy") != "same-origin" ||
+		response.Header().Get("Content-Security-Policy") != "default-src 'none'" ||
+		response.Header().Get("Cache-Control") != "public, max-age=86400" ||
+		response.Header().Get("Set-Cookie") != "" {
+		t.Fatalf("font response status=%d headers=%v bytes=%d", response.Code, response.Header(), response.Body.Len())
+	}
+	if len(humanDesignFont) < 1000 || !strings.Contains(humanDesignStyle, "./recursive-latin-full-normal.woff2") ||
+		!strings.Contains(humanDesignStyle, ".d0-foundation") ||
+		!strings.HasPrefix(humanDesignLogo, "<svg ") {
+		t.Fatal("embedded d0 design assets are missing or inconsistent")
+	}
+	if got := serveHumanInteraction(t, router, http.MethodPost, fontPath, nil, nil); got.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("font POST status=%d, want 405", got.Code)
+	}
+	if got := serveHumanInteraction(t, router, http.MethodGet, fontPath+"?unexpected=1", nil, nil); got.Code != http.StatusNotFound {
+		t.Fatalf("font query status=%d, want 404", got.Code)
+	}
+	manifestBytes, err := os.ReadFile("assets/manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Files map[string]string `json:"files"`
+	}
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string][]byte{
+		"assets/d0.css":   []byte(humanDesignStyle),
+		"assets/logo.svg": []byte(humanDesignLogo),
+		"assets/recursive-latin-full-normal.woff2": humanDesignFont,
+	} {
+		digest := sha256.Sum256(content)
+		if got := hex.EncodeToString(digest[:]); got != manifest.Files[name] {
+			t.Fatalf("embedded %s hash = %s, manifest = %s", name, got, manifest.Files[name])
+		}
+	}
 }
 
 func TestHumanBrowserInteractionPOSTConfirmsExactCapabilities(t *testing.T) {
@@ -426,6 +483,12 @@ func TestHumanInteractionRoutesHonorProviderPathPrefix(t *testing.T) {
 			)
 		}
 	}
+	if response := serveHumanInteraction(t, router, http.MethodGet, humanInteractionFontRoute, nil, nil); response.Code != http.StatusNotFound {
+		t.Fatalf("unprefixed design font status = %d, want 404", response.Code)
+	}
+	if response := serveHumanInteraction(t, router, http.MethodGet, "/tenant"+humanInteractionFontRoute, nil, nil); response.Code != http.StatusOK || !bytes.Equal(response.Body.Bytes(), humanDesignFont) {
+		t.Fatalf("prefixed design font status = %d, bytes = %d", response.Code, response.Body.Len())
+	}
 }
 
 func TestHumanBrowserInteractionLogicalRejectionsAreIndistinguishable(t *testing.T) {
@@ -539,10 +602,12 @@ func TestHumanConsumeInteractionGETKeepsReadyCapabilityOutOfDocument(t *testing.
 		!strings.Contains(body, `^d0_hio_s1_[A-Za-z0-9_-]{43}$`) ||
 		!strings.Contains(body, "form.submit()") ||
 		!strings.Contains(body, `addEventListener("pagehide"`) ||
+		!strings.Contains(body, `<a id="human-interaction-restart" href="https://human-bff.example.invalid/login" hidden>`) ||
+		!strings.Contains(body, `restart.hidden=false`) ||
+		strings.Count(body, `href="https://`) != 1 ||
 		strings.Contains(body, `<button`) || strings.Contains(body, "fetch(") ||
 		strings.Contains(body, "localStorage") ||
-		strings.Contains(body, "sessionStorage") || strings.Contains(body, "http://") ||
-		strings.Contains(body, "https://") {
+		strings.Contains(body, "sessionStorage") || strings.Contains(body, `src="https://`) {
 		t.Fatalf("consume GET is not a closed native navigation page: %q", body)
 	}
 	if strings.Index(body, "history.replaceState") > strings.Index(body, "form.submit()") ||
@@ -945,6 +1010,10 @@ func assertHumanInteractionFormAction(t *testing.T, header http.Header, want str
 		"base-uri":        "'none'",
 		"frame-ancestors": "'none'",
 	}
+	style := directives["style-src"]
+	if style != "'none'" {
+		fixed["font-src"] = "'self'"
+	}
 	if len(directives) != len(fixed)+3 {
 		t.Fatalf("CSP directive count = %d, want %d", len(directives), len(fixed)+3)
 	}
@@ -953,7 +1022,6 @@ func assertHumanInteractionFormAction(t *testing.T, header http.Header, want str
 			t.Fatalf("%s = %q, want %q", name, directives[name], value)
 		}
 	}
-	style := directives["style-src"]
 	if style != "'none'" && (!strings.HasPrefix(style, "'sha256-") || !strings.HasSuffix(style, "'")) {
 		t.Fatalf("style-src = %q, want none or one SHA-256 source", style)
 	}
