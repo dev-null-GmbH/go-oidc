@@ -14,6 +14,7 @@ func RegisterHandlers(router *http.ServeMux, config *oidc.Configuration, middlew
 	if config.HumanConfidentialBFFAuthorizationEnabled {
 		browserRoute := config.EndpointPrefix + humanBrowserInteractionRoute
 		consumeRoute := config.EndpointPrefix + humanConsumeInteractionRoute
+		router.Handle(config.EndpointPrefix+humanInteractionFontRoute, http.HandlerFunc(serveHumanInteractionFont))
 		browserHandler := limitHumanAuthorizationMiddlewareBody(
 			config,
 			goidc.ApplyMiddlewares(

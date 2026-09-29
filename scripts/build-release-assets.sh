@@ -207,9 +207,9 @@ Verify after downloading all assets:
 
 \`sha256sum --check SHA256SUMS\`
 
-\`for subject in $archive_name $sbom_name PATCHES.txt RELEASE-EVIDENCE.json CONFORMANCE-EVIDENCE.tar RELEASE-MANIFEST.json RELEASE-NOTES.md; do gh attestation verify "\$subject" --bundle provenance.sigstore.json --deny-self-hosted-runners --repo dev-null-GmbH/go-oidc --signer-workflow github.com/dev-null-GmbH/go-oidc/.github/workflows/release.yml --source-ref refs/heads/main --source-digest $release_commit; done\`
+\`for subject in $archive_name $sbom_name PATCHES.txt RELEASE-EVIDENCE.json CONFORMANCE-EVIDENCE.tar RELEASE-MANIFEST.json RELEASE-NOTES.md; do gh attestation verify "\$subject" --bundle provenance.sigstore.json --repo dev-null-GmbH/go-oidc --signer-workflow github.com/dev-null-GmbH/go-oidc/.github/workflows/release.yml --source-ref refs/heads/main --source-digest $release_commit; done\`
 
-\`gh attestation verify $archive_name --bundle sbom-attestation.sigstore.json --deny-self-hosted-runners --predicate-type https://spdx.dev/Document/v2.3 --repo dev-null-GmbH/go-oidc --signer-workflow github.com/dev-null-GmbH/go-oidc/.github/workflows/release.yml --source-ref refs/heads/main --source-digest $release_commit\`
+\`gh attestation verify $archive_name --bundle sbom-attestation.sigstore.json --predicate-type https://spdx.dev/Document/v2.3 --repo dev-null-GmbH/go-oidc --signer-workflow github.com/dev-null-GmbH/go-oidc/.github/workflows/release.yml --source-ref refs/heads/main --source-digest $release_commit\`
 EOF
 
 printf 'Built deterministic release payload for %s at %s\n' \
