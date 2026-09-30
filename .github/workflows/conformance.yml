@@ -23,13 +23,16 @@ env:
 
 jobs:
   prepare-suite:
-    name: Prime conformance dependency cache
+    name: Build pinned conformance suite
     runs-on: >-
       ${{ github.repository == 'dev-null-GmbH/go-oidc' &&
           github.ref == 'refs/heads/main' &&
           github.event_name != 'pull_request' &&
           'd0-trusted' || 'd0-untrusted' }}
     timeout-minutes: 30
+    outputs:
+      jar-sha256: ${{ steps.jar-digest.outputs.sha256 }}
+      artifact-id: ${{ steps.upload-jar.outputs.artifact-id }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,13 +63,17 @@ jobs:
           printf 'PIP_CACHE_DIR=%s\n' \
             "$RUNNER_TEMP/conformance-pip-cache" >> "$GITHUB_ENV"
 
-      - name: Cache immutable dependency downloads
+      - name: Cache immutable Maven downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: |
-            ${{ env.MAVEN_CACHE_DIR }}
-            ${{ env.PIP_CACHE_DIR }}
-          key: ${{ runner.os }}-conformance-${{ env.CS_CACHE_SCHEMA }}-${{ env.CS_COMMIT }}-python-${{ env.PYTHON_VERSION }}-${{ hashFiles('scripts/conformance-requirements.lock', 'scripts/prepare-conformance-suite.sh', 'docker-compose.yml', 'Makefile') }}
+          path: ${{ env.MAVEN_CACHE_DIR }}
+          key: ${{ runner.os }}-conformance-maven-${{ env.CS_CACHE_SCHEMA }}-${{ env.CS_COMMIT }}-${{ hashFiles('scripts/prepare-conformance-suite.sh', 'docker-compose.yml', 'Makefile') }}
+
+      - name: Cache immutable Python downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.PIP_CACHE_DIR }}
+          key: ${{ runner.os }}-conformance-pip-${{ env.CS_CACHE_SCHEMA }}-${{ env.CS_COMMIT }}-python-${{ env.PYTHON_VERSION }}-${{ hashFiles('scripts/conformance-requirements.lock', 'scripts/prepare-conformance-suite.sh', 'docker-compose.yml', 'Makefile') }}
 
       - name: Pull pinned Maven image with bounded retry
         shell: bash
@@ -124,6 +131,22 @@ jobs:
           ./scripts/prepare-conformance-suite.sh conformance-suite
           test -s conformance-suite/target/fapi-test-suite.jar
 
+      - name: Record prepared JAR digest
+        id: jar-digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'sha256=%s\n' "$(sha256sum conformance-suite/target/fapi-test-suite.jar | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload prepared JAR
+        id: upload-jar
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: conformance-suite-${{ github.run_id }}-${{ github.run_attempt }}
+          path: conformance-suite/target/fapi-test-suite.jar
+          if-no-files-found: error
+          retention-days: 1
+
   run-tests:
     name: ${{ matrix.profile }}
     runs-on: >-
@@ -176,8 +199,6 @@ jobs:
       - name: Initialize dependency cache paths
         shell: bash
         run: |
-          printf 'MAVEN_CACHE_DIR=%s\n' \
-            "$RUNNER_TEMP/conformance-maven-repository" >> "$GITHUB_ENV"
           printf 'PIP_CACHE_DIR=%s\n' \
             "$RUNNER_TEMP/conformance-pip-cache" >> "$GITHUB_ENV"
 
@@ -191,34 +212,14 @@ jobs:
           profile_folder="${PROFILE//-/_}"
           printf 'PROFILE_FOLDER=%s\n' "$profile_folder" >> "$GITHUB_ENV"
 
-      - name: Restore immutable dependency downloads
+      - name: Restore immutable Python downloads
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: |
-            ${{ env.MAVEN_CACHE_DIR }}
-            ${{ env.PIP_CACHE_DIR }}
-          key: ${{ runner.os }}-conformance-${{ env.CS_CACHE_SCHEMA }}-${{ env.CS_COMMIT }}-python-${{ env.PYTHON_VERSION }}-${{ hashFiles('scripts/conformance-requirements.lock', 'scripts/prepare-conformance-suite.sh', 'docker-compose.yml', 'Makefile') }}
+          path: ${{ env.PIP_CACHE_DIR }}
+          key: ${{ runner.os }}-conformance-pip-${{ env.CS_CACHE_SCHEMA }}-${{ env.CS_COMMIT }}-python-${{ env.PYTHON_VERSION }}-${{ hashFiles('scripts/conformance-requirements.lock', 'scripts/prepare-conformance-suite.sh', 'docker-compose.yml', 'Makefile') }}
           fail-on-cache-miss: true
 
-      - name: Pull pinned Maven image with bounded retry
-        shell: bash
-        run: |
-          set -euo pipefail
-          for attempt in 1 2 3 4; do
-            if timeout --kill-after=10s 120s docker pull "$CS_MAVEN_IMAGE"; then
-              break
-            fi
-            if (( attempt == 4 )); then
-              echo "Unable to pull the pinned Maven image after 4 attempts" >&2
-              exit 1
-            fi
-            retry_delay=$((attempt * 5 + RANDOM % 5))
-            printf 'Pinned Maven image pull failed; retrying in %s seconds\n' \
-              "$retry_delay" >&2
-            sleep "$retry_delay"
-          done
-
-      - name: Build from a fresh exact conformance checkout
+      - name: Prepare fresh exact conformance checkout
         shell: bash
         run: |
           set -euo pipefail
@@ -240,14 +241,20 @@ jobs:
           fi
           ./scripts/prepare-conformance-suite.sh conformance-suite
 
-          mkdir -p "$MAVEN_CACHE_DIR"
-          docker run --rm --pull=never \
-            --mount "type=bind,src=$PWD/conformance-suite,dst=/usr/src/mymaven" \
-            --mount "type=bind,src=$MAVEN_CACHE_DIR,dst=/root/.m2/repository" \
-            --workdir /usr/src/mymaven \
-            "$CS_MAVEN_IMAGE" \
-            mvn -B clean package -DskipTests=true
+      - name: Download prepared JAR
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.prepare-suite.outputs.artifact-id }}
+          path: conformance-suite/target
+
+      - name: Verify prepared JAR digest
+        env:
+          JAR_SHA256: ${{ needs.prepare-suite.outputs.jar-sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
           test -s conformance-suite/target/fapi-test-suite.jar
+          printf '%s  %s\n' "$JAR_SHA256" conformance-suite/target/fapi-test-suite.jar | sha256sum --check --status
 
       - name: Generate ephemeral conformance TLS fixtures
         shell: bash

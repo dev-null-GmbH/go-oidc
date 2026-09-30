@@ -105,20 +105,22 @@ if grep -Eq '^[[:space:]]+path:[[:space:]]+conformance-suite$' \
   exit 1
 fi
 if [[ "$(grep -c 'git init --quiet conformance-suite' \
-  .github/workflows/conformance.yml)" -lt 2 ||
+  .github/workflows/conformance.yml)" != "2" ||
       "$(grep -c 'mvn -B clean package -DskipTests=true' \
-  .github/workflows/conformance.yml)" -lt 2 ]]; then
-  echo "Every conformance phase must use a fresh checkout and rebuilt JAR" >&2
+  .github/workflows/conformance.yml)" != "1" ||
+      "$(grep -c 'sha256sum --check --status' \
+  .github/workflows/conformance.yml)" != "1" ]]; then
+  echo "Every conformance phase needs a fresh checkout; the JAR must be built once and digest-verified" >&2
   exit 1
 fi
 
 if [[ "$(grep -Fc 'for attempt in 1 2 3 4; do' \
-  .github/workflows/conformance.yml)" != "2" ||
+  .github/workflows/conformance.yml)" != "1" ||
       "$(grep -Fc 'timeout --kill-after=10s 120s docker pull "$CS_MAVEN_IMAGE"' \
-  .github/workflows/conformance.yml)" != "2" ||
+  .github/workflows/conformance.yml)" != "1" ||
       "$(grep -Fc 'docker run --rm --pull=never \' \
-  .github/workflows/conformance.yml)" != "2" ]]; then
-  echo "Every conformance phase must use the bounded pinned-image pull contract" >&2
+  .github/workflows/conformance.yml)" != "1" ]]; then
+  echo "The single JAR build must use the bounded pinned-image pull contract" >&2
   exit 1
 fi
 
