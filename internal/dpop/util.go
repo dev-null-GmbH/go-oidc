@@ -89,8 +89,13 @@ func ValidateJWT(ctx oidc.Context, dpopJWT string, opts ValidationOptions) error
 	}
 
 	// Validate that the "iat" claim is present and it is not too far in the past.
-	if claims.IssuedAt == nil ||
-		int(timeutil.Now().Sub(claims.IssuedAt.Time()).Seconds()) > ctx.JWTLifetimeSecs {
+	if claims.IssuedAt == nil {
+		return goidc.WrapError(goidc.ErrorCodeUnauthorizedClient, "unauthorized client",
+			errors.New("the DPoP proof issuance time is invalid"))
+	}
+	acceptedUntil := claims.IssuedAt.Time().Add(time.Duration(ctx.JWTLifetimeSecs) * time.Second)
+	now := timeutil.Now()
+	if !now.Before(acceptedUntil) {
 		return goidc.WrapError(goidc.ErrorCodeUnauthorizedClient, "unauthorized client",
 			errors.New("the DPoP proof issuance time is invalid"))
 	}
@@ -138,8 +143,18 @@ func ValidateJWT(ctx oidc.Context, dpopJWT string, opts ValidationOptions) error
 		}
 	}
 
-	if err := ctx.ConsumeJTI(claims.ID); err != nil && !errors.Is(err, goidc.ErrNotFound) {
+	thumbprint, err := jwk.Thumbprint(crypto.SHA256)
+	if err != nil {
 		return goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid DPoP proof", err)
+	}
+	err = ctx.ReserveJTI(goidc.JTIUse{
+		ID:        claims.ID,
+		Issuer:    base64.RawURLEncoding.EncodeToString(thumbprint),
+		Purpose:   goidc.JTIUsePurposeDPoPProof,
+		ExpiresAt: acceptedUntil,
+	}, goidc.ErrorCodeInvalidRequest, "invalid DPoP proof")
+	if err != nil {
+		return err
 	}
 
 	return nil

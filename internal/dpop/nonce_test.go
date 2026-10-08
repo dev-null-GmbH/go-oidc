@@ -41,7 +41,7 @@ func TestValidateJWTDPoPNonceChallenge(t *testing.T) {
 			manager := newNonceManager("fresh_nonce")
 			ctx, rec := nonceContext(t, manager, http.MethodPost, "/token")
 			consumeCalls := 0
-			ctx.ConsumeJTIFunc = func(context.Context, string) error {
+			ctx.ConsumeJTIUseFunc = func(context.Context, goidc.JTIUse) error {
 				consumeCalls++
 				return nil
 			}
@@ -72,7 +72,7 @@ func TestValidateJWTDPoPNonceChallenge(t *testing.T) {
 				t.Fatalf("ValidateNonce() calls = %d, want 0", manager.validateCallCount())
 			}
 			if consumeCalls != 0 {
-				t.Fatalf("ConsumeJTI() calls = %d, want 0", consumeCalls)
+				t.Fatalf("ConsumeJTIUse() calls = %d, want 0", consumeCalls)
 			}
 		})
 	}
@@ -87,16 +87,27 @@ func TestValidateJWTDPoPNonceAcceptsRecentNonce(t *testing.T) {
 			manager := newNonceManager()
 			manager.add(scope, "current_nonce")
 			ctx, rec := nonceContext(t, manager, http.MethodPost, "/token")
-			proof, _ := oidctest.DPoPProof(t, oidctest.DPoPProofOptions{
+			consumeCalls := 0
+			proof, thumbprint := oidctest.DPoPProof(t, oidctest.DPoPProofOptions{
 				Method: http.MethodPost,
 				URI:    ctx.Host + "/token",
 				Nonce:  "current_nonce",
 			})
+			ctx.ConsumeJTIUseFunc = func(_ context.Context, use goidc.JTIUse) error {
+				consumeCalls++
+				if use.Purpose != goidc.JTIUsePurposeDPoPProof || use.Issuer != thumbprint {
+					t.Errorf("JTI use = %#v, want DPoP proof with issuer %q", use, thumbprint)
+				}
+				return nil
+			}
 
 			err := dpop.ValidateJWT(ctx, proof, dpop.ValidationOptions{NonceScope: scope})
 
 			if err != nil {
 				t.Fatalf("ValidateJWT() error = %v", err)
+			}
+			if consumeCalls != 1 {
+				t.Fatalf("ConsumeJTIUse() calls = %d, want 1", consumeCalls)
 			}
 			if got := rec.Header().Values(goidc.HeaderDPoPNonce); len(got) != 0 {
 				t.Fatalf("%s = %v, want no rotation", goidc.HeaderDPoPNonce, got)
@@ -186,6 +197,28 @@ func TestValidateJWTDPoPNonceIsScopedToIssuer(t *testing.T) {
 
 func TestValidateJWTDPoPNonceOperationalErrorsFailClosed(t *testing.T) {
 	storeErr := errors.New("nonce store unavailable")
+
+	t.Run("typed JTI consumer", func(t *testing.T) {
+		manager := newNonceManager()
+		manager.add(goidc.DPoPNonceScopeAuthorizationServer, "current_nonce")
+		ctx, rec := nonceContext(t, manager, http.MethodPost, "/token")
+		ctx.ConsumeJTIUseFunc = func(context.Context, goidc.JTIUse) error { return storeErr }
+		proof, _ := oidctest.DPoPProof(t, oidctest.DPoPProofOptions{
+			Method: http.MethodPost,
+			URI:    ctx.Host + "/token",
+			Nonce:  "current_nonce",
+		})
+
+		err := dpop.ValidateJWT(ctx, proof, dpop.ValidationOptions{
+			NonceScope: goidc.DPoPNonceScopeAuthorizationServer,
+		})
+
+		assertOAuthError(t, err, goidc.ErrorCodeInternalError, http.StatusInternalServerError)
+		if !errors.Is(err, storeErr) {
+			t.Fatalf("ValidateJWT() error = %v, want wrapped store error", err)
+		}
+		assertNotNonceChallenge(t, err, rec)
+	})
 
 	t.Run("validate", func(t *testing.T) {
 		manager := newNonceManager("unused_nonce")
