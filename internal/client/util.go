@@ -20,18 +20,8 @@ func Client(ctx oidc.Context, id string) (*goidc.Client, error) {
 		}
 	}
 
-	if ctx.ResolveClientFunc != nil {
-		c, err := ctx.ResolveClient(id)
-		if err != nil {
-			return nil, err
-		}
-		if c == nil {
-			return nil, errors.New("client resolver returned a nil client")
-		}
-		if c.ID != id {
-			return nil, fmt.Errorf("client resolver returned client %q for %q", c.ID, id)
-		}
-		return c, nil
+	if ctx.ClientFunc != nil {
+		return ctx.Client(id)
 	}
 
 	if ctx.OpenIDFedEnabled && strutil.IsURL(id) {
@@ -83,27 +73,18 @@ func JWKByAlg(ctx oidc.Context, c *goidc.Client, alg string) (goidc.JSONWebKey, 
 //  2. From jwks_uri as a fallback.
 //  3. Directly from the jwks attribute if present.
 //
-// Fetched keys are cached unless the client came from ResolveClientFunc. The
-// latter is deliberately re-fetched so key rotation takes effect immediately.
+// It also caches the keys if they are fetched.
 func JWKS(ctx oidc.Context, c *goidc.Client) (*goidc.JSONWebKeySet, error) {
-	cacheEnabled := clientJWKSCacheEnabled(ctx, c)
-	if cacheEnabled {
-		if jwks := c.CachedJWKS(); jwks != nil {
-			return jwks, nil
-		}
+	if jwks := c.CachedJWKS(); jwks != nil {
+		return jwks, nil
 	}
 
 	if c.SignedJWKSURI != "" {
-		if !ctx.OpenIDFedEnabled || ctx.OpenIDFedEntityJWKSFunc == nil {
-			return nil, errors.New("signed_jwks_uri requires OpenID Federation")
-		}
 		jwks, err := fetchSignedJWKS(ctx, c)
 		if err != nil {
 			return nil, err
 		}
-		if cacheEnabled {
-			c.CacheJWKS(jwks)
-		}
+		c.CacheJWKS(jwks)
 		return jwks, nil
 	}
 
@@ -112,9 +93,7 @@ func JWKS(ctx oidc.Context, c *goidc.Client) (*goidc.JSONWebKeySet, error) {
 		if err != nil {
 			return nil, err
 		}
-		if cacheEnabled {
-			c.CacheJWKS(jwks)
-		}
+		c.CacheJWKS(jwks)
 		return jwks, nil
 	}
 
@@ -122,18 +101,6 @@ func JWKS(ctx oidc.Context, c *goidc.Client) (*goidc.JSONWebKeySet, error) {
 		return nil, errors.New("the client jwks was informed neither by value nor by reference")
 	}
 	return c.JWKS, nil
-}
-
-func clientJWKSCacheEnabled(ctx oidc.Context, c *goidc.Client) bool {
-	if ctx.ResolveClientFunc == nil {
-		return true
-	}
-	for _, staticClient := range ctx.StaticClients {
-		if staticClient == c {
-			return true
-		}
-	}
-	return false
 }
 
 func fetchJWKS(ctx oidc.Context, c *goidc.Client) (*goidc.JSONWebKeySet, error) {

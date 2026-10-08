@@ -362,17 +362,17 @@ func TestNew_ValidationErrors(t *testing.T) {
 		{
 			name: "client resolver and dcr are mutually exclusive",
 			opts: []Option{
-				WithClientResolver(func(context.Context, string) (*goidc.Client, error) {
+				WithClientFunc(func(context.Context, string) (*goidc.Client, error) {
 					return nil, goidc.ErrNotFound
 				}),
 				WithDCR(nil),
 			},
-			wantErr: "client resolver cannot be combined with dynamic client registration",
+			wantErr: "client function cannot be combined with dynamic client registration",
 		},
 		{
 			name: "client resolver and federation are mutually exclusive",
 			opts: []Option{
-				WithClientResolver(func(context.Context, string) (*goidc.Client, error) {
+				WithClientFunc(func(context.Context, string) (*goidc.Client, error) {
 					return nil, goidc.ErrNotFound
 				}),
 				WithOpenIDFederation(OpenIDFedConfig{
@@ -382,7 +382,7 @@ func TestNew_ValidationErrors(t *testing.T) {
 					TrustedAnchors: []string{"https://trust-anchor.example.com"},
 				}),
 			},
-			wantErr: "client resolver cannot be combined with OpenID Federation",
+			wantErr: "client function cannot be combined with OpenID Federation",
 		},
 		{
 			name: "dc sd-jwt credential configuration requires type",
@@ -454,7 +454,7 @@ func TestClientResolverDoesNotExposeDynamicRegistration(t *testing.T) {
 			return goidc.JSONWebKeySet{}, nil
 		},
 		IDTokenAlgs: []goidc.SignatureAlgorithm{goidc.SigAlgRS256},
-	}, WithClientResolver(func(context.Context, string) (*goidc.Client, error) {
+	}, WithClientFunc(func(context.Context, string) (*goidc.Client, error) {
 		return nil, goidc.ErrNotFound
 	}))
 	if err != nil {

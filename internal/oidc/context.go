@@ -105,8 +105,8 @@ func (ctx Context) DCRDeleteClient(id string) error {
 	return ctx.DCRManager.DeleteClient(ctx, id)
 }
 
-func (ctx Context) ResolveClient(id string) (*goidc.Client, error) {
-	return ctx.ResolveClientFunc(ctx, id)
+func (ctx Context) Client(id string) (*goidc.Client, error) {
+	return ctx.ClientFunc(ctx, id)
 }
 
 func (ctx Context) ValidateInitalAccessToken(token string) error {

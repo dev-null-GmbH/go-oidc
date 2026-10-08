@@ -1807,32 +1807,32 @@ func TestWithStaticClients(t *testing.T) {
 	}
 }
 
-func TestWithClientResolver(t *testing.T) {
+func TestWithClientFunc(t *testing.T) {
 	p := &Provider{config: oidc.Configuration{}}
 	resolver := func(context.Context, string) (*goidc.Client, error) {
 		return nil, goidc.ErrNotFound
 	}
 
-	err := WithClientResolver(resolver)(p)
+	err := WithClientFunc(resolver)(p)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if p.config.ResolveClientFunc == nil {
-		t.Fatal("ResolveClientFunc must be set")
+	if p.config.ClientFunc == nil {
+		t.Fatal("ClientFunc must be set")
 	}
 	if p.config.DCREnabled {
 		t.Fatal("client resolver must not enable DCR")
 	}
 }
 
-func TestWithClientResolver_Nil(t *testing.T) {
+func TestWithClientFunc_Nil(t *testing.T) {
 	p := &Provider{config: oidc.Configuration{}}
 
-	err := WithClientResolver(nil)(p)
+	err := WithClientFunc(nil)(p)
 
 	if err == nil {
-		t.Fatal("WithClientResolver(nil) error = nil, want non-nil")
+		t.Fatal("WithClientFunc(nil) error = nil, want non-nil")
 	}
 }
 

@@ -1221,7 +1221,7 @@ func TestAuthenticated_PreservesClientResolverOperationalError(t *testing.T) {
 	ctx := oidctest.NewContext(t)
 	ctx.Request.PostForm = map[string][]string{"client_id": {"client"}}
 	resolverErr := errors.New("client store unavailable")
-	ctx.ResolveClientFunc = func(context.Context, string) (*goidc.Client, error) {
+	ctx.ClientFunc = func(context.Context, string) (*goidc.Client, error) {
 		return nil, resolverErr
 	}
 

@@ -910,24 +910,25 @@ op, _ := provider.New(
 
 ## Client resolution
 
-Use `provider.WithClientResolver` when clients live in an external store but
+Use `provider.WithClientFunc` when clients live in an external store but
 must not be allowed to register themselves:
 
 ```go
 op, _ := provider.New(
   ...,
-  provider.WithClientResolver(func(ctx context.Context, id string) (*goidc.Client, error) {
+  provider.WithClientFunc(func(ctx context.Context, id string) (*goidc.Client, error) {
     return clientStore.Client(ctx, id)
   }),
 )
 ```
 
-The resolver is called for every lookup and must return `goidc.ErrNotFound`
-only for unknown clients. Other errors remain operational errors. Resolved
-clients and their referenced JWKS are not cached, so disablement and key
-rotation take effect on the next request. Static clients may be configured as
-well and take precedence. A resolver cannot be combined with DCR or OpenID
-Federation, which provide their own dynamic client sources.
+The callback must return a non-nil client with the requested ID on success,
+`goidc.ErrNotFound` only for unknown clients, and other lookup errors unchanged.
+It may be called concurrently. Return a fresh client snapshot on each lookup
+so disablement and key rotation take effect. Fetched JWKS are cached on that
+snapshot; implementations that reuse client pointers own cache invalidation
+and synchronization. Static clients take precedence. The callback cannot be
+combined with DCR or OpenID Federation, which provide their own client sources.
 
 ## [Dynamic Client Registration (DCR)](https://www.rfc-editor.org/rfc/rfc7591.html)
 
