@@ -91,7 +91,7 @@ func handleHumanBrowserInteractionGET(ctx oidc.Context) {
 		return
 	}
 	body := `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="same-origin"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Continuing sign-in</title><style>` + humanInteractionStyle + `</style></head><body class="d0-foundation"><main><span class="brand" aria-hidden="true">` + humanDesignLogo + `</span><h1>Continuing sign-in</h1><p id="human-interaction-status" role="status">Checking this sign-in…</p><a id="human-interaction-restart" href="` + html.EscapeString(ctx.HumanBrowserOrigin+"/login") + `" hidden>Start sign-in again</a><form id="human-interaction" method="post" action="` + html.EscapeString(humanInteractionRoute(ctx, humanBrowserInteractionRoute)) + `"><input id="identity-return" type="hidden" name="identity_return" value=""><input type="hidden" name="browser_return" value="` + html.EscapeString(browserReturn) + `"></form><noscript>JavaScript is required to continue sign-in.</noscript></main><script>` + humanBrowserInteractionScript + `</script></body></html>`
-	writeHumanInteractionPage(ctx, body, humanBrowserInteractionScript, humanInteractionStyle, identityReadyOrigin)
+	writeHumanInteractionPage(ctx, body, humanBrowserInteractionScript, humanInteractionStyle, []string{identityReadyOrigin})
 }
 
 func handleHumanBrowserInteractionPOST(ctx oidc.Context) {
@@ -165,13 +165,13 @@ func handleHumanConsumeInteractionGET(ctx oidc.Context) {
 		writeHumanInteractionError(ctx, http.StatusBadRequest, humanInteractionRejectedBody)
 		return
 	}
-	browserOrigin, ok := humanInteractionConfiguredOrigin(ctx.HumanBrowserOrigin)
+	completionOrigins, ok := humanCompletionOriginSnapshot(ctx)
 	if !ok {
 		writeHumanInteractionError(ctx, http.StatusInternalServerError, humanInteractionServerBody)
 		return
 	}
 	body := `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="same-origin"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Finishing sign-in</title><style>` + humanInteractionStyle + `</style></head><body class="d0-foundation"><main><span class="brand" aria-hidden="true">` + humanDesignLogo + `</span><h1>Finishing sign-in</h1><p id="human-interaction-status" role="status">Returning to d0…</p><a id="human-interaction-restart" href="` + html.EscapeString(ctx.HumanBrowserOrigin+"/login") + `" hidden>Start sign-in again</a><form id="human-interaction" method="post" action="` + html.EscapeString(humanInteractionRoute(ctx, humanConsumeInteractionRoute)) + `"><input id="ready" type="hidden" name="ready" value=""></form><noscript>JavaScript is required to finish sign-in.</noscript></main><script>` + humanConsumeInteractionScript + `</script></body></html>`
-	writeHumanInteractionPage(ctx, body, humanConsumeInteractionScript, humanInteractionStyle, browserOrigin)
+	writeHumanInteractionPage(ctx, body, humanConsumeInteractionScript, humanInteractionStyle, completionOrigins)
 }
 
 func handleHumanConsumeInteractionPOST(ctx oidc.Context) {
@@ -179,7 +179,7 @@ func handleHumanConsumeInteractionPOST(ctx oidc.Context) {
 		writeHumanInteractionError(ctx, http.StatusInternalServerError, humanInteractionServerBody)
 		return
 	}
-	browserOrigin, ok := humanInteractionConfiguredOrigin(ctx.HumanBrowserOrigin)
+	completionOrigins, ok := humanCompletionOriginSnapshot(ctx)
 	if !ok {
 		writeHumanInteractionError(ctx, http.StatusInternalServerError, humanInteractionServerBody)
 		return
@@ -222,7 +222,7 @@ func handleHumanConsumeInteractionPOST(ctx oidc.Context) {
 	}
 	switch decision.Outcome() {
 	case goidc.HumanCompletionOutcomeCompleted:
-		redirectBase, rebound := reboundHumanCompletionRedirect(ctx, decision, browserOrigin)
+		redirectBase, rebound := reboundHumanCompletionRedirect(ctx, decision, completionOrigins)
 		if !rebound {
 			writeHumanInteractionError(ctx, http.StatusInternalServerError, humanInteractionServerBody)
 			return
@@ -238,7 +238,7 @@ func handleHumanConsumeInteractionPOST(ctx oidc.Context) {
 			url.Values{"code": {codeText}, "state": {decision.State()}, "iss": {ctx.Issuer()}},
 		))
 	case goidc.HumanCompletionOutcomeFailed:
-		redirectBase, rebound := reboundHumanCompletionRedirect(ctx, decision, browserOrigin)
+		redirectBase, rebound := reboundHumanCompletionRedirect(ctx, decision, completionOrigins)
 		if !rebound {
 			writeHumanInteractionError(ctx, http.StatusInternalServerError, humanInteractionServerBody)
 			return
@@ -389,7 +389,7 @@ func mintHumanBrowserReturnCapability() (string, error) {
 func reboundHumanCompletionRedirect(
 	ctx oidc.Context,
 	decision goidc.HumanCompletionDecision,
-	expectedBrowserOrigin string,
+	completionOrigins []string,
 ) (
 	redirect string,
 	valid bool,
@@ -417,10 +417,34 @@ func reboundHumanCompletionRedirect(
 		return "", false
 	}
 	redirectOrigin, originValid := humanInteractionHTTPSOrigin(decision.RedirectURI())
-	if !originValid || redirectOrigin != expectedBrowserOrigin {
+	if !originValid || !slices.Contains(completionOrigins, redirectOrigin) {
 		return "", false
 	}
 	return decision.RedirectURI(), true
+}
+
+func humanCompletionOriginSnapshot(ctx oidc.Context) ([]string, bool) {
+	if ctx.Configuration == nil || !validHumanInteractionConfiguredOrigin(ctx.HumanBrowserOrigin) {
+		return nil, false
+	}
+	configured := ctx.HumanCompletionOrigins
+	if configured == nil {
+		configured = []string{ctx.HumanBrowserOrigin}
+	}
+	identityOrigin, identityValid := humanInteractionHTTPSOrigin(ctx.HumanIdentityInteractionEndpoint)
+	if !identityValid || len(configured) == 0 || len(configured) > 8 ||
+		!slices.Contains(configured, ctx.HumanBrowserOrigin) {
+		return nil, false
+	}
+	origins := make([]string, 0, len(configured))
+	for _, origin := range configured {
+		if !validHumanInteractionConfiguredOrigin(origin) || origin == ctx.Host ||
+			origin == identityOrigin || slices.Contains(origins, origin) {
+			return nil, false
+		}
+		origins = append(origins, origin)
+	}
+	return origins, true
 }
 
 func validHumanInteractionConfiguration(ctx oidc.Context) bool {
@@ -436,7 +460,9 @@ func validHumanInteractionConfiguration(ctx oidc.Context) bool {
 	interaction, interactionErr := url.ParseRequestURI(ctx.HumanIdentityInteractionEndpoint)
 	ready, readyErr := url.ParseRequestURI(ctx.HumanIdentityReadyEndpoint)
 	browser, browserErr := canonicalHumanInteractionIssuer(ctx.HumanBrowserOrigin)
+	_, completionValid := humanCompletionOriginSnapshot(ctx)
 	return err == nil && interactionErr == nil && readyErr == nil && browserErr == nil &&
+		completionValid &&
 		interaction.Scheme == ready.Scheme && interaction.Host == ready.Host &&
 		interaction.Hostname() != issuer.Hostname() && ready.Hostname() != issuer.Hostname() &&
 		browser.Path == "" && browser.Hostname() != issuer.Hostname() &&
@@ -501,8 +527,8 @@ func clearHumanBrowserBindingCookie(ctx oidc.Context) {
 	})
 }
 
-func writeHumanInteractionPage(ctx oidc.Context, body, script, style, formActionOrigin string) {
-	setHumanInteractionSecurityHeaders(ctx.Response.Header(), script, style, formActionOrigin)
+func writeHumanInteractionPage(ctx oidc.Context, body, script, style string, formActionOrigins []string) {
+	setHumanInteractionSecurityHeaders(ctx.Response.Header(), script, style, formActionOrigins)
 	ctx.Response.Header().Set("Content-Type", "text/html; charset=utf-8")
 	ctx.Response.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(ctx.Response, body)
@@ -528,19 +554,19 @@ func serveHumanInteractionFont(response http.ResponseWriter, request *http.Reque
 }
 
 func writeHumanInteractionRedirect(ctx oidc.Context, location string) {
-	setHumanInteractionSecurityHeaders(ctx.Response.Header(), "", "", "")
+	setHumanInteractionSecurityHeaders(ctx.Response.Header(), "", "", nil)
 	ctx.Response.Header().Set("Location", location)
 	ctx.Response.WriteHeader(http.StatusSeeOther)
 }
 
 func writeHumanInteractionError(ctx oidc.Context, status int, body string) {
-	setHumanInteractionSecurityHeaders(ctx.Response.Header(), "", "", "")
+	setHumanInteractionSecurityHeaders(ctx.Response.Header(), "", "", nil)
 	ctx.Response.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	ctx.Response.WriteHeader(status)
 	_, _ = io.WriteString(ctx.Response, body)
 }
 
-func setHumanInteractionSecurityHeaders(header http.Header, script, style, formActionOrigin string) {
+func setHumanInteractionSecurityHeaders(header http.Header, script, style string, formActionOrigins []string) {
 	header.Set("Cache-Control", "no-store")
 	header.Set("Pragma", "no-cache")
 	header.Set("Referrer-Policy", "same-origin")
@@ -562,8 +588,8 @@ func setHumanInteractionSecurityHeaders(header http.Header, script, style, formA
 		fontPolicy = "font-src 'self'"
 	}
 	formActionPolicy := "form-action 'self'"
-	if formActionOrigin != "" {
-		formActionPolicy += " " + formActionOrigin
+	for _, origin := range formActionOrigins {
+		formActionPolicy += " " + origin
 	}
 	header.Set("Content-Security-Policy", "default-src 'none'; "+scriptPolicy+
 		"; "+stylePolicy+"; img-src 'none'; "+fontPolicy+"; media-src 'none'; connect-src 'none'; "+
@@ -576,13 +602,6 @@ func humanInteractionHTTPSOrigin(value string) (string, bool) {
 		return "", false
 	}
 	return parsed.Scheme + "://" + parsed.Host, true
-}
-
-func humanInteractionConfiguredOrigin(value string) (string, bool) {
-	if !validHumanInteractionConfiguredOrigin(value) {
-		return "", false
-	}
-	return value, true
 }
 
 func validHumanInteractionConfiguredOrigin(value string) bool {

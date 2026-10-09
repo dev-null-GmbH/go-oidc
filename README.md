@@ -69,7 +69,7 @@ Luiky Vasconcelos has certified that [go-oidc](https://pkg.go.dev/github.com/lui
 
 Install the module:
 ```
-go get github.com/dev-null-GmbH/go-oidc@v0.25.1-d0.11
+go get github.com/dev-null-GmbH/go-oidc@v0.25.1-d0.12
 ```
 
 Fork consumers must exact-pin a governed `-d0.N` tag and must not use
@@ -349,6 +349,9 @@ op, err := provider.New(provider.Config{
       "https://id.example.com/oidc/interaction/ready",
     ),
     provider.WithHumanConfidentialBFFBrowserOrigin("https://app.example.com"),
+    provider.WithHumanConfidentialBFFCompletionOrigins(
+      "https://app.example.com", "https://second-app.example.com",
+    ),
     provider.WithHumanConfidentialBFFBrowserBindingCookieName("__Host-human-oidc"),
   ),
 )
@@ -365,11 +368,13 @@ Starting with fork release `v0.25.1-d0.5`,
 from `v0.25.1-d0.4` must configure the exact browser application origin.
 
 The provider requires HTTPS, PS256 ID tokens, a typed JTI consumer, configured
-resources and ACRs, two clean identity endpoints on one origin, and one exact
-browser application origin; all three origins are distinct. Interaction-page
-CSP permits form redirects only to the corresponding configured origin, and
+resources and ACRs, two clean identity endpoints on one origin, and one primary
+browser application origin; all three origins are distinct. An optional closed
+set of up to eight exact HTTPS completion origins supports multiple BFFs and
+must include the primary origin. Without it, only the primary origin is allowed.
+The consume-page CSP permits form redirects only to those configured origins;
 completion additionally requires the freshly resolved registered redirect URI
-to have the exact configured browser origin. Its client resolver must classify
+to have an allowed origin. Its client resolver must classify
 eligible clients with
 `goidc.AuthorizationRequestProfileHumanConfidentialBFF` and supply a
 server-owned `goidc.PrivateKeyJWTAuthority`; these fields cannot be selected

@@ -41,6 +41,7 @@ type Configuration struct {
 	HumanIdentityInteractionEndpoint         string
 	HumanIdentityReadyEndpoint               string
 	HumanBrowserOrigin                       string
+	HumanCompletionOrigins                   []string
 	HumanBrowserBindingCookieName            string
 	HumanAccessTokenLifetimeSecs             int
 

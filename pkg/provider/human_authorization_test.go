@@ -98,6 +98,25 @@ func TestNewHumanConfidentialBFFAuthorizationResponseIssuer(t *testing.T) {
 	}
 }
 
+func TestNewHumanConfidentialBFFCompletionOrigins(t *testing.T) {
+	configured := []string{"https://app.d0.eu", "https://second.example.com"}
+	option := WithHumanConfidentialBFFCompletionOrigins(configured...)
+	configured[1] = "https://attacker.invalid"
+	provider, err := New(humanAuthorizationProviderConfig(goidc.SigAlgPS256),
+		withHumanAuthorizationJTIUseConsumer(),
+		withHumanAuthorizationResourceIndicators(),
+		withHumanAuthorizationACRs(),
+		WithHumanConfidentialBFFAuthorizationAuthority(humanAuthorizationAuthorityProviderStub{},
+			append(validHumanAuthorizationProviderOptions(), option)...),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if !slices.Equal(provider.config.HumanCompletionOrigins, []string{"https://app.d0.eu", "https://second.example.com"}) {
+		t.Fatalf("completion origins = %q", provider.config.HumanCompletionOrigins)
+	}
+}
+
 func TestNewHumanConfidentialBFFAuthorizationSupportsMixedLegacyDispatch(t *testing.T) {
 	provider, err := New(humanAuthorizationProviderConfig(goidc.SigAlgPS256),
 		withHumanAuthorizationJTIUseConsumer(),
@@ -275,6 +294,14 @@ func TestNewHumanConfidentialBFFAuthorizationRejectsUnsafeConfiguration(t *testi
 		{name: "browser origin with IP host", config: humanAuthorizationProviderConfig(goidc.SigAlgPS256), options: append(validHumanAuthorizationProviderOptions(), WithHumanConfidentialBFFBrowserOrigin("https://127.0.0.1"))},
 		{name: "browser origin on auth origin", config: humanAuthorizationProviderConfig(goidc.SigAlgPS256), options: append(validHumanAuthorizationProviderOptions(), WithHumanConfidentialBFFBrowserOrigin("https://auth.d0.eu"))},
 		{name: "browser origin on identity origin", config: humanAuthorizationProviderConfig(goidc.SigAlgPS256), options: append(validHumanAuthorizationProviderOptions(), WithHumanConfidentialBFFBrowserOrigin("https://id.d0.eu"))},
+		{name: "empty completion origins", config: humanAuthorizationProviderConfig(goidc.SigAlgPS256), options: append(validHumanAuthorizationProviderOptions(), WithHumanConfidentialBFFCompletionOrigins())},
+		{name: "completion missing browser", config: humanAuthorizationProviderConfig(goidc.SigAlgPS256), options: append(validHumanAuthorizationProviderOptions(), WithHumanConfidentialBFFCompletionOrigins("https://second.example.com"))},
+		{name: "completion insecure", config: humanAuthorizationProviderConfig(goidc.SigAlgPS256), options: append(validHumanAuthorizationProviderOptions(), WithHumanConfidentialBFFCompletionOrigins("https://app.d0.eu", "http://second.example.com"))},
+		{name: "completion path", config: humanAuthorizationProviderConfig(goidc.SigAlgPS256), options: append(validHumanAuthorizationProviderOptions(), WithHumanConfidentialBFFCompletionOrigins("https://app.d0.eu", "https://second.example.com/callback"))},
+		{name: "completion query", config: humanAuthorizationProviderConfig(goidc.SigAlgPS256), options: append(validHumanAuthorizationProviderOptions(), WithHumanConfidentialBFFCompletionOrigins("https://app.d0.eu", "https://second.example.com?x=1"))},
+		{name: "completion duplicate", config: humanAuthorizationProviderConfig(goidc.SigAlgPS256), options: append(validHumanAuthorizationProviderOptions(), WithHumanConfidentialBFFCompletionOrigins("https://app.d0.eu", "https://app.d0.eu"))},
+		{name: "completion auth origin", config: humanAuthorizationProviderConfig(goidc.SigAlgPS256), options: append(validHumanAuthorizationProviderOptions(), WithHumanConfidentialBFFCompletionOrigins("https://app.d0.eu", "https://auth.d0.eu"))},
+		{name: "completion identity origin", config: humanAuthorizationProviderConfig(goidc.SigAlgPS256), options: append(validHumanAuthorizationProviderOptions(), WithHumanConfidentialBFFCompletionOrigins("https://app.d0.eu", "https://id.d0.eu"))},
 		{name: "endpoint with query", config: humanAuthorizationProviderConfig(goidc.SigAlgPS256), options: []HumanConfidentialBFFAuthorizationOption{WithHumanConfidentialBFFIdentityInteractionEndpoint("https://id.d0.eu/oidc/interaction/identity?next=x"), WithHumanConfidentialBFFBrowserBindingCookieName("__Host-d0-human-oidc")}},
 		{name: "endpoint with IP host", config: humanAuthorizationProviderConfig(goidc.SigAlgPS256), options: []HumanConfidentialBFFAuthorizationOption{WithHumanConfidentialBFFIdentityInteractionEndpoint("https://127.0.0.1/oidc/interaction/identity"), WithHumanConfidentialBFFBrowserBindingCookieName("__Host-d0-human-oidc")}},
 		{name: "ready endpoint with query", config: humanAuthorizationProviderConfig(goidc.SigAlgPS256), options: []HumanConfidentialBFFAuthorizationOption{WithHumanConfidentialBFFIdentityInteractionEndpoint("https://id.d0.eu/oidc/interaction/identity"), WithHumanConfidentialBFFIdentityReadyEndpoint("https://id.d0.eu/oidc/interaction/ready?next=x"), WithHumanConfidentialBFFBrowserBindingCookieName("__Host-d0-human-oidc")}},

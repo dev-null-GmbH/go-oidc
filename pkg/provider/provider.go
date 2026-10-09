@@ -142,6 +142,8 @@ func New(cfg Config, opts ...Option) (*Provider, error) {
 				op.config.HumanIdentityInteractionEndpoint,
 				op.config.HumanBrowserOrigin,
 			) ||
+			!validHumanCompletionOrigins(op.config.Host, op.config.HumanIdentityInteractionEndpoint,
+				op.config.HumanBrowserOrigin, op.config.HumanCompletionOrigins) ||
 			!validHumanBrowserBindingCookieName(op.config.HumanBrowserBindingCookieName) ||
 			!validHumanAuthorizationResources(op.config.ResourceIndicatorsEnabled, op.config.ResourceIndicators) ||
 			!validHumanAuthorizationACRs(op.config.ACRs) ||

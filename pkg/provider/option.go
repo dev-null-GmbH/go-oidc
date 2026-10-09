@@ -127,16 +127,33 @@ func WithHumanConfidentialBFFIdentityReadyEndpoint(endpoint string) HumanConfide
 	}
 }
 
-// WithHumanConfidentialBFFBrowserOrigin pins the exact application origin to
-// which this provider may complete a browser authorization. The completion
-// handler still revalidates the exact registered redirect URI and requires its
-// origin to equal this value before redirecting.
+// WithHumanConfidentialBFFBrowserOrigin pins the primary application origin.
+// Without an explicit completion-origin set, it is the only permitted callback
+// origin. Completion always revalidates the exact registered redirect URI.
 func WithHumanConfidentialBFFBrowserOrigin(origin string) HumanConfidentialBFFAuthorizationOption {
 	return func(p *Provider) error {
 		if !validHumanBrowserOrigin(origin) {
 			return errors.New("invalid human browser origin")
 		}
 		p.config.HumanBrowserOrigin = origin
+		return nil
+	}
+}
+
+// WithHumanConfidentialBFFCompletionOrigins pins a closed set of BFF callback
+// origins. Omitting it retains the configured browser origin as the only origin.
+func WithHumanConfidentialBFFCompletionOrigins(origins ...string) HumanConfidentialBFFAuthorizationOption {
+	copyOfOrigins := append(make([]string, 0, len(origins)), origins...)
+	return func(p *Provider) error {
+		if len(copyOfOrigins) == 0 || len(copyOfOrigins) > 8 {
+			return errors.New("invalid human completion origins")
+		}
+		for index, origin := range copyOfOrigins {
+			if !validHumanBrowserOrigin(origin) || slices.Contains(copyOfOrigins[:index], origin) {
+				return errors.New("invalid human completion origins")
+			}
+		}
+		p.config.HumanCompletionOrigins = slices.Clone(copyOfOrigins)
 		return nil
 	}
 }
@@ -208,6 +225,23 @@ func validHumanBrowserOriginTopology(issuer, identity, browser string) bool {
 	return issuerErr == nil && identityErr == nil && browserErr == nil &&
 		browserURL.Hostname() != issuerURL.Hostname() &&
 		browserURL.Hostname() != identityURL.Hostname()
+}
+
+func validHumanCompletionOrigins(issuer, identity, browser string, origins []string) bool {
+	if origins == nil {
+		return true
+	}
+	if len(origins) == 0 || len(origins) > 8 || !slices.Contains(origins, browser) {
+		return false
+	}
+	for index, origin := range origins {
+		if !validHumanBrowserOrigin(origin) ||
+			!validHumanBrowserOriginTopology(issuer, identity, origin) ||
+			slices.Contains(origins[:index], origin) {
+			return false
+		}
+	}
+	return true
 }
 
 func validHumanBrowserBindingCookieName(name string) bool {
