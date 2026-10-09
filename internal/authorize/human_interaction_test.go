@@ -718,6 +718,179 @@ func TestHumanConsumeInteractionPOSTCompletesAgainstFreshClientAuthority(t *test
 	assertHumanBrowserBindingCleared(t, response.Result(), ctx.HumanBrowserBindingCookieName)
 }
 
+func TestHumanConsumeInteractionAllowsSecondConfiguredBFFOrigin(t *testing.T) {
+	t.Parallel()
+	for _, failed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "completed", true: "failed"}[failed], func(t *testing.T) {
+			ctx, client, _ := newStrictOuterAuthorizationContext(t)
+			configureHumanInteractionTestContext(ctx)
+			ctx.HumanCompletionOrigins = []string{ctx.HumanBrowserOrigin, "https://kavell.example.invalid"}
+			client.RedirectURIs[0] = "https://kavell.example.invalid/callback"
+			router := http.NewServeMux()
+			RegisterHandlers(router, ctx.Configuration)
+			page := serveHumanInteraction(t, router, http.MethodGet, humanConsumeInteractionPath, nil, nil)
+			if page.Code != http.StatusOK {
+				t.Fatalf("consume GET = %d, want 200", page.Code)
+			}
+			assertHumanInteractionFormAction(t, page.Header(), "'self' https://human-bff.example.invalid https://kavell.example.invalid")
+
+			ready := testHumanCapability("d0_hio_s1_", 42)
+			binding := testHumanCapability("d0_hio_b1_", 43)
+			code := testHumanCapability("d0_hac_1_", 44)
+			ctx.HumanAuthorizationAuthority = humanInteractionAuthorityStub{
+				complete: func(context.Context, goidc.HumanCompletionInput) (goidc.HumanCompletionDecision, error) {
+					config := goidc.HumanCompletionDecisionConfig{
+						Profile:  goidc.AuthorizationRequestProfileHumanConfidentialBFF,
+						ClientID: client.ID, ClientSnapshotRevision: client.PrivateKeyJWTAuthority.SnapshotRevision,
+						AdmissionKeyAuthorityID: client.PrivateKeyJWTAuthority.Keys[0].KeyAuthorityID,
+						RedirectURI:             client.RedirectURIs[0], State: "opaque-client-state-value",
+					}
+					if failed {
+						config.Outcome = goidc.HumanCompletionOutcomeFailed
+						config.Failure = goidc.HumanAuthorizationFailureAccessDenied
+					} else {
+						config.Outcome = goidc.HumanCompletionOutcomeCompleted
+						config.AuthorizationCode = mustHumanAuthorizationCode(t, code)
+						config.CodeExpiresInSeconds = 60
+					}
+					return mustHumanCompletionDecision(t, config), nil
+				},
+			}
+			response := serveHumanInteraction(t, router, http.MethodPost, humanConsumeInteractionPath,
+				url.Values{"ready": {ready}}, map[string]string{"Origin": ctx.Host,
+					"Referer": ctx.Host + humanConsumeInteractionPath,
+					"Cookie":  ctx.HumanBrowserBindingCookieName + "=" + binding})
+			if response.Code != http.StatusSeeOther || !strings.HasPrefix(response.Header().Get("Location"), client.RedirectURIs[0]+"?") {
+				t.Fatalf("second BFF completion = status %d, location %q", response.Code, response.Header().Get("Location"))
+			}
+		})
+	}
+}
+
+func TestHumanConsumeInteractionRejectsUnsafeCompletionOriginsBeforeAuthority(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name    string
+		origins []string
+	}{
+		{"insecure", []string{"https://human-bff.example.invalid", "http://other.example.invalid"}},
+		{"path", []string{"https://human-bff.example.invalid", "https://other.example.invalid/callback"}},
+		{"duplicate", []string{"https://human-bff.example.invalid", "https://human-bff.example.invalid"}},
+		{"missing browser", []string{"https://other.example.invalid"}},
+		{"issuer", []string{"https://human-bff.example.invalid", "https://example.com"}},
+		{"identity", []string{"https://human-bff.example.invalid", "https://id.d0.eu"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, _, _ := newStrictOuterAuthorizationContext(t)
+			configureHumanInteractionTestContext(ctx)
+			ctx.HumanCompletionOrigins = test.origins
+			calls := 0
+			ctx.HumanAuthorizationAuthority = humanInteractionAuthorityStub{
+				complete: func(context.Context, goidc.HumanCompletionInput) (goidc.HumanCompletionDecision, error) {
+					calls++
+					return goidc.HumanCompletionDecision{}, nil
+				},
+			}
+			router := http.NewServeMux()
+			RegisterHandlers(router, ctx.Configuration)
+			get := serveHumanInteraction(t, router, http.MethodGet, humanConsumeInteractionPath, nil, nil)
+			if get.Code != http.StatusInternalServerError {
+				t.Fatalf("consume GET = %d, want 500", get.Code)
+			}
+			post := serveHumanInteraction(t, router, http.MethodPost, humanConsumeInteractionPath,
+				url.Values{"ready": {testHumanCapability("d0_hio_s1_", 91)}},
+				map[string]string{"Origin": ctx.Host, "Referer": ctx.Host + humanConsumeInteractionPath,
+					"Cookie": ctx.HumanBrowserBindingCookieName + "=" + testHumanCapability("d0_hio_b1_", 92)})
+			if post.Code != http.StatusInternalServerError || calls != 0 {
+				t.Fatalf("consume POST = %d, authority calls = %d, want 500 and 0", post.Code, calls)
+			}
+		})
+	}
+}
+
+func TestHumanConsumeInteractionFreezesCompletionOriginsBeforeAuthority(t *testing.T) {
+	t.Parallel()
+	ctx, client, _ := newStrictOuterAuthorizationContext(t)
+	configureHumanInteractionTestContext(ctx)
+	ctx.HumanCompletionOrigins = []string{ctx.HumanBrowserOrigin, "https://second.example.invalid"}
+	ready := testHumanCapability("d0_hio_s1_", 93)
+	binding := testHumanCapability("d0_hio_b1_", 94)
+	code := testHumanCapability("d0_hac_1_", 95)
+	ctx.HumanAuthorizationAuthority = humanInteractionAuthorityStub{
+		complete: func(context.Context, goidc.HumanCompletionInput) (goidc.HumanCompletionDecision, error) {
+			// A mutable provider configuration must not enlarge this request's trust set after the callback.
+			ctx.HumanCompletionOrigins[1] = "https://attacker.example.invalid"
+			client.RedirectURIs[0] = "https://attacker.example.invalid/callback"
+			return mustHumanCompletionDecision(t, goidc.HumanCompletionDecisionConfig{
+				Outcome:  goidc.HumanCompletionOutcomeCompleted,
+				Profile:  goidc.AuthorizationRequestProfileHumanConfidentialBFF,
+				ClientID: client.ID, ClientSnapshotRevision: client.PrivateKeyJWTAuthority.SnapshotRevision,
+				AdmissionKeyAuthorityID: client.PrivateKeyJWTAuthority.Keys[0].KeyAuthorityID,
+				AuthorizationCode:       mustHumanAuthorizationCode(t, code),
+				RedirectURI:             client.RedirectURIs[0], State: "opaque-client-state-value", CodeExpiresInSeconds: 60,
+			}), nil
+		},
+	}
+	router := http.NewServeMux()
+	RegisterHandlers(router, ctx.Configuration)
+	response := serveHumanInteraction(t, router, http.MethodPost, humanConsumeInteractionPath,
+		url.Values{"ready": {ready}}, map[string]string{"Origin": ctx.Host,
+			"Referer": ctx.Host + humanConsumeInteractionPath,
+			"Cookie":  ctx.HumanBrowserBindingCookieName + "=" + binding})
+	if response.Code != http.StatusInternalServerError || response.Header().Get("Location") != "" {
+		t.Fatalf("mutated completion origin response = status %d, location %q", response.Code, response.Header().Get("Location"))
+	}
+}
+
+func TestHumanConsumeInteractionSecondBFFStillRequiresFreshAuthority(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name   string
+		mutate func(*goidc.Client)
+	}{
+		{"client", func(client *goidc.Client) { client.ID = "other-client" }},
+		{"revision", func(client *goidc.Client) { client.PrivateKeyJWTAuthority.SnapshotRevision++ }},
+		{"key", func(client *goidc.Client) { client.PrivateKeyJWTAuthority.Keys[0].KeyAuthorityID = "other-key" }},
+		{"redirect", func(client *goidc.Client) { client.RedirectURIs[0] = "https://second.example.invalid/other" }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, admitted, _ := newStrictOuterAuthorizationContext(t)
+			configureHumanInteractionTestContext(ctx)
+			ctx.HumanCompletionOrigins = []string{ctx.HumanBrowserOrigin, "https://second.example.invalid"}
+			admitted.RedirectURIs[0] = "https://second.example.invalid/callback"
+			current, err := cloneHumanConfidentialBFFClient(admitted)
+			if err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(current)
+			ctx.StaticClients = nil
+			ctx.ResolveClientFunc = func(context.Context, string) (*goidc.Client, error) { return current, nil }
+			code := testHumanCapability("d0_hac_1_", 96)
+			ctx.HumanAuthorizationAuthority = humanInteractionAuthorityStub{
+				complete: func(context.Context, goidc.HumanCompletionInput) (goidc.HumanCompletionDecision, error) {
+					return mustHumanCompletionDecision(t, goidc.HumanCompletionDecisionConfig{
+						Outcome:  goidc.HumanCompletionOutcomeCompleted,
+						Profile:  goidc.AuthorizationRequestProfileHumanConfidentialBFF,
+						ClientID: admitted.ID, ClientSnapshotRevision: admitted.PrivateKeyJWTAuthority.SnapshotRevision,
+						AdmissionKeyAuthorityID: admitted.PrivateKeyJWTAuthority.Keys[0].KeyAuthorityID,
+						AuthorizationCode:       mustHumanAuthorizationCode(t, code),
+						RedirectURI:             admitted.RedirectURIs[0], State: "opaque-client-state-value", CodeExpiresInSeconds: 60,
+					}), nil
+				},
+			}
+			router := http.NewServeMux()
+			RegisterHandlers(router, ctx.Configuration)
+			response := serveHumanInteraction(t, router, http.MethodPost, humanConsumeInteractionPath,
+				url.Values{"ready": {testHumanCapability("d0_hio_s1_", 97)}},
+				map[string]string{"Origin": ctx.Host, "Referer": ctx.Host + humanConsumeInteractionPath,
+					"Cookie": ctx.HumanBrowserBindingCookieName + "=" + testHumanCapability("d0_hio_b1_", 98)})
+			if response.Code != http.StatusInternalServerError || response.Header().Get("Location") != "" {
+				t.Fatalf("fresh authority mismatch response = %d, location %q", response.Code, response.Header().Get("Location"))
+			}
+		})
+	}
+}
+
 func TestHumanConsumeInteractionRejectsRegisteredRedirectOutsideConfiguredBrowserOrigin(t *testing.T) {
 	t.Parallel()
 
