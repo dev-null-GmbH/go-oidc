@@ -26,6 +26,56 @@ const (
 	humanConsumeInteractionPath = "/oidc/interaction/consume"
 )
 
+func TestHumanInteractionPOSTFailureOffersBoundedRestart(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name     string
+		path     string
+		form     url.Values
+		confirm  func(context.Context, goidc.HumanContinuationInput) (goidc.HumanContinuationDecision, error)
+		complete func(context.Context, goidc.HumanCompletionInput) (goidc.HumanCompletionDecision, error)
+		status   int
+	}{
+		{name: "browser invalid form", path: humanBrowserInteractionPath, form: url.Values{"identity_return": {"invalid"}, "browser_return": {testHumanCapability("d0_hio_c1_", 42)}}, status: http.StatusBadRequest},
+		{name: "browser expired", path: humanBrowserInteractionPath, form: url.Values{"identity_return": {testHumanCapability("d0_hio_r1_", 41)}, "browser_return": {testHumanCapability("d0_hio_c1_", 42)}}, confirm: func(context.Context, goidc.HumanContinuationInput) (goidc.HumanContinuationDecision, error) {
+			return mustHumanContinuationDecision(t, goidc.HumanContinuationOutcomeExpired, ""), nil
+		}, status: http.StatusBadRequest},
+		{name: "browser unavailable", path: humanBrowserInteractionPath, form: url.Values{"identity_return": {testHumanCapability("d0_hio_r1_", 41)}, "browser_return": {testHumanCapability("d0_hio_c1_", 42)}}, confirm: func(context.Context, goidc.HumanContinuationInput) (goidc.HumanContinuationDecision, error) {
+			return goidc.HumanContinuationDecision{}, errors.New("private backend detail")
+		}, status: http.StatusInternalServerError},
+		{name: "consume invalid form", path: humanConsumeInteractionPath, form: url.Values{"ready": {"invalid"}}, status: http.StatusBadRequest},
+		{name: "consume unavailable", path: humanConsumeInteractionPath, form: url.Values{"ready": {testHumanCapability("d0_hio_s1_", 43)}}, complete: func(context.Context, goidc.HumanCompletionInput) (goidc.HumanCompletionDecision, error) {
+			return goidc.HumanCompletionDecision{}, errors.New("private backend detail")
+		}, status: http.StatusInternalServerError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, _, _ := newStrictOuterAuthorizationContext(t)
+			configureHumanInteractionTestContext(ctx)
+			ctx.HumanAuthorizationAuthority = humanInteractionAuthorityStub{confirm: test.confirm, complete: test.complete}
+			router := http.NewServeMux()
+			RegisterHandlers(router, ctx.Configuration)
+			response := serveHumanInteraction(t, router, http.MethodPost, test.path, test.form,
+				map[string]string{"Origin": ctx.Host, "Referer": ctx.Host + test.path,
+					"Cookie": ctx.HumanBrowserBindingCookieName + "=" + testHumanCapability("d0_hio_b1_", 44)})
+			if response.Code != test.status || response.Header().Get("Content-Type") != "text/html; charset=utf-8" ||
+				response.Header().Get("Location") != "" || (response.Header().Get("Set-Cookie") != "" && test.path == humanBrowserInteractionPath) ||
+				!strings.Contains(response.Body.String(), `href="https://human-bff.example.invalid/login"`) ||
+				strings.Count(response.Body.String(), `href="https://`) != 1 ||
+				strings.Contains(response.Body.String(), "private backend detail") ||
+				strings.Contains(response.Body.String(), "d0_hio_") ||
+				strings.Contains(response.Body.String(), test.form.Encode()) {
+				t.Fatalf("browser restart response = status %d content type %q", response.Code, response.Header().Get("Content-Type"))
+			}
+			assertHumanInteractionSecurityHeaders(t, response.Header())
+			assertHumanInteractionFormAction(t, response.Header(), "'self'")
+			assertHumanInteractionCSPMatchesPageStyle(t, response.Header(), response.Body.String())
+			if !strings.Contains(response.Header().Get("Content-Security-Policy"), "script-src 'none'") {
+				t.Fatal("restart page permits scripts")
+			}
+		})
+	}
+}
+
 func TestHumanBrowserInteractionGETMintsFreshSuccessorForOneNativePOST(t *testing.T) {
 	t.Parallel()
 
@@ -188,12 +238,13 @@ func TestHumanBrowserInteractionPOSTConfirmsExactCapabilities(t *testing.T) {
 		target  string
 		form    url.Values
 		headers map[string]string
+		page    bool
 	}{
 		{name: "query", target: humanBrowserInteractionPath + "?x=1", form: url.Values{"identity_return": {identityReturn}, "browser_return": {browserReturn}}, headers: map[string]string{"Origin": ctx.Host, "Cookie": ctx.HumanBrowserBindingCookieName + "=" + browserBinding}},
-		{name: "extra form field", target: humanBrowserInteractionPath, form: url.Values{"identity_return": {identityReturn}, "browser_return": {browserReturn}, "extra": {"x"}}, headers: map[string]string{"Origin": ctx.Host, "Cookie": ctx.HumanBrowserBindingCookieName + "=" + browserBinding}},
-		{name: "duplicate field", target: humanBrowserInteractionPath, form: url.Values{"identity_return": {identityReturn, identityReturn}, "browser_return": {browserReturn}}, headers: map[string]string{"Origin": ctx.Host, "Cookie": ctx.HumanBrowserBindingCookieName + "=" + browserBinding}},
-		{name: "missing binding", target: humanBrowserInteractionPath, form: url.Values{"identity_return": {identityReturn}, "browser_return": {browserReturn}}, headers: map[string]string{"Origin": ctx.Host}},
-		{name: "duplicate binding", target: humanBrowserInteractionPath, form: url.Values{"identity_return": {identityReturn}, "browser_return": {browserReturn}}, headers: map[string]string{"Origin": ctx.Host, "Cookie": ctx.HumanBrowserBindingCookieName + "=" + browserBinding + "; " + ctx.HumanBrowserBindingCookieName + "=" + browserBinding}},
+		{name: "extra form field", target: humanBrowserInteractionPath, form: url.Values{"identity_return": {identityReturn}, "browser_return": {browserReturn}, "extra": {"x"}}, headers: map[string]string{"Origin": ctx.Host, "Cookie": ctx.HumanBrowserBindingCookieName + "=" + browserBinding}, page: true},
+		{name: "duplicate field", target: humanBrowserInteractionPath, form: url.Values{"identity_return": {identityReturn, identityReturn}, "browser_return": {browserReturn}}, headers: map[string]string{"Origin": ctx.Host, "Cookie": ctx.HumanBrowserBindingCookieName + "=" + browserBinding}, page: true},
+		{name: "missing binding", target: humanBrowserInteractionPath, form: url.Values{"identity_return": {identityReturn}, "browser_return": {browserReturn}}, headers: map[string]string{"Origin": ctx.Host}, page: true},
+		{name: "duplicate binding", target: humanBrowserInteractionPath, form: url.Values{"identity_return": {identityReturn}, "browser_return": {browserReturn}}, headers: map[string]string{"Origin": ctx.Host, "Cookie": ctx.HumanBrowserBindingCookieName + "=" + browserBinding + "; " + ctx.HumanBrowserBindingCookieName + "=" + browserBinding}, page: true},
 		{name: "cross origin", target: humanBrowserInteractionPath, form: url.Values{"identity_return": {identityReturn}, "browser_return": {browserReturn}}, headers: map[string]string{"Origin": "https://attacker.invalid", "Cookie": ctx.HumanBrowserBindingCookieName + "=" + browserBinding}},
 		{name: "credential header", target: humanBrowserInteractionPath, form: url.Values{"identity_return": {identityReturn}, "browser_return": {browserReturn}}, headers: map[string]string{"Origin": ctx.Host, "Cookie": ctx.HumanBrowserBindingCookieName + "=" + browserBinding, "Authorization": "Bearer attacker"}},
 		{name: "parameterized content type", target: humanBrowserInteractionPath, form: url.Values{"identity_return": {identityReturn}, "browser_return": {browserReturn}}, headers: map[string]string{"Origin": ctx.Host, "Cookie": ctx.HumanBrowserBindingCookieName + "=" + browserBinding, "Content-Type": "application/x-www-form-urlencoded; charset=utf-8"}},
@@ -202,8 +253,9 @@ func TestHumanBrowserInteractionPOSTConfirmsExactCapabilities(t *testing.T) {
 			test.headers["Referer"] = ctx.Host + humanBrowserInteractionPath
 			before := calls
 			result := serveHumanInteraction(t, router, http.MethodPost, test.target, test.form, test.headers)
-			if result.Code != http.StatusBadRequest || result.Body.String() != humanInteractionRejectedBody {
-				t.Fatalf("malformed browser POST = status %d, body %q", result.Code, result.Body.String())
+			if result.Code != http.StatusBadRequest || test.page != strings.Contains(result.Body.String(), `href="https://human-bff.example.invalid/login"`) ||
+				!test.page && result.Body.String() != humanInteractionRejectedBody {
+				t.Fatalf("malformed browser POST = status %d, content type %q", result.Code, result.Header().Get("Content-Type"))
 			}
 			if calls != before {
 				t.Fatal("malformed browser POST reached the authority")
@@ -1033,8 +1085,10 @@ func TestHumanConsumeInteractionAuthorityFailureBurnsBrowserBinding(t *testing.T
 		response := serveHumanInteraction(t, router, http.MethodPost, humanConsumeInteractionPath,
 			url.Values{"ready": {ready}},
 			map[string]string{"Origin": ctx.Host, "Referer": ctx.Host + humanConsumeInteractionPath, "Cookie": ctx.HumanBrowserBindingCookieName + "=" + browserBinding})
-		if response.Code != http.StatusInternalServerError || response.Body.String() != humanInteractionServerBody {
-			t.Fatalf("authority failure = status %d, body %q", response.Code, response.Body.String())
+		if response.Code != http.StatusInternalServerError ||
+			!strings.Contains(response.Body.String(), `href="https://human-bff.example.invalid/login"`) ||
+			strings.Contains(response.Body.String(), "authority unavailable") {
+			t.Fatalf("authority failure = status %d, content type %q", response.Code, response.Header().Get("Content-Type"))
 		}
 		assertHumanBrowserBindingCleared(t, response.Result(), ctx.HumanBrowserBindingCookieName)
 	}
