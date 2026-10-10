@@ -114,29 +114,29 @@ func handleHumanBrowserInteractionPOST(ctx oidc.Context) {
 	}
 	form, ok := parseExactHumanInteractionForm(ctx, humanIdentityReturnFormField, humanBrowserReturnFormField)
 	if !ok {
-		writeHumanInteractionError(ctx, http.StatusBadRequest, humanInteractionRejectedBody)
+		writeHumanInteractionRestart(ctx, http.StatusBadRequest)
 		return
 	}
 	browserBinding, ok := humanBrowserBindingCookie(ctx.Request, ctx.HumanBrowserBindingCookieName)
 	if !ok {
-		writeHumanInteractionError(ctx, http.StatusBadRequest, humanInteractionRejectedBody)
+		writeHumanInteractionRestart(ctx, http.StatusBadRequest)
 		return
 	}
 	identityReturn, identityErr := goidc.NewHumanIdentityReturnCapability(form[humanIdentityReturnFormField][0])
 	browserReturn, browserErr := goidc.NewHumanBrowserReturnCapability(form[humanBrowserReturnFormField][0])
 	binding, bindingErr := goidc.NewHumanBrowserBindingCapability(browserBinding)
 	if identityErr != nil || browserErr != nil || bindingErr != nil {
-		writeHumanInteractionError(ctx, http.StatusBadRequest, humanInteractionRejectedBody)
+		writeHumanInteractionRestart(ctx, http.StatusBadRequest)
 		return
 	}
 	input, err := goidc.NewHumanContinuationInput(identityReturn, browserReturn, binding)
 	if err != nil {
-		writeHumanInteractionError(ctx, http.StatusBadRequest, humanInteractionRejectedBody)
+		writeHumanInteractionRestart(ctx, http.StatusBadRequest)
 		return
 	}
 	decision, err := ctx.HumanConfirmBrowser(input)
 	if err != nil {
-		writeHumanInteractionError(ctx, http.StatusInternalServerError, humanInteractionServerBody)
+		writeHumanInteractionRestart(ctx, http.StatusInternalServerError)
 		return
 	}
 	switch decision.Outcome() {
@@ -150,7 +150,7 @@ func handleHumanBrowserInteractionPOST(ctx oidc.Context) {
 		}
 		writeHumanInteractionRedirect(ctx, identityReadyEndpoint+"#"+confirmedText)
 	case goidc.HumanContinuationOutcomeExpired, goidc.HumanContinuationOutcomeRejected:
-		writeHumanInteractionError(ctx, http.StatusBadRequest, humanInteractionRejectedBody)
+		writeHumanInteractionRestart(ctx, http.StatusBadRequest)
 	default:
 		writeHumanInteractionError(ctx, http.StatusInternalServerError, humanInteractionServerBody)
 	}
@@ -194,30 +194,30 @@ func handleHumanConsumeInteractionPOST(ctx oidc.Context) {
 	}
 	form, ok := parseExactHumanInteractionForm(ctx, humanReadyFormField)
 	if !ok {
-		writeHumanInteractionError(ctx, http.StatusBadRequest, humanInteractionRejectedBody)
+		writeHumanInteractionRestart(ctx, http.StatusBadRequest)
 		return
 	}
 	browserBinding, ok := humanBrowserBindingCookie(ctx.Request, ctx.HumanBrowserBindingCookieName)
 	if !ok {
-		writeHumanInteractionError(ctx, http.StatusBadRequest, humanInteractionRejectedBody)
+		writeHumanInteractionRestart(ctx, http.StatusBadRequest)
 		return
 	}
 	ready, readyErr := goidc.NewHumanReadyCapability(form[humanReadyFormField][0])
 	binding, bindingErr := goidc.NewHumanBrowserBindingCapability(browserBinding)
 	if readyErr != nil || bindingErr != nil {
-		writeHumanInteractionError(ctx, http.StatusBadRequest, humanInteractionRejectedBody)
+		writeHumanInteractionRestart(ctx, http.StatusBadRequest)
 		return
 	}
 	input, err := goidc.NewHumanCompletionInput(ready, binding)
 	if err != nil {
-		writeHumanInteractionError(ctx, http.StatusBadRequest, humanInteractionRejectedBody)
+		writeHumanInteractionRestart(ctx, http.StatusBadRequest)
 		return
 	}
 
 	decision, err := ctx.HumanCompleteAuthorization(input)
 	clearHumanBrowserBindingCookie(ctx)
 	if err != nil {
-		writeHumanInteractionError(ctx, http.StatusInternalServerError, humanInteractionServerBody)
+		writeHumanInteractionRestart(ctx, http.StatusInternalServerError)
 		return
 	}
 	switch decision.Outcome() {
@@ -250,7 +250,7 @@ func handleHumanConsumeInteractionPOST(ctx oidc.Context) {
 	case goidc.HumanCompletionOutcomeReplayed,
 		goidc.HumanCompletionOutcomeExpired,
 		goidc.HumanCompletionOutcomeRejected:
-		writeHumanInteractionError(ctx, http.StatusBadRequest, humanInteractionRejectedBody)
+		writeHumanInteractionRestart(ctx, http.StatusBadRequest)
 	default:
 		writeHumanInteractionError(ctx, http.StatusInternalServerError, humanInteractionServerBody)
 	}
@@ -564,6 +564,15 @@ func writeHumanInteractionError(ctx oidc.Context, status int, body string) {
 	ctx.Response.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	ctx.Response.WriteHeader(status)
 	_, _ = io.WriteString(ctx.Response, body)
+}
+
+// This page is only used after the native, same-origin POST transport was
+// accepted. It does not echo a capability or redirect to a client-supplied URI.
+func writeHumanInteractionRestart(ctx oidc.Context, status int) {
+	setHumanInteractionSecurityHeaders(ctx.Response.Header(), "", humanInteractionStyle, nil)
+	ctx.Response.Header().Set("Content-Type", "text/html; charset=utf-8")
+	ctx.Response.WriteHeader(status)
+	_, _ = io.WriteString(ctx.Response, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="same-origin"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign-in interrupted</title><style>`+humanInteractionStyle+`</style></head><body class="d0-foundation"><main><span class="brand" aria-hidden="true">`+humanDesignLogo+`</span><h1>Sign-in interrupted</h1><p>This sign-in could not continue. Start a new sign-in to try again.</p><a href="`+html.EscapeString(ctx.HumanBrowserOrigin+"/login")+`">Start sign-in again</a></main></body></html>`)
 }
 
 func setHumanInteractionSecurityHeaders(header http.Header, script, style string, formActionOrigins []string) {
