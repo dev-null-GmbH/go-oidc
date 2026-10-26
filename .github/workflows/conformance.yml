@@ -114,9 +114,10 @@ jobs:
           docker run --rm --pull=never \
             --mount "type=bind,src=$PWD/conformance-suite,dst=/usr/src/mymaven" \
             --mount "type=bind,src=$MAVEN_CACHE_DIR,dst=/root/.m2/repository" \
+            --mount "type=bind,src=$PWD/scripts/ConformanceNetworkProbe.java,dst=/opt/d0/ConformanceNetworkProbe.java,readonly" \
             --workdir /usr/src/mymaven \
             "$CS_MAVEN_IMAGE" \
-            mvn -B clean package -DskipTests=true
+            sh -ec 'if timeout --kill-after=2s 45s java /opt/d0/ConformanceNetworkProbe.java; then :; else printf "%s\n" "phase=network_probe status=incomplete"; fi; exec mvn -B clean package -DskipTests=true'
 
       - name: Verify prepared conformance suite
         shell: bash
