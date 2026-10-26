@@ -365,7 +365,7 @@ jobs:
           'd0-trusted' || 'd0-untrusted' }}
     timeout-minutes: 5
     needs: run-tests
-    if: always()
+    if: ${{ !cancelled() }}
     steps:
       - name: Check matrix result
         env:
