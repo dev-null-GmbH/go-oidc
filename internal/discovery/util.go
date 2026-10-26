@@ -20,7 +20,7 @@ func NewConfiguration(ctx oidc.Context) goidc.Configuration {
 		JWKSEndpoint:               ctx.BaseURL() + ctx.JWKSEndpoint,
 		ResponseTypes:              ctx.ResponseTypes,
 		ResponseModes:              ctx.ResponseModes,
-		GrantTypes:                 ctx.GrantTypes,
+		GrantTypes:                 supportedGrantTypes(ctx),
 		UserClaimsSupported:        ctx.Claims,
 		ClaimTypesSupported:        ctx.ClaimTypes,
 		SubIdentifierTypes:         ctx.SubIdentifierTypes,
@@ -174,7 +174,7 @@ func NewAuthorizationServerMetadata(ctx oidc.Context) authorizationServerMetadat
 		Scopes:                     scopes,
 		ResponseTypes:              append([]goidc.ResponseType{}, ctx.ResponseTypes...),
 		ResponseModes:              ctx.ResponseModes,
-		GrantTypes:                 ctx.GrantTypes,
+		GrantTypes:                 supportedGrantTypes(ctx),
 		TokenAuthnMethods:          ctx.AuthnMethods,
 		TokenAuthnSigAlgs:          ctx.TokenAuthnSigAlgs(),
 		IssuerResponseParamEnabled: ctx.IssuerRespParamEnabled,
@@ -264,4 +264,15 @@ func NewAuthorizationServerMetadata(ctx oidc.Context) authorizationServerMetadat
 	}
 
 	return metadata
+}
+
+func supportedGrantTypes(ctx oidc.Context) []goidc.GrantType {
+	if !ctx.HumanConfidentialBFFAuthorizationEnabled || ctx.LegacyRefreshTokenGrantEnabled {
+		return ctx.GrantTypes
+	}
+	// Strict human refresh uses receipt-bound delivery, not the token endpoint.
+	// Keep the internal refresh capability used by provider/profile validation.
+	return slices.DeleteFunc(slices.Clone(ctx.GrantTypes), func(grant goidc.GrantType) bool {
+		return grant == goidc.GrantRefreshToken
+	})
 }
