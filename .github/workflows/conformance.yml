@@ -117,7 +117,7 @@ jobs:
             --mount "type=bind,src=$PWD/scripts/ConformanceNetworkProbe.java,dst=/opt/d0/ConformanceNetworkProbe.java,readonly" \
             --workdir /usr/src/mymaven \
             "$CS_MAVEN_IMAGE" \
-            sh -ec 'export MAVEN_OPTS="${MAVEN_OPTS:+$MAVEN_OPTS }-Djava.net.preferIPv6Addresses=true"; if timeout --kill-after=2s 45s java -Djava.net.preferIPv6Addresses=true /opt/d0/ConformanceNetworkProbe.java; then :; else printf "%s\n" "phase=network_probe status=incomplete"; fi; exec mvn -B clean package -DskipTests=true'
+            sh -ec 'export MAVEN_OPTS="${MAVEN_OPTS:+$MAVEN_OPTS }-Djava.net.preferIPv6Addresses=true -Dkotlin.compiler.daemon.jvmArgs=Djava.net.preferIPv6Addresses=true"; if timeout --kill-after=2s 45s java -Djava.net.preferIPv6Addresses=true /opt/d0/ConformanceNetworkProbe.java; then :; else printf "%s\n" "phase=network_probe status=incomplete"; fi; exec mvn -B clean package -DskipTests=true'
 
       - name: Verify prepared conformance suite
         shell: bash
