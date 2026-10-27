@@ -76,6 +76,10 @@ fi
 
 require_literal .github/workflows/conformance.yml "$expected_maven_image"
 require_literal docker-compose.yml "$expected_mongo_image"
+if [[ "$(tail -n 3 docker-compose.yml)" != $'networks:\n  default:\n    enable_ipv6: true' ]]; then
+  echo "Conformance default network must explicitly enable IPv6" >&2
+  exit 1
+fi
 if [[ "$(grep -E '^[[:space:]]+--openid[.]mongodb[.]targetFeatureCompatibilityVersion=' docker-compose.yml)" != \
       "      --openid.mongodb.targetFeatureCompatibilityVersion=7.0" ]]; then
   echo "Conformance MongoDB FCV must be pinned once to 7.0" >&2
@@ -88,6 +92,12 @@ require_literal docker-compose.yml \
 require_literal scripts/prepare-conformance-suite.sh "$expected_commit"
 require_literal scripts/prepare-conformance-suite.sh "$expected_nginx_image"
 require_literal scripts/prepare-conformance-suite.sh "$expected_temurin_image"
+require_literal scripts/prepare-conformance-suite.sh \
+  'a0d5fd58f15fb1cd7bae4103ee9b637e7c64a66fee18f374e6062a75e0b2acdd'
+require_literal scripts/prepare-conformance-suite.sh \
+  '6a135eccd81000b2d1fb21d1e6d57688a163624c00e1f71b713835fe7a79e9d6'
+require_literal .github/workflows/conformance.yml \
+  './scripts/prepare-conformance-suite.sh --self-test conformance-suite'
 require_literal .github/workflows/conformance.yml \
   "hashFiles('scripts/conformance-requirements.lock', 'scripts/prepare-conformance-suite.sh', 'docker-compose.yml', 'Makefile')"
 require_literal .github/workflows/conformance.yml \

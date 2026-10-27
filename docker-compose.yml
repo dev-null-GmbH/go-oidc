@@ -53,3 +53,7 @@ services:
       - matls-auth.localhost:host-gateway
       - fed-trust-anchor.localhost:host-gateway
       - conformance.localhost:host-gateway
+
+networks:
+  default:
+    enable_ipv6: true

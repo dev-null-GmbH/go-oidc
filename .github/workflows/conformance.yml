@@ -133,6 +133,7 @@ jobs:
             exit 1
           fi
           ./scripts/prepare-conformance-suite.sh conformance-suite
+          ./scripts/prepare-conformance-suite.sh --self-test conformance-suite
           test -s conformance-suite/target/fapi-test-suite.jar
 
       - name: Record prepared JAR digest
