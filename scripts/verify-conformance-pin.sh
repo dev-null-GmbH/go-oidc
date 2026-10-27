@@ -11,7 +11,7 @@ readonly expected_version="release-v5.3.3"
 readonly expected_commit="7d420f716e49d44f8a6b04f0a3e240ad6d68ab55"
 readonly expected_python="3.14.10"
 readonly expected_maven_image="maven:3.9.16-eclipse-temurin-21@sha256:8f6ac126f7810bb5549c4cd122d2bf0e9cda5bdeb0838aa928f09e779fd8bef8"
-readonly expected_mongo_image="mongo:6.0.13@sha256:b415b12f638e2685d06c58ab7fb5943577c50fadec6d9340ef67d21aeac72070"
+readonly expected_mongo_image="mongo:7.0.45@sha256:c53852c00c23ca9f23fc39690350ffa9a80e3642fe8f96879726d8da0abe80a7"
 readonly expected_nginx_image="nginx:1.31.5@sha256:05b8cb60c354a44ab824ea6e7dc69b46d50762cdbe728a347a5b656e6fb3d7c4"
 readonly expected_temurin_image="eclipse-temurin:21@sha256:85f00967bcc624fc19fa9c2cf124ea426a5363898e267141726f31f358c2e14b"
 readonly expected_cache_schema="v3-dependencies-only"
@@ -76,6 +76,11 @@ fi
 
 require_literal .github/workflows/conformance.yml "$expected_maven_image"
 require_literal docker-compose.yml "$expected_mongo_image"
+if [[ "$(grep -E '^[[:space:]]+--openid[.]mongodb[.]targetFeatureCompatibilityVersion=' docker-compose.yml)" != \
+      "      --openid.mongodb.targetFeatureCompatibilityVersion=7.0" ]]; then
+  echo "Conformance MongoDB FCV must be pinned once to 7.0" >&2
+  exit 1
+fi
 require_literal docker-compose.yml \
   './examples/keys/server.crt:/etc/ssl/certs/nginx-selfsigned.crt:ro'
 require_literal docker-compose.yml \
