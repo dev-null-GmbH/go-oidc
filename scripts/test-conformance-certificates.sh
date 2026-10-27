@@ -35,6 +35,14 @@ committed_server_fingerprint="$({
 "$tool_root/scripts/verify-conformance-certificates.sh" \
   "$temporary_root" 43200
 
+for name in server client_one client_two; do
+  if openssl x509 -in "$temporary_root/examples/keys/$name.crt" \
+    -noout -checkend 129600 >/dev/null; then
+    echo "Generated conformance certificate lacks headroom below the 48-hour ceiling" >&2
+    exit 1
+  fi
+done
+
 generated_server_fingerprint="$({
   openssl x509 -in "$temporary_root/examples/keys/server.crt" \
     -noout -fingerprint -sha256

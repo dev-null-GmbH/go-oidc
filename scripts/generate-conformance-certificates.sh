@@ -39,8 +39,9 @@ generate_certificate() {
   local common_name="$2"
   local extended_key_usage="$3"
   local subject_alt_name="${4:-}"
+  # Keep generation below the verifier ceiling across separate clock reads.
   local arguments=(
-    req -new -newkey rsa:2048 -nodes -x509 -sha256 -days 2
+    req -new -newkey rsa:2048 -nodes -x509 -sha256 -days 1
     -subj "/CN=$common_name"
     -keyout "$generation_dir/$name.key"
     -out "$generation_dir/$name.crt"
