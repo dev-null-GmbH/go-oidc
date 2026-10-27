@@ -33,8 +33,8 @@ services:
       -Djdk.tls.maxHandshakeMessageSize=65536
       -Djava.net.preferIPv6Addresses=true
       -jar /server/fapi-test-suite.jar
-      --fintechlabs.base_url=https://localhost.emobix.co.uk:8443
-      --fintechlabs.base_mtls_url=https://localhost.emobix.co.uk:8444
+      --fintechlabs.base_url=https://conformance.localhost:8443
+      --fintechlabs.base_mtls_url=https://conformance.localhost:8444
       --fintechlabs.devmode=true
       --fintechlabs.startredir=true
       --openid.mongodb.targetFeatureCompatibilityVersion=7.0
@@ -52,4 +52,4 @@ services:
       - auth.localhost:host-gateway
       - matls-auth.localhost:host-gateway
       - fed-trust-anchor.localhost:host-gateway
-      - localhost.emobix.co.uk:host-gateway
+      - conformance.localhost:host-gateway

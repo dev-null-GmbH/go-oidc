@@ -18,7 +18,7 @@
     "client": {
         "client_name": "client_one",
         "client_id": "client_one",
-        "redirect_uri": "https://localhost.emobix.co.uk:8443/test/a/goidc/callback",
+        "redirect_uri": "https://conformance.localhost:8443/test/a/goidc/callback",
         "response_types": [
             "code"
         ],
@@ -48,7 +48,7 @@
     "client2": {
         "client_name": "client_two",
         "client_id": "client_two",
-        "redirect_uri": "https://localhost.emobix.co.uk:8443/test/a/goidc/callback",
+        "redirect_uri": "https://conformance.localhost:8443/test/a/goidc/callback",
         "response_types": [
             "code"
         ],

@@ -102,8 +102,8 @@ func Client(id string, scopes ...goidc.Scope) (*goidc.Client, goidc.JSONWebKeySe
 			},
 			RedirectURIs: []string{
 				"https://localhost/callback",
-				"https://localhost.emobix.co.uk:8443/test/a/goidc/callback",
-				"https://localhost.emobix.co.uk:8443/test/a/goidc/callback?dummy1=lorem&dummy2=ipsum",
+				"https://conformance.localhost:8443/test/a/goidc/callback",
+				"https://conformance.localhost:8443/test/a/goidc/callback?dummy1=lorem&dummy2=ipsum",
 			},
 		},
 	}, jwks

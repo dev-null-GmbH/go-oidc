@@ -44,7 +44,7 @@ async def export_local(directory):
     sys.path.insert(0, str(Path("conformance-suite/scripts").resolve()))
     from conformance import Conformance
 
-    client = Conformance("https://localhost.emobix.co.uk:8443/", None, False)
+    client = Conformance("https://conformance.localhost:8443/", None, False)
     try:
         await export_missing(client, Path(directory))
     finally:
@@ -140,6 +140,40 @@ def self_test():
             self.assertIn("timeout --kill-after=5s 90s", diagnostic)
             self.assertLess(workflow.index("name: Export incomplete conformance plans"),
                             workflow.index("name: Upload test logs"))
+
+        def test_fixture_hostname_is_coherent_with_active_config(self):
+            obsolete_fixture_host = "localhost.emobix." + "co.uk"
+            authutil = Path("examples/authutil/util.go").read_text()
+            active_files = [
+                Path("docker-compose.yml"),
+                Path("examples/authutil/util.go"),
+                Path("examples/oidc/main.go"),
+                Path("examples/federation/main.go"),
+                Path("scripts/export-conformance-failure.py"),
+                Path("scripts/generate-conformance-certificates.sh"),
+                Path("scripts/verify-conformance-certificates.sh"),
+                Path("scripts/verify-conformance-pin.sh"),
+                Path("scripts/test-conformance-certificates.sh"),
+                Path("README.md"),
+                *Path("docs").rglob("*.md"),
+                *Path("examples").rglob("config.json"),
+            ]
+            for path in active_files:
+                with self.subTest(path=path):
+                    content = path.read_text()
+                    self.assertNotIn(
+                        obsolete_fixture_host, content,
+                        msg=f"{path} retains the obsolete fixture hostname",
+                    )
+
+            compose = Path("docker-compose.yml").read_text()
+            self.assertIn("https://conformance.localhost:8443", compose)
+            self.assertIn("https://conformance.localhost:8444", compose)
+            self.assertIn("conformance.localhost:host-gateway", compose)
+            self.assertIn(
+                'Issuer                   string = "https://auth.localhost"',
+                authutil,
+            )
 
     result = unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromTestCase(ExportTests))
     return not result.wasSuccessful()

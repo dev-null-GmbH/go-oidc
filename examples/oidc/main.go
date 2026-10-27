@@ -42,7 +42,7 @@ func main() {
 			provider.WithJAR(
 				[]goidc.SignatureAlgorithm{goidc.SigAlgRS256, goidc.SigAlgNone},
 				provider.WithJARByReference(authutil.JARHTTPClient),
-				provider.WithJARByReferenceAllowedLoopbackOrigins("https://localhost.emobix.co.uk:8443"),
+				provider.WithJARByReferenceAllowedLoopbackOrigins("https://conformance.localhost:8443"),
 			),
 			provider.WithJARM([]goidc.SignatureAlgorithm{goidc.SigAlgRS256}),
 			provider.WithIssuerResponseParameter(),

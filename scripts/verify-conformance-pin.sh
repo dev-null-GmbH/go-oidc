@@ -102,7 +102,7 @@ require_literal Makefile "./scripts/prepare-conformance-suite.sh conformance-sui
 require_literal Makefile "./scripts/generate-conformance-certificates.sh"
 require_literal Makefile "run-cs: keys"
 require_literal scripts/generate-conformance-certificates.sh \
-  'DNS:localhost.emobix.co.uk'
+  'DNS:conformance.localhost'
 
 if grep -Eq '^[[:space:]]+path:[[:space:]]+conformance-suite$' \
   .github/workflows/conformance.yml; then
