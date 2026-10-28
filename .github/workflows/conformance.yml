@@ -293,7 +293,6 @@ jobs:
           if [[ "$PROFILE_FOLDER" == oidc ]]; then
             if ! timeout --kill-after=2s 60s "$go_binary" run scripts/conformance-loopback-probe.go 2>/dev/null; then
               printf '%s\n' '{"endpoint":"suite_readiness","family":"set","phase":"process","status":"failed_or_incomplete","duration_ms":0}'
-              exit 1
             fi
           fi
           "$go_binary" run \

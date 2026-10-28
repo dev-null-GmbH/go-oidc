@@ -53,6 +53,8 @@ async def export_local(directory):
 
 def self_test():
     import io
+    import subprocess
+    import textwrap
     from types import SimpleNamespace
     import unittest
     from unittest.mock import AsyncMock
@@ -140,6 +142,42 @@ def self_test():
             self.assertIn("timeout --kill-after=5s 90s", diagnostic)
             self.assertLess(workflow.index("name: Export incomplete conformance plans"),
                             workflow.index("name: Upload test logs"))
+
+        def test_failed_loopback_diagnostic_reaches_server_and_preserves_test_result(self):
+            workflow = Path(".github/workflows/conformance.yml").read_text()
+            startup = workflow.split("      - name: Start authorization server\n", 1)[1].split("\n      - name:", 1)[0]
+            startup = textwrap.dedent(startup.split("run: |\n", 1)[1])
+            tests = workflow.split("      - name: Run tests\n", 1)[1].split("\n      - name:", 1)[0]
+            command = tests.split("run: ", 1)[1].strip().replace("${{ matrix.profile }}", "oidc")
+            for result in (0, 7):
+                with self.subTest(result=result), tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    (root / "bin").mkdir()
+                    executable = root / "bin/go"
+                    executable.write_text('#!/bin/bash\nset -eu\n'
+                                          '[[ "$*" == "run examples/oidc/main.go" ]]\n'
+                                          'touch "$RUNNER_TEMP/server-started"\n')
+                    executable.chmod(0o755)
+                    stubs = '''
+                        go() { printf '%s\\n' "$RUNNER_TEMP"; }
+                        timeout() {
+                          if [[ "$*" == *conformance-loopback-probe.go* ]]; then return 1; fi
+                          return 0
+                        }
+                        make() { printf 'conformance_reached\\n'; return "$TEST_RESULT"; }
+                    '''
+                    completed = subprocess.run(
+                        ["bash", "-c", textwrap.dedent(stubs) + startup +
+                         '\nwait\n' + command + '\nprintf "after_conformance\\n"\n'],
+                        env={**os.environ, "RUNNER_TEMP": temporary,
+                             "PROFILE_FOLDER": "oidc", "TEST_RESULT": str(result)},
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    self.assertEqual(completed.returncode, result, completed.stderr)
+                    self.assertIn('"status":"failed_or_incomplete"', completed.stdout)
+                    self.assertTrue((root / "server-started").is_file())
+                    self.assertIn("conformance_reached", completed.stdout)
+                    self.assertEqual("after_conformance" in completed.stdout, result == 0)
 
         def test_fixture_hostname_is_coherent_with_active_config(self):
             obsolete_fixture_host = "localhost.emobix." + "co.uk"
