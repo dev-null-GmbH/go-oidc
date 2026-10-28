@@ -203,6 +203,7 @@ func canonicalJARNetworkOrigin(rawURI string) (string, error) {
 }
 
 func newGuardedJARHTTPClient(
+	networkContext context.Context,
 	baseClient *http.Client,
 	target jarNetworkTarget,
 ) (*http.Client, *http.Transport, error) {
@@ -251,7 +252,12 @@ func newGuardedJARHTTPClient(
 		KeepAlive: 30 * time.Second,
 	}).DialContext
 	transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
-		return dialJARNetworkTarget(ctx, network, target, baseDial)
+		// Transport detaches request deadlines; this transport serves one bounded fetch.
+		dialContext, cancel := context.WithCancel(networkContext)
+		stop := context.AfterFunc(ctx, cancel)
+		defer stop()
+		defer cancel()
+		return dialJARNetworkTarget(dialContext, network, target, baseDial)
 	}
 	if transport.TLSClientConfig == nil {
 		transport.TLSClientConfig = &tls.Config{}
@@ -273,14 +279,28 @@ func dialJARNetworkTarget(
 	target jarNetworkTarget,
 	dial func(context.Context, string, string) (net.Conn, error),
 ) (net.Conn, error) {
-	var failures []error
+	ctx, cancel := context.WithTimeout(ctx, maxJARNetworkTimeout)
+	defer cancel()
+	addresses := make([]netip.Addr, 0, len(target.addresses))
 	for _, address := range target.addresses {
-		if !target.allowAddress(address) ||
-			(strings.HasSuffix(network, "4") && !address.Is4()) ||
-			(strings.HasSuffix(network, "6") && !address.Is6()) {
+		if target.allowAddress(address) &&
+			(!strings.HasSuffix(network, "4") || address.Is4()) &&
+			(!strings.HasSuffix(network, "6") || address.Is6()) {
+			addresses = append(addresses, address)
+		}
+	}
+	var failures []error
+	for i, address := range addresses {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if !target.allowAddress(address) {
 			continue
 		}
-		connection, err := dial(ctx, network, net.JoinHostPort(address.String(), target.port))
+		deadline, _ := ctx.Deadline()
+		attemptContext, cancelAttempt := context.WithTimeout(ctx, time.Until(deadline)/time.Duration(len(addresses)-i))
+		connection, err := dial(attemptContext, network, net.JoinHostPort(address.String(), target.port))
+		cancelAttempt()
 		if err == nil {
 			return connection, nil
 		}

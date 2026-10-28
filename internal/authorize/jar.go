@@ -71,7 +71,7 @@ func jarFromRequestURIWithNetworkControl(
 		return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri",
 			fmt.Errorf("could not create the request_uri request: %w", err))
 	}
-	jarHTTPClient, jarTransport, err := newGuardedJARHTTPClient(httpClient, target)
+	jarHTTPClient, jarTransport, err := newGuardedJARHTTPClient(networkContext, httpClient, target)
 	if err != nil {
 		return request{}, goidc.WrapError(goidc.ErrorCodeInvalidRequest, "invalid request_uri", err)
 	}

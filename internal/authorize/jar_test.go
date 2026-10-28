@@ -945,6 +945,7 @@ func TestJARNetworkGuardPinsSingleDNSAnswerAgainstRebinding(t *testing.T) {
 		return url.Parse("http://127.0.0.1:8080")
 	}}
 	guardedClient, guardedTransport, guardErr := newGuardedJARHTTPClient(
+		context.Background(),
 		&http.Client{Transport: baseTransport, Jar: baseJar},
 		target,
 	)
