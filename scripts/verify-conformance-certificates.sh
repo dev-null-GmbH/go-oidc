@@ -122,7 +122,7 @@ verify_pair() {
         exit 1
       fi
       for hostname in auth.localhost matls-auth.localhost \
-        fed-trust-anchor.localhost localhost.emobix.co.uk; do
+        fed-trust-anchor.localhost conformance.localhost; do
         openssl verify -purpose sslserver -verify_hostname "$hostname" \
           -CAfile "$cert" "$cert" >/dev/null
       done

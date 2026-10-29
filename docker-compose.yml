@@ -4,7 +4,8 @@ services:
   # on localhost.
   # The auth server is expected to be running under the domain "auth.localhost".
   mongodb:
-    image: mongo:6.0.13@sha256:b415b12f638e2685d06c58ab7fb5943577c50fadec6d9340ef67d21aeac72070
+    image: mongo:7.0.45@sha256:c53852c00c23ca9f23fc39690350ffa9a80e3642fe8f96879726d8da0abe80a7
+    command: ["mongod", "--ipv6", "--bind_ip_all"]
   nginx:
     build:
       context: ./conformance-suite/nginx
@@ -29,12 +30,14 @@ services:
     command: >
       java
       -Xdebug -Xrunjdwp:transport=dt_socket,address=*:9999,server=y,suspend=n
-      -jar /server/fapi-test-suite.jar
       -Djdk.tls.maxHandshakeMessageSize=65536
-      --fintechlabs.base_url=https://localhost.emobix.co.uk:8443
-      --fintechlabs.base_mtls_url=https://localhost.emobix.co.uk:8444
+      -Djava.net.preferIPv6Addresses=true
+      -jar /server/fapi-test-suite.jar
+      --fintechlabs.base_url=https://conformance.localhost:8443
+      --fintechlabs.base_mtls_url=https://conformance.localhost:8444
       --fintechlabs.devmode=true
       --fintechlabs.startredir=true
+      --openid.mongodb.targetFeatureCompatibilityVersion=7.0
     depends_on:
      - mongodb
     logging:
@@ -49,4 +52,8 @@ services:
       - auth.localhost:host-gateway
       - matls-auth.localhost:host-gateway
       - fed-trust-anchor.localhost:host-gateway
-      - localhost.emobix.co.uk:host-gateway
+      - conformance.localhost:host-gateway
+
+networks:
+  default:
+    enable_ipv6: true

@@ -15,11 +15,11 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CS_VERSION: release-v5.2.4
-  CS_COMMIT: ab35a8df4864da35b49eff11483e204e01aa7961
+  CS_VERSION: release-v5.3.3
+  CS_COMMIT: 7d420f716e49d44f8a6b04f0a3e240ad6d68ab55
   CS_CACHE_SCHEMA: v3-dependencies-only
   CS_MAVEN_IMAGE: maven:3.9.16-eclipse-temurin-21@sha256:8f6ac126f7810bb5549c4cd122d2bf0e9cda5bdeb0838aa928f09e779fd8bef8
-  PYTHON_VERSION: "3.14.7"
+  PYTHON_VERSION: "3.14.10"
 
 jobs:
   prepare-suite:
@@ -54,6 +54,9 @@ jobs:
         run: |
           ./scripts/verify-action-pins.sh
           ./scripts/verify-conformance-pin.sh
+
+      - name: Test conformance failure export
+        run: python3 scripts/export-conformance-failure.py --self-test
 
       - name: Initialize dependency cache paths
         shell: bash
@@ -114,9 +117,10 @@ jobs:
           docker run --rm --pull=never \
             --mount "type=bind,src=$PWD/conformance-suite,dst=/usr/src/mymaven" \
             --mount "type=bind,src=$MAVEN_CACHE_DIR,dst=/root/.m2/repository" \
+            --mount "type=bind,src=$PWD/scripts/ConformanceNetworkProbe.java,dst=/opt/d0/ConformanceNetworkProbe.java,readonly" \
             --workdir /usr/src/mymaven \
             "$CS_MAVEN_IMAGE" \
-            mvn -B clean package -DskipTests=true
+            sh -ec 'export MAVEN_OPTS="${MAVEN_OPTS:+$MAVEN_OPTS }-Djava.net.preferIPv6Addresses=true -Dkotlin.compiler.daemon.jvmArgs=Djava.net.preferIPv6Addresses=true"; if timeout --kill-after=2s 45s java -Djava.net.preferIPv6Addresses=true /opt/d0/ConformanceNetworkProbe.java; then :; else printf "%s\n" "phase=network_probe status=incomplete"; fi; exec mvn -B clean package -DskipTests=true'
 
       - name: Verify prepared conformance suite
         shell: bash
@@ -129,6 +133,7 @@ jobs:
             exit 1
           fi
           ./scripts/prepare-conformance-suite.sh conformance-suite
+          ./scripts/prepare-conformance-suite.sh --self-test conformance-suite
           test -s conformance-suite/target/fapi-test-suite.jar
 
       - name: Record prepared JAR digest
@@ -285,6 +290,11 @@ jobs:
         run: |
           set -euo pipefail
           go_binary="$(go env GOROOT)/bin/go"
+          if [[ "$PROFILE_FOLDER" == oidc ]]; then
+            if ! timeout --kill-after=2s 60s "$go_binary" run scripts/conformance-loopback-probe.go 2>/dev/null; then
+              printf '%s\n' '{"endpoint":"suite_readiness","family":"set","phase":"process","status":"failed_or_incomplete","duration_ms":0}'
+            fi
+          fi
           "$go_binary" run \
             "examples/${PROFILE_FOLDER}/main.go" \
             > "$RUNNER_TEMP/auth-server.log" 2>&1 &
@@ -303,7 +313,17 @@ jobs:
           fi
 
       - name: Run tests
+        id: tests
         run: make "cs-${{ matrix.profile }}-tests"
+
+      - name: Export incomplete conformance plans
+        if: ${{ failure() && steps.tests.outcome == 'failure' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          timeout --kill-after=5s 90s \
+            conformance-suite/venv/bin/python3 scripts/export-conformance-failure.py \
+            "examples/${PROFILE_FOLDER}"
 
       - name: Verify retained conformance outputs
         if: always()
@@ -351,7 +371,7 @@ jobs:
           'd0-trusted' || 'd0-untrusted' }}
     timeout-minutes: 5
     needs: run-tests
-    if: always()
+    if: ${{ !cancelled() }}
     steps:
       - name: Check matrix result
         env:

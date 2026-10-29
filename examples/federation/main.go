@@ -124,9 +124,9 @@ func main() {
 				AuthorityHints: []string{TrustAnchorFedID},
 				TrustedAnchors: []string{
 					TrustAnchorFedID,
-					"https://localhost.emobix.co.uk:8443/test/a/goidc/trust-anchor",
-					"https://localhost.emobix.co.uk:8443/test/a/goidc2/trust-anchor",
-					"https://localhost.emobix.co.uk:8443/test/a/goidc3/trust-anchor",
+					"https://conformance.localhost:8443/test/a/goidc/trust-anchor",
+					"https://conformance.localhost:8443/test/a/goidc2/trust-anchor",
+					"https://conformance.localhost:8443/test/a/goidc3/trust-anchor",
 				},
 			},
 			provider.WithOpenIDFedSignatureAlgs(goidc.SigAlgRS256, goidc.SigAlgES256),
