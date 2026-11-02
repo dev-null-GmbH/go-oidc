@@ -69,7 +69,7 @@ Luiky Vasconcelos has certified that [go-oidc](https://pkg.go.dev/github.com/lui
 
 Install the module:
 ```
-go get github.com/dev-null-GmbH/go-oidc@v0.25.1-d0.14
+go get github.com/dev-null-GmbH/go-oidc@v0.25.1-d0.15
 ```
 
 Fork consumers must exact-pin a governed `-d0.N` tag and must not use
@@ -243,6 +243,12 @@ op, _ := provider.New(
   }),
 )
 ```
+
+`provider.WithAccessTokenClaims(...)` selects the fallible, authenticated
+client-credentials claim boundary. Resource audiences in its signed access
+tokens are JSON arrays, including a single resource. The callback returns
+additional claims only; engine-owned claims, including `aud`, cannot be
+replaced. Other uses of `goidc.Audiences` retain their existing serialization.
 
 `goidc.Token` is created from a `goidc.Grant` and captures the exact
 authorization state attached to that token at issuance time. A token may

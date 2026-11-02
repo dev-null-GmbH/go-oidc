@@ -1177,7 +1177,7 @@ func (ctx Context) Decrypt(
 	string,
 	error,
 ) {
-	parseJWE, err := jose.ParseEncrypted(jwe, keyAlgs, cntAlgs)
+	parseJWE, err := jose.ParseEncryptedCompact(jwe, keyAlgs, cntAlgs)
 	if err != nil {
 		return "", fmt.Errorf("could not parse the jwe: %w", err)
 	}
