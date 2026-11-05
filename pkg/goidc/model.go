@@ -668,6 +668,7 @@ type AccessTokenClaimsInput struct {
 // this boundary is restricted to client_credentials-only providers. The
 // provider calls it after grant validation and final token construction, and
 // before persisting the grant or invoking the signer.
+// Resource audiences in these access tokens are always serialized as JSON arrays.
 type AccessTokenClaimsFunc func(context.Context, AccessTokenClaimsInput) (map[string]any, error)
 
 // TokenOptions defines a template for generating access tokens.

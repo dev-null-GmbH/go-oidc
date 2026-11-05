@@ -30,6 +30,9 @@ func generateAuthCodeToken(ctx oidc.Context, req request) (response, error) {
 		return response{}, humanAuthorizationServerError()
 	}
 	if !ctx.LegacyAuthorizationCodeEnabled {
+		if !slices.Contains(c.GrantTypes, goidc.GrantAuthorizationCode) {
+			return response{}, goidc.WrapError(goidc.ErrorCodeUnauthorizedClient, "unauthorized client", errors.New("the client is not allowed to use the authorization_code grant type"))
+		}
 		return response{}, humanAuthorizationServerError()
 	}
 	if ctx.HumanConfidentialBFFAuthorizationEnabled && isHumanAuthorizationCode(req.code) {

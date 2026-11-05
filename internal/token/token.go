@@ -134,6 +134,10 @@ func Issue(ctx oidc.Context, grant *goidc.Grant, c *goidc.Client, opts *Issuance
 
 		if tkn.Resources != nil {
 			claims[goidc.ClaimAudience] = tkn.Resources
+			if ctx.UsesAccessTokenClaims() {
+				// Typed client-credentials issuance retains the resource audience as an array.
+				claims[goidc.ClaimAudience] = []string(tkn.Resources)
+			}
 		}
 
 		if tkn.Actor != nil {

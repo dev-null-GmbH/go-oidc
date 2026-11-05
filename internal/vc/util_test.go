@@ -264,7 +264,7 @@ func TestIssue(t *testing.T) {
 					t.Fatal("encrypted credential response is empty")
 				}
 
-				jwe, err := jose.ParseEncrypted(
+				jwe, err := jose.ParseEncryptedCompact(
 					resp.JWT,
 					[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
 					[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM},
@@ -863,7 +863,7 @@ func TestDeferredCredential_ResponseEncryption(t *testing.T) {
 				t.Fatal("encrypted deferred credential response is empty")
 			}
 
-			jwe, err := jose.ParseEncrypted(
+			jwe, err := jose.ParseEncryptedCompact(
 				resp.JWT,
 				[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
 				[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128GCM},

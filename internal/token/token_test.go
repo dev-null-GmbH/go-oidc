@@ -231,7 +231,7 @@ func TestMakeIDToken(t *testing.T) {
 					t.Fatalf("expected JWE with 5 parts, got %d", len(parts))
 				}
 
-				jwe, err := jose.ParseEncrypted(
+				jwe, err := jose.ParseEncryptedCompact(
 					idToken,
 					[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP256},
 					[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256},

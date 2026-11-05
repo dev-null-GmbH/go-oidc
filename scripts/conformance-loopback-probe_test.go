@@ -110,7 +110,21 @@ func TestProbePhasesAndClosedOutput(t *testing.T) {
 				if address != net.JoinHostPort(addresses[dials-1].String(), "8443") {
 					t.Fatal("validated_literal_not_pinned")
 				}
-				client, raw := net.Pipe()
+				// TCP buffers TLS rejection alerts while the peer finishes its server flight.
+				listener, err := net.Listen("tcp", "127.0.0.1:0")
+				if err != nil {
+					t.Fatal("fixture_listener_failed")
+				}
+				defer listener.Close()
+				client, err := (&net.Dialer{}).DialContext(ctx, "tcp", listener.Addr().String())
+				if err != nil {
+					t.Fatal("fixture_dial_failed")
+				}
+				raw, err := listener.Accept()
+				if err != nil {
+					_ = client.Close()
+					t.Fatal("fixture_accept_failed")
+				}
 				peers.Add(1)
 				go func() {
 					defer peers.Done()

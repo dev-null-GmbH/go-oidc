@@ -3,9 +3,13 @@ package token
 import (
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/dev-null-GmbH/go-oidc/internal/hashutil"
 	"github.com/dev-null-GmbH/go-oidc/internal/oidc"
@@ -15,6 +19,90 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
+
+func TestAuthCodeEndpointRejectsAuthenticatedMachineClientBeforeStrictOnlyGate(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		code       string
+		profile    goidc.AuthorizationRequestProfile
+		allowCode  bool
+		badKey     bool
+		wantStatus int
+		wantError  goidc.ErrorCode
+		wantResult goidc.TokenEndpointResult
+	}{
+		{name: "machine client", code: "legacy-code", wantStatus: 400, wantError: goidc.ErrorCodeUnauthorizedClient, wantResult: goidc.TokenEndpointResultUnauthorizedClient},
+		{name: "machine client missing code", wantStatus: 400, wantError: goidc.ErrorCodeUnauthorizedClient, wantResult: goidc.TokenEndpointResultUnauthorizedClient},
+		{name: "machine client human code", code: testHumanAuthorizationCode, wantStatus: 400, wantError: goidc.ErrorCodeUnauthorizedClient, wantResult: goidc.TokenEndpointResultUnauthorizedClient},
+		{name: "invalid signature", code: "legacy-code", badKey: true, wantStatus: 401, wantError: goidc.ErrorCodeInvalidClient, wantResult: goidc.TokenEndpointResultInvalidClient},
+		{name: "default authorized code remains strict-only error", code: "legacy-code", allowCode: true, wantStatus: 500, wantError: goidc.ErrorCodeServerError, wantResult: goidc.TokenEndpointResultServerError},
+		{name: "unknown profile remains closed", code: "legacy-code", profile: "unqualified-profile", wantStatus: 500, wantError: goidc.ErrorCodeServerError, wantResult: goidc.TokenEndpointResultServerError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newHumanTokenFixture(t)
+			fixture.ctx.LegacyAuthorizationCodeEnabled = false
+			fixture.client.AuthorizationRequestProfile = test.profile
+			fixture.client.GrantTypes = []goidc.GrantType{goidc.GrantClientCredentials}
+			if test.allowCode {
+				fixture.client.GrantTypes = []goidc.GrantType{goidc.GrantAuthorizationCode}
+			}
+			if test.badKey {
+				fixture.assertionKey = oidctest.PrivatePS256JWK(t, fixture.assertionKey.KeyID, goidc.KeyUsageSignature)
+				fixture.installRequest(t, "unregistered-assertion")
+			}
+			values := fixture.ctx.Request.PostForm
+			values.Set("code", test.code)
+			var evidence []goidc.TokenEndpointEvidence
+			fixture.ctx.TokenEndpointEvidenceFunc = func(_ context.Context, value goidc.TokenEndpointEvidence) {
+				evidence = append(evidence, value)
+			}
+			signingCalls := 0
+			fixture.ctx.JWKSFunc = func(context.Context) (goidc.JSONWebKeySet, error) {
+				signingCalls++
+				return goidc.JSONWebKeySet{}, errors.New("unexpected issuer signing lookup")
+			}
+			mux := http.NewServeMux()
+			RegisterHandlers(mux, fixture.ctx.Configuration)
+			done := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer close(done)
+				mux.ServeHTTP(w, r)
+			}))
+			defer server.Close()
+			client := server.Client()
+			client.Timeout = 5 * time.Second
+			response, err := client.PostForm(server.URL+fixture.ctx.TokenEndpoint, values)
+			if err != nil {
+				t.Fatal("token HTTP request failed")
+			}
+			raw, readErr := io.ReadAll(io.LimitReader(response.Body, 1025))
+			closeErr := response.Body.Close()
+			<-done
+			if readErr != nil || closeErr != nil || len(raw) > 1024 {
+				t.Fatal("token HTTP response incomplete")
+			}
+			var body struct {
+				Error       goidc.ErrorCode `json:"error"`
+				AccessToken string          `json:"access_token"`
+			}
+			if json.Unmarshal(raw, &body) != nil || response.StatusCode != test.wantStatus || body.Error != test.wantError || body.AccessToken != "" {
+				t.Errorf("token endpoint status/error = %d/%s; want %d/%s and no token", response.StatusCode, body.Error, test.wantStatus, test.wantError)
+			}
+			clientID := fixture.client.ID
+			if test.badKey {
+				clientID = ""
+			}
+			want := []goidc.TokenEndpointEvidence{{Result: test.wantResult, AuthenticatedClientID: clientID}}
+			if !cmp.Equal(evidence, want) {
+				t.Error("token evidence did not preserve the authenticated denial boundary")
+			}
+			if fixture.authority.redeemCalls != 0 || signingCalls != 0 {
+				t.Error("denied code request reached Human authority or issuer signing")
+			}
+			fixture.assertNoLegacyIssuance(t)
+		})
+	}
+}
 
 func TestGenerateAuthCodeToken(t *testing.T) {
 	setup := func(tb testing.TB) (oidc.Context, request, *goidc.Client, *goidc.Grant) {

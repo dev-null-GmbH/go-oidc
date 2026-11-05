@@ -478,6 +478,56 @@ func TestClientCredentialsAccessTokenClaimsRunBeforePersistenceAndSigning(t *tes
 	}
 }
 
+func TestClientCredentialsAccessTokenAudienceShape(t *testing.T) {
+	const resource = "https://resource.example"
+	for _, typed := range []bool{false, true} {
+		name := "legacy singleton remains scalar"
+		if typed {
+			name = "typed singleton is an array"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx, req, client := clientCredentialsTestContext(t)
+			ctx.GrantTypes = []goidc.GrantType{goidc.GrantClientCredentials}
+			ctx.ResourceIndicatorsEnabled = true
+			ctx.ResourceIndicatorsRequired = true
+			ctx.ResourceIndicators = []goidc.ResourceIndicator{resource}
+			req.resources = goidc.Resources{resource}
+			if typed {
+				ctx.AccessTokenClaimsFunc = func(_ context.Context, input goidc.AccessTokenClaimsInput) (map[string]any, error) {
+					if input.GrantType != goidc.GrantClientCredentials || input.AuthenticatedClientID != client.ID ||
+						!slices.Equal(input.Resources, []string{resource}) {
+						t.Fatal("claim projection did not receive the authenticated client and exact resource")
+					}
+					return map[string]any{"https://example.com/organization_id": "organization"}, nil
+				}
+			}
+			resp, err := generateClientCredentialsToken(ctx, req)
+			if err != nil {
+				t.Fatalf("generateClientCredentialsToken() error = %v", err)
+			}
+			claims, err := oidctest.SafeClaims(resp.AccessToken, oidctest.PrivateJWKS(t, ctx).Keys[0])
+			if err != nil {
+				t.Fatalf("verify actual signed token claims: %v", err)
+			}
+			var wantAudience any = resource
+			if typed {
+				wantAudience = []any{resource}
+				if claims["https://example.com/organization_id"] != "organization" {
+					t.Fatal("typed organization projection was not retained")
+				}
+			}
+			if diff := cmp.Diff(wantAudience, claims[goidc.ClaimAudience]); diff != "" {
+				t.Fatalf("signed audience wire shape (-want +got):\n%s", diff)
+			}
+			grants := oidctest.Grants(t, ctx)
+			if len(grants) != 1 || !slices.Equal(grants[0].Resources, []string{resource}) ||
+				!slices.Equal(resp.Resources, []string{resource}) {
+				t.Fatal("audience serialization changed the persisted or returned resource")
+			}
+		})
+	}
+}
+
 func TestClientCredentialsAccessTokenClaimsResourcesAreDefensivelyCopied(t *testing.T) {
 	ctx, req, _ := clientCredentialsTestContext(t)
 	req.resources = goidc.Resources{"https://resource.example"}

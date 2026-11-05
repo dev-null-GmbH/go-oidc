@@ -112,7 +112,7 @@ func TestOpaqueDecrypter_RSA_OAEP(t *testing.T) {
 		Decrypter: rsaKey,
 	}
 
-	jwe, err := jose.ParseEncrypted(
+	jwe, err := jose.ParseEncryptedCompact(
 		encrypted,
 		[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
 		[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256},
@@ -145,7 +145,7 @@ func TestOpaqueDecrypter_RSA_OAEP_256(t *testing.T) {
 		Decrypter: rsaKey,
 	}
 
-	jwe, err := jose.ParseEncrypted(
+	jwe, err := jose.ParseEncryptedCompact(
 		encrypted,
 		[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP256},
 		[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256},
@@ -344,7 +344,7 @@ func TestEncrypt(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	jwe, err := jose.ParseEncrypted(
+	jwe, err := jose.ParseEncryptedCompact(
 		encryptedStr,
 		[]goidc.KeyEncryptionAlgorithm{goidc.KeyEncRSAOAEP},
 		[]goidc.ContentEncryptionAlgorithm{goidc.ContentEncAlgA128CBCHS256},

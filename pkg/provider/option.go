@@ -646,7 +646,8 @@ func WithTokenClaims(f goidc.TokenClaimsFunc) Option {
 // WithAccessTokenClaims configures a fallible, client-aware additional-claims
 // projection for JWT access tokens. For newly created client_credentials
 // grants it runs after grant validation and before grant persistence and
-// signing. Engine-owned claims cannot be returned by the callback.
+// signing. Resource audiences are serialized as JSON arrays, including a single
+// resource. Engine-owned claims cannot be returned by the callback.
 //
 // This option and [WithTokenClaims] are mutually exclusive.
 func WithAccessTokenClaims(f goidc.AccessTokenClaimsFunc) Option {
