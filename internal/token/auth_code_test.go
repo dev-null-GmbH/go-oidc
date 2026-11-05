@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"testing"
 	"time"
 
@@ -51,7 +50,7 @@ func TestAuthCodeEndpointRejectsAuthenticatedMachineClientBeforeStrictOnlyGate(t
 				fixture.assertionKey = oidctest.PrivatePS256JWK(t, fixture.assertionKey.KeyID, goidc.KeyUsageSignature)
 				fixture.installRequest(t, "unregistered-assertion")
 			}
-			values := url.Values(fixture.ctx.Request.PostForm)
+			values := fixture.ctx.Request.PostForm
 			values.Set("code", test.code)
 			var evidence []goidc.TokenEndpointEvidence
 			fixture.ctx.TokenEndpointEvidenceFunc = func(_ context.Context, value goidc.TokenEndpointEvidence) {
