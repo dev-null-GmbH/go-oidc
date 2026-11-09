@@ -63,7 +63,7 @@ jobs:
           tool_dir="$RUNNER_TEMP/govulncheck-bin"
           mkdir -p "$tool_dir"
           GOBIN="$tool_dir" go install \
-            golang.org/x/vuln/cmd/govulncheck@v1.7.0
+            golang.org/x/vuln/cmd/govulncheck@v1.9.0
           "$tool_dir/govulncheck" ./...
 
   vci-govulncheck:
@@ -98,5 +98,5 @@ jobs:
           tool_dir="$RUNNER_TEMP/govulncheck-bin"
           mkdir -p "$tool_dir"
           GOBIN="$tool_dir" go install \
-            golang.org/x/vuln/cmd/govulncheck@v1.7.0
+            golang.org/x/vuln/cmd/govulncheck@v1.9.0
           "$tool_dir/govulncheck" ./...
