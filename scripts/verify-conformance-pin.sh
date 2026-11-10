@@ -7,13 +7,13 @@ source_root="${RELEASE_SOURCE_ROOT:-$tool_root}"
 source_root="$(cd "$source_root" && pwd)"
 cd "$source_root"
 
-readonly expected_version="release-v5.3.3"
-readonly expected_commit="7d420f716e49d44f8a6b04f0a3e240ad6d68ab55"
+readonly expected_version="release-v5.3.4"
+readonly expected_commit="23353b36957d6466010de767c812d2c91ed37638"
 readonly expected_python="3.14.10"
-readonly expected_maven_image="maven:3.9.16-eclipse-temurin-21@sha256:8f6ac126f7810bb5549c4cd122d2bf0e9cda5bdeb0838aa928f09e779fd8bef8"
-readonly expected_mongo_image="mongo:7.0.45@sha256:c53852c00c23ca9f23fc39690350ffa9a80e3642fe8f96879726d8da0abe80a7"
-readonly expected_nginx_image="nginx:1.31.5@sha256:05b8cb60c354a44ab824ea6e7dc69b46d50762cdbe728a347a5b656e6fb3d7c4"
-readonly expected_temurin_image="eclipse-temurin:21@sha256:85f00967bcc624fc19fa9c2cf124ea426a5363898e267141726f31f358c2e14b"
+readonly expected_maven_image="maven:3.9.16-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320"
+readonly expected_mongo_image="mongo:8.3.13@sha256:e16e606f792ea89d2b4907b54e5e31eb86a7a23e27231dce3a982cc8f2d73cd2"
+readonly expected_nginx_image="nginx:1.31.8@sha256:165ddde8751e75a1c907d24ef10d9f6deb08b57e0fe56caf67512486aff76d82"
+readonly expected_temurin_image="eclipse-temurin:21@sha256:ebfbb18d11ff163ee83b21258acf12248af48d22a0fdfdc68fa1a1516c05976a"
 readonly expected_cache_schema="v3-dependencies-only"
 
 make_value() {
@@ -81,8 +81,8 @@ if [[ "$(tail -n 3 docker-compose.yml)" != $'networks:\n  default:\n    enable_i
   exit 1
 fi
 if [[ "$(grep -E '^[[:space:]]+--openid[.]mongodb[.]targetFeatureCompatibilityVersion=' docker-compose.yml)" != \
-      "      --openid.mongodb.targetFeatureCompatibilityVersion=7.0" ]]; then
-  echo "Conformance MongoDB FCV must be pinned once to 7.0" >&2
+      "      --openid.mongodb.targetFeatureCompatibilityVersion=8.3" ]]; then
+  echo "Conformance MongoDB FCV must be pinned once to 8.3" >&2
   exit 1
 fi
 require_literal docker-compose.yml \
@@ -176,7 +176,7 @@ if grep -E '^[[:space:]]*image:' docker-compose.yml | grep -Ev '@sha256:[0-9a-f]
 fi
 
 if ! grep -Fqx 'httpx==0.28.1 \' scripts/conformance-requirements.lock || \
-   ! grep -Fqx 'pyparsing==3.3.2 \' scripts/conformance-requirements.lock; then
+   ! grep -Fqx 'pyparsing==3.3.3 \' scripts/conformance-requirements.lock; then
   echo "Direct conformance Python dependencies are not pinned as reviewed" >&2
   exit 1
 fi

@@ -10,16 +10,16 @@ if [[ "${1:-}" == "--self-test" ]]; then
 fi
 suite_dir="${1:-$repo_root/conformance-suite}"
 
-readonly expected_commit="7d420f716e49d44f8a6b04f0a3e240ad6d68ab55"
+readonly expected_commit="23353b36957d6466010de767c812d2c91ed37638"
 readonly expected_requirements_sha256="05176cbcaf1a221a8943f8534d14d70c45237b3f28d055f3a55d0633d63a3085"
 readonly expected_nginx_dockerfile_sha256="25c8f9a1cff410eaccfe98c460e96adb5e772d0cf1f20f9d1bb02815e7ed9f20"
 readonly expected_server_dockerfile_sha256="bf8149a12accc809d2d55f6faf67859dbb59340076bb5819efd21343d5d53035"
-readonly pinned_nginx_dockerfile_sha256="3282bc953da1148d1b8cb9f2bb3f532f8e8e22699a6827c2126aa4843f9393a1"
-readonly pinned_server_dockerfile_sha256="c5b560e429286131f89f5c6261b757a71d4cb891e765532f83b1b55fba9c9761"
+readonly pinned_nginx_dockerfile_sha256="740378c6c5e541468a5a522da621ed900f10d2c223245b0a4bf73239d7764528"
+readonly pinned_server_dockerfile_sha256="0c17eb4bd480bf785b2228785c36cd6cf900e8b2d602dbd127c0f0c30b98ff06"
 readonly expected_nginx_config_sha256="a0d5fd58f15fb1cd7bae4103ee9b637e7c64a66fee18f374e6062a75e0b2acdd"
 readonly pinned_nginx_config_sha256="6a135eccd81000b2d1fb21d1e6d57688a163624c00e1f71b713835fe7a79e9d6"
-readonly nginx_image="nginx:1.31.5@sha256:05b8cb60c354a44ab824ea6e7dc69b46d50762cdbe728a347a5b656e6fb3d7c4"
-readonly temurin_image="eclipse-temurin:21@sha256:85f00967bcc624fc19fa9c2cf124ea426a5363898e267141726f31f358c2e14b"
+readonly nginx_image="nginx:1.31.8@sha256:165ddde8751e75a1c907d24ef10d9f6deb08b57e0fe56caf67512486aff76d82"
+readonly temurin_image="eclipse-temurin:21@sha256:ebfbb18d11ff163ee83b21258acf12248af48d22a0fdfdc68fa1a1516c05976a"
 
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then
