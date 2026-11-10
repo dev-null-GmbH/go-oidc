@@ -11,6 +11,8 @@ fi
 suite_dir="${1:-$repo_root/conformance-suite}"
 
 readonly expected_commit="23353b36957d6466010de767c812d2c91ed37638"
+readonly expected_runner_sha256="6043f8fb9d64dcd30235540cae1f32eb4e94618d1fc5408f1e8ae626d6553ad2"
+readonly pinned_runner_sha256="d77ece5ec94b7c24792cb23e6a9e340aa613fa0f7d3abe3a8bff8711195654f0"
 readonly expected_requirements_sha256="05176cbcaf1a221a8943f8534d14d70c45237b3f28d055f3a55d0633d63a3085"
 readonly expected_nginx_dockerfile_sha256="25c8f9a1cff410eaccfe98c460e96adb5e772d0cf1f20f9d1bb02815e7ed9f20"
 readonly expected_server_dockerfile_sha256="bf8149a12accc809d2d55f6faf67859dbb59340076bb5819efd21343d5d53035"
@@ -83,6 +85,15 @@ prepare_nginx_config() {
   fi
 }
 
+prepare_terminal_log_read() {
+  local root="$1"
+  local runner="$root/scripts/run-test-plan.py"
+  if [[ "$(sha256_file "$runner")" == "$expected_runner_sha256" ]]; then
+    (cd "$root" && git apply --unidiff-zero --whitespace=error "$repo_root/scripts/conformance-terminal-log.patch")
+  fi
+  verify_sha256 "$runner" "$pinned_runner_sha256"
+}
+
 if [[ ! -d "$suite_dir/.git" ]]; then
   printf '%s is not a conformance-suite Git checkout\n' "$suite_dir" >&2
   exit 1
@@ -115,6 +126,19 @@ if "$self_test"; then
   fi
   verify_sha256 "$test_config" "$drift_sha256"
   echo "Conformance nginx overlay is dual-stack, idempotent, and rejects drift"
+  mkdir "$temporary_root/scripts"
+  test_runner="$temporary_root/scripts/run-test-plan.py"
+  git -C "$suite_dir" show HEAD:scripts/run-test-plan.py > "$test_runner"
+  prepare_terminal_log_read "$temporary_root"
+  prepare_terminal_log_read "$temporary_root"
+  python3 -B "$repo_root/scripts/test-conformance-terminal-log.py" "$test_runner" "$repo_root/examples/oidc/failures.json"
+  printf '\n# drift\n' >> "$test_runner"
+  drift_sha256="$(sha256_file "$test_runner")"
+  if (prepare_terminal_log_read "$temporary_root") >/dev/null 2>&1; then
+    echo "Conformance terminal log overlay accepted runner drift" >&2
+    exit 1
+  fi
+  verify_sha256 "$test_runner" "$drift_sha256"
   exit 0
 fi
 
@@ -125,6 +149,7 @@ nginx_config="$suite_dir/nginx/nginx-static.conf"
 
 verify_sha256 "$requirements_file" "$expected_requirements_sha256"
 prepare_nginx_config "$nginx_config"
+prepare_terminal_log_read "$suite_dir"
 
 nginx_dockerfile_sha256="$(sha256_file "$nginx_dockerfile")"
 server_dockerfile_sha256="$(sha256_file "$server_dockerfile")"

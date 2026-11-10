@@ -1,0 +1,58 @@
+--- a/scripts/run-test-plan.py
++++ b/scripts/run-test-plan.py
+@@ -249,0 +250,15 @@
++
++class IncompleteTestLog(ValueError):
++    pass
++
++
++def order_test_log(logs):
++    # MongoDB only sorts by millisecond time. A tied block marker can follow
++    # its result, which would stop the analyzer before later conditions.
++    starts = {}
++    for entry in logs:
++        if entry.get('startBlock') is True and entry.get('src') == '-START-BLOCK-':
++            block_id = entry['blockId']
++            if block_id in starts:
++                raise ValueError('Duplicate conformance log block start')
++            starts[block_id] = entry
+@@ -250,0 +266,36 @@
++    ordered = []
++    emitted = set()
++    for entry in logs:
++        block_id = entry.get('blockId')
++        start = starts.get(block_id)
++        if entry is start:
++            if block_id in emitted:
++                continue
++            emitted.add(block_id)
++        elif block_id is not None and 'result' in entry and block_id not in emitted:
++            if start is None:
++                raise IncompleteTestLog('Missing conformance log block start')
++            if start['time'] != entry['time']:
++                raise ValueError('Conformance log block start follows a different timestamp')
++            ordered.append(start)
++            emitted.add(block_id)
++        ordered.append(entry)
++    return ordered
++
++
++async def get_terminal_test_log(conformance, module_id):
++    try:
++        return order_test_log(await conformance.get_test_log(module_id))
++    except IncompleteTestLog:
++        # Re-read only an incomplete log for this same module. Persistently
++        # incomplete or malformed results still fail the upstream analyzer.
++        async with asyncio.timeout(2):
++            for _ in range(5):
++                await asyncio.sleep(0.2)
++                try:
++                    return order_test_log(await conformance.get_test_log(module_id))
++                except IncompleteTestLog:
++                    pass
++        raise
++
++
+@@ -427 +478 @@
+-            module_info['logs'] = await conformance.get_test_log(module_id)
++            module_info['logs'] = await get_terminal_test_log(conformance, module_id)
