@@ -1,0 +1,24 @@
+--- a/scripts/run-test-plan.py
++++ b/scripts/run-test-plan.py
+@@ -248,0 +249,18 @@
++
++
++async def get_terminal_test_log(conformance, module, module_id, info):
++    logs = await conformance.get_test_log(module_id)
++    if module != 'oidcc-server-rotate-keys' or (info.get('status'), info.get('result')) != ('FINISHED', 'FAILED'):
++        return logs
++    # The suite can expose the terminal state before all condition logs are readable.
++    # Refresh this module only. The original analyzer still requires every expected condition.
++    try:
++        async with asyncio.timeout(2):
++            for _ in range(5):
++                if any(entry.get('result') == 'FAILURE' for entry in logs):
++                    break
++                await asyncio.sleep(0.2)
++                logs = await conformance.get_test_log(module_id)
++    except TimeoutError:
++        pass
++    return logs
+@@ -427 +445 @@
+-            module_info['logs'] = await conformance.get_test_log(module_id)
++            module_info['logs'] = await get_terminal_test_log(conformance, module, module_id, module_info['info'])
