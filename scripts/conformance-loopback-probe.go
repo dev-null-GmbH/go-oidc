@@ -31,7 +31,7 @@ type probeEvent struct {
 }
 
 func main() {
-	if runtime.Version() != "go1.27.3" {
+	if runtime.Version() != "go1.27.4" {
 		if err := json.NewEncoder(os.Stdout).Encode(probeEvent{Endpoint: "suite_readiness", Family: "set", Phase: "toolchain", Status: "unexpected_pin"}); err != nil {
 			os.Exit(1)
 		}
