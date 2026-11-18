@@ -300,7 +300,7 @@ func authenticatePrivateKeyJWT(ctx oidc.Context, c *goidc.Client, authnCtx Authn
 		return goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client", err)
 	}
 
-	if err := areClaimsValid(ctx, claims, c, authnCtx); err != nil {
+	if err := areClaimsValid(ctx, claims, c, ctx.PrivateKeyJWTAssertionPolicyFunc != nil); err != nil {
 		return err
 	}
 
@@ -480,7 +480,7 @@ func authenticateSecretJWT(ctx oidc.Context, c *goidc.Client, authnCtx AuthnCont
 		return goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client", errors.New("client_secret is expired"))
 	}
 
-	if err := areClaimsValid(ctx, claims, c, authnCtx); err != nil {
+	if err := areClaimsValid(ctx, claims, c, false); err != nil {
 		return err
 	}
 
@@ -519,7 +519,7 @@ func assertion(ctx oidc.Context) (string, error) {
 	return assertion, nil
 }
 
-func areClaimsValid(ctx oidc.Context, claims jwt.Claims, client *goidc.Client, _ AuthnContext) error {
+func areClaimsValid(ctx oidc.Context, claims jwt.Claims, client *goidc.Client, signedLifetime bool) error {
 	if claims.Expiry == nil {
 		return goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client",
 			errors.New("the exp claim is required in the client assertion"))
@@ -535,8 +535,13 @@ func areClaimsValid(ctx oidc.Context, claims jwt.Claims, client *goidc.Client, _
 			errors.New("the audience claim is invalid"))
 	}
 
-	secsToExpiry := int(claims.Expiry.Time().Sub(timeutil.Now()).Seconds())
-	if secsToExpiry > ctx.JWTLifetimeSecs {
+	lifetimeStart := timeutil.Now()
+	if signedLifetime && claims.IssuedAt != nil {
+		// Policy-bound private key assertions measure signed lifetime independently of JOSE clock tolerance.
+		lifetimeStart = claims.IssuedAt.Time()
+	}
+	secsToExpiry := int64(claims.Expiry.Time().Sub(lifetimeStart) / time.Second)
+	if secsToExpiry > int64(ctx.JWTLifetimeSecs) {
 		return goidc.WrapError(goidc.ErrorCodeInvalidClient, "invalid client",
 			errors.New("the client assertion lifetime exceeds the allowed maximum"))
 	}

@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/dev-null-GmbH/go-oidc/internal/client"
@@ -93,6 +94,115 @@ func TestPrivateKeyJWTAssertionPolicyRunsBeforeJTIConsumption(t *testing.T) {
 	}
 	if want := []string{"policy", "consume"}; !reflect.DeepEqual(calls, want) {
 		t.Fatalf("call order = %v, want %v", calls, want)
+	}
+}
+
+func TestPrivateKeyJWTAssertionPolicySeparatesSignedLifetimeFromClockSkew(t *testing.T) {
+	for _, test := range []struct {
+		name                       string
+		issuedOffset, lifetime     int
+		unmanaged, secret, badDate bool
+		replay, accepted           bool
+	}{
+		{name: "ten seconds ahead", issuedOffset: 10, lifetime: 60, accepted: true},
+		{name: "at skew limit", issuedOffset: 30, lifetime: 60, accepted: true},
+		{name: "lifetime exceeds limit even when backdated", issuedOffset: -10, lifetime: 61},
+		{name: "beyond skew limit", issuedOffset: 31, lifetime: 60},
+		{name: "non-numeric issuance time", issuedOffset: 10, lifetime: 60, badDate: true},
+		{name: "unmanaged private key JWT", issuedOffset: 10, lifetime: 60, unmanaged: true},
+		{name: "secret JWT with private policy configured", issuedOffset: 10, lifetime: 60, secret: true},
+		{name: "replay of assertion within skew", issuedOffset: 10, lifetime: 60, replay: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var ctx oidc.Context
+				var c *goidc.Client
+				var key goidc.JSONWebKey
+				if test.secret {
+					var secret string
+					ctx, c, secret = setUpClientSecretJWTAuthn(t)
+					key = goidc.JSONWebKey{Key: []byte(secret), Algorithm: string(goidc.SigAlgHS256)}
+				} else {
+					ctx, c, key = setUpPrivateKeyJWTAuthn(t)
+					key.Algorithm = string(goidc.SigAlgPS256)
+					c.JWKS.Keys[0] = key.Public()
+				}
+				ctx.Profile = goidc.ProfileFAPI2
+				ctx.JWTLeewayTimeSecs = 30
+				now := timeutil.TimestampNow()
+				issuedAt := now + test.issuedOffset
+				expiresAt := issuedAt + test.lifetime
+				claims := map[string]any{
+					goidc.ClaimIssuer:   c.ID,
+					goidc.ClaimSubject:  c.ID,
+					goidc.ClaimAudience: ctx.Issuer(),
+					goidc.ClaimIssuedAt: issuedAt,
+					goidc.ClaimExpiry:   expiresAt,
+					goidc.ClaimTokenID:  "assertion-id",
+				}
+				if test.badDate {
+					claims[goidc.ClaimIssuedAt] = "not-a-numeric-date"
+				}
+				ctx.Request.PostForm = map[string][]string{
+					"client_assertion":      {oidctest.Sign(t, claims, key)},
+					"client_assertion_type": {string(goidc.AssertionTypeJWTBearer)},
+				}
+				var calls []string
+				if !test.unmanaged {
+					ctx.PrivateKeyJWTAssertionPolicyFunc = func(_ context.Context, assertion goidc.VerifiedClientAssertion) error {
+						calls = append(calls, "policy")
+						if assertion.AuthenticatedClientID != c.ID || assertion.Header.Algorithm != goidc.SigAlgPS256 {
+							t.Error("policy did not receive the verified PS256 assertion")
+						}
+						return nil
+					}
+				}
+				ctx.ConsumeJTIUseFunc = func(_ context.Context, use goidc.JTIUse) error {
+					calls = append(calls, "consume")
+					use.ExpiresAt = use.ExpiresAt.UTC()
+					want := goidc.JTIUse{
+						ID: "assertion-id", Issuer: c.ID, Purpose: goidc.JTIUsePurposeClientAssertion,
+						ExpiresAt: time.Unix(int64(expiresAt+ctx.JWTLeewayTimeSecs), 0).UTC(),
+					}
+					if use != want {
+						t.Errorf("JTI use = %#v, want %#v", use, want)
+					}
+					if test.replay {
+						return goidc.ErrJTIReplay
+					}
+					return nil
+				}
+				var evidence goidc.TokenEndpointEvidence
+				ctx.TokenEndpointEvidenceFunc = func(_ context.Context, got goidc.TokenEndpointEvidence) {
+					evidence = got
+				}
+				ctx = ctx.BeginTokenEndpointEvidence()
+
+				_, err := client.Authenticated(ctx, client.AuthnContextToken)
+				if test.accepted {
+					if err != nil {
+						t.Fatalf("valid assertion rejected: %v", err)
+					}
+				} else {
+					assertErrorCode(t, err, goidc.ErrorCodeInvalidClient)
+					ctx.EmitTokenEndpointEvidence(goidc.TokenEndpointResultInvalidClient)
+					want := goidc.TokenEndpointEvidence{Result: goidc.TokenEndpointResultInvalidClient}
+					if test.replay {
+						want.AuthenticatedClientID = c.ID
+					}
+					if evidence != want {
+						t.Errorf("denial evidence = %#v, want %#v", evidence, want)
+					}
+				}
+				var wantCalls []string
+				if test.accepted || test.replay {
+					wantCalls = []string{"policy", "consume"}
+				}
+				if !reflect.DeepEqual(calls, wantCalls) {
+					t.Errorf("call order = %v, want %v", calls, wantCalls)
+				}
+			})
+		})
 	}
 }
 
