@@ -202,6 +202,10 @@ func activateHumanRefreshDelivery(ctx oidc.Context) (tokenResponse response, err
 	if err != nil {
 		return response{}, humanRefreshDeliveryServerError()
 	}
+	accessLifetime := policy.accessLifetime(decision.AuthenticationTime(), decision.RefreshTokenExpiresAt(), int64(now))
+	if accessLifetime < 1 {
+		return response{}, humanRefreshDeliveryServerError()
+	}
 	scopes := decision.Scopes()
 	resources := decision.Resources()
 	accessToken, err := issueHumanAccessToken(ctx, policy, humanAccessTokenFacts{
@@ -213,7 +217,8 @@ func activateHumanRefreshDelivery(ctx oidc.Context) (tokenResponse response, err
 		clientID:           decision.ClientID(),
 		scopes:             scopes,
 		resources:          resources,
-	}, now)
+		authenticationTime: decision.AuthenticationTime(),
+	}, now, accessLifetime)
 	if err != nil {
 		return response{}, humanRefreshDeliveryServerError()
 	}
@@ -221,7 +226,7 @@ func activateHumanRefreshDelivery(ctx oidc.Context) (tokenResponse response, err
 		AccessToken:           accessToken,
 		RefreshToken:          refreshTokenValue,
 		RefreshTokenExpiresIn: refreshTokenExpiresIn,
-		ExpiresIn:             policy.accessTokenLifetimeSeconds,
+		ExpiresIn:             accessLifetime,
 		TokenType:             goidc.TokenTypeBearer,
 		Scopes:                strings.Join(scopes, " "),
 		Resources:             goidc.Resources(resources),

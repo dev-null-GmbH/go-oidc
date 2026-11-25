@@ -118,6 +118,10 @@ func generateHumanAuthorizationCodeToken(
 		return response{}, humanAuthorizationServerError()
 	}
 
+	accessLifetime := policy.accessLifetime(decision.AuthenticationTime(), decision.RefreshTokenExpiresAt(), int64(now))
+	if accessLifetime < 1 {
+		return response{}, humanAuthorizationServerError()
+	}
 	scopes := decision.Scopes()
 	resources := decision.Resources()
 	scope := strings.Join(scopes, " ")
@@ -125,8 +129,8 @@ func generateHumanAuthorizationCodeToken(
 		grantID: decision.GrantID(), subject: decision.Subject(),
 		organizationID: decision.OrganizationID(), membershipID: decision.MembershipID(),
 		membershipRevision: decision.MembershipRevision(), clientID: decision.ClientID(),
-		scopes: scopes, resources: resources,
-	}, now)
+		scopes: scopes, resources: resources, authenticationTime: decision.AuthenticationTime(),
+	}, now, accessLifetime)
 	if err != nil {
 		return response{}, humanAuthorizationServerError()
 	}
@@ -171,7 +175,7 @@ func generateHumanAuthorizationCodeToken(
 		IDToken:               idToken,
 		RefreshToken:          refreshToken,
 		RefreshTokenExpiresIn: refreshTokenExpiresIn,
-		ExpiresIn:             policy.accessTokenLifetimeSeconds,
+		ExpiresIn:             accessLifetime,
 		TokenType:             goidc.TokenTypeBearer,
 		Scopes:                scope,
 		Resources:             goidc.Resources(resources),
@@ -180,6 +184,7 @@ func generateHumanAuthorizationCodeToken(
 }
 
 type humanAccessTokenFacts struct {
+	authenticationTime int64
 	grantID            string
 	subject            string
 	organizationID     string
@@ -194,7 +199,7 @@ func issueHumanAccessToken(
 	ctx oidc.Context,
 	policy humanTokenIssuancePolicy,
 	facts humanAccessTokenFacts,
-	now int,
+	now, lifetime int,
 ) (string, error) {
 	accessTokenID, err := newHumanJWTID()
 	if err != nil {
@@ -209,10 +214,13 @@ func issueHumanAccessToken(
 		goidc.ClaimScope:             strings.Join(facts.scopes, " "),
 		goidc.ClaimGrantID:           facts.grantID,
 		goidc.ClaimIssuedAt:          now,
-		goidc.ClaimExpiry:            now + policy.accessTokenLifetimeSeconds,
+		goidc.ClaimExpiry:            now + lifetime,
 		humanOrganizationIDClaim:     facts.organizationID,
 		humanMembershipIDClaim:       facts.membershipID,
 		humanMembershipRevisionClaim: facts.membershipRevision,
+	}
+	if policy.refreshLifetimeSeconds > goidc.HumanDefaultRefreshLifetimeSeconds {
+		accessClaims[goidc.ClaimAuthTime] = facts.authenticationTime
 	}
 	accessToken, err := ctx.Sign(
 		accessClaims,
@@ -699,6 +707,21 @@ func validRedeemedHumanAuthorization(
 			now,
 			policy.authorityClockSkewSeconds,
 		)
+}
+
+// Only the final access token of a full workspace grant may be shorter.
+func (policy humanTokenIssuancePolicy) accessLifetime(authenticatedAt, refreshExpiresAt, now int64) int {
+	if policy.refreshLifetimeSeconds <= goidc.HumanDefaultRefreshLifetimeSeconds || refreshExpiresAt == 0 {
+		return policy.accessTokenLifetimeSeconds
+	}
+	remaining := refreshExpiresAt - now
+	if remaining >= int64(policy.accessTokenLifetimeSeconds) {
+		return policy.accessTokenLifetimeSeconds
+	}
+	if remaining < 1 || refreshExpiresAt-authenticatedAt != policy.refreshLifetimeSeconds {
+		return 0
+	}
+	return int(remaining)
 }
 
 // Extended login has an absolute cutoff even within the ordinary authority clock tolerance.

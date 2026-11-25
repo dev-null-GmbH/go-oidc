@@ -226,6 +226,42 @@ func assertHumanRefreshDeliveryReplay(t *testing.T, fixture *humanTokenFixture, 
 	}
 }
 
+func TestFinalWorkspaceAccessTokenEndsAtTheOriginalDeadline(t *testing.T) {
+	t.Parallel()
+	fixture := newHumanTokenFixture(t)
+	fixture.enableOfflineAccess()
+	policy, err := goidc.NewHumanExtendedRefreshPolicy(fixture.client.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.ctx.HumanRefreshPolicy = policy
+	config := fixture.activationConfig()
+	config.RefreshPolicy = policy
+	config.RefreshTokenExpiresAt = config.CreatedAt + 45
+	config.AuthenticationTime = config.RefreshTokenExpiresAt - policy.LifetimeSeconds(fixture.client.ID)
+	config.ExpiresAt = config.RefreshTokenExpiresAt
+	decision, err := goidc.NewHumanRefreshDeliveryActivateDecision(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.authority.activate = func(context.Context, goidc.HumanRefreshDeliveryActivateInput) (goidc.HumanRefreshDeliveryActivateDecision, error) {
+		return decision, nil
+	}
+	for _, assertion := range []string{"activate-terminal-grant", "recover-terminal-grant"} {
+		fixture.installDeliveryRequest(t, goidc.HumanRefreshDeliveryActivateRoute, assertion, false)
+		resp, activateErr := activateHumanRefreshDelivery(fixture.ctx)
+		if activateErr != nil || resp.ExpiresIn <= 0 || resp.ExpiresIn > 45 || resp.ExpiresIn != resp.RefreshTokenExpiresIn {
+			t.Fatalf("terminal response: access=%d refresh=%d err=%v", resp.ExpiresIn, resp.RefreshTokenExpiresIn, activateErr)
+		}
+		claims := parseHumanPS256Token(t, fixture.ctx, resp.AccessToken, "at+jwt")
+		expiresAt := integerClaim(t, claims, goidc.ClaimExpiry)
+		if expiresAt != config.RefreshTokenExpiresAt || int64(resp.ExpiresIn) != expiresAt-integerClaim(t, claims, goidc.ClaimIssuedAt) ||
+			integerClaim(t, claims, goidc.ClaimAuthTime) != config.AuthenticationTime {
+			t.Fatal("terminal access token lost its signed authentication time or deadline")
+		}
+	}
+}
+
 func TestHumanRefreshDeliveryPrepareExactReplayReportsTerminalState(t *testing.T) {
 	t.Parallel()
 
