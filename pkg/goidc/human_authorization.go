@@ -1286,29 +1286,37 @@ func (input HumanRefreshRevocationInput) ClientAssertionAuthority() VerifiedClie
 // HumanDefaultRefreshLifetimeSeconds bounds the ordinary strict confidential client refresh family.
 const HumanDefaultRefreshLifetimeSeconds = 24 * 60 * 60
 
-// HumanRefreshPolicy selects at most one strict confidential client for a family
-// lasting up to 30 days from verified authentication. Its zero value preserves
-// the 24-hour limit for all clients.
+// HumanRefreshPolicy selects the strict confidential clients of one provider
+// whose families can last up to 30 days from verified authentication. Its zero
+// value preserves the 24-hour limit for all clients.
 type HumanRefreshPolicy struct {
-	extendedClientID string
+	extendedClientIDs []string
 }
 
-// NewHumanExtendedRefreshPolicy selects an exact client ID from trusted provider configuration.
-func NewHumanExtendedRefreshPolicy(clientID string) (HumanRefreshPolicy, error) {
-	if !validHumanClientID(clientID) {
+// NewHumanExtendedRefreshPolicy selects exact client IDs from the issuer's
+// trusted registration configuration. Duplicate IDs are rejected.
+func NewHumanExtendedRefreshPolicy(clientIDs ...string) (HumanRefreshPolicy, error) {
+	if len(clientIDs) == 0 {
 		return HumanRefreshPolicy{}, ErrInvalidHumanAuthorizationValue
 	}
-	return HumanRefreshPolicy{extendedClientID: clientID}, nil
+	ids := slices.Clone(clientIDs)
+	slices.Sort(ids)
+	for index, id := range ids {
+		if !validHumanClientID(id) || index > 0 && id == ids[index-1] {
+			return HumanRefreshPolicy{}, ErrInvalidHumanAuthorizationValue
+		}
+	}
+	return HumanRefreshPolicy{extendedClientIDs: ids}, nil
 }
 
-// Equal reports whether both policies select the same confidential client.
+// Equal reports whether both policies select the same confidential clients.
 func (policy HumanRefreshPolicy) Equal(other HumanRefreshPolicy) bool {
-	return policy == other
+	return slices.Equal(policy.extendedClientIDs, other.extendedClientIDs)
 }
 
 // LifetimeSeconds bounds the refresh family for an authenticated client.
 func (policy HumanRefreshPolicy) LifetimeSeconds(clientID string) int64 {
-	if clientID != "" && clientID == policy.extendedClientID {
+	if _, found := slices.BinarySearch(policy.extendedClientIDs, clientID); found {
 		return 30 * HumanDefaultRefreshLifetimeSeconds
 	}
 	return HumanDefaultRefreshLifetimeSeconds
@@ -1318,12 +1326,13 @@ func (policy HumanRefreshPolicy) validExpiry(clientID string, authenticatedAt, c
 	if createdAt < 1 || expiresAt <= createdAt {
 		return false
 	}
+	lifetime := policy.LifetimeSeconds(clientID)
 	anchor := createdAt
-	if clientID != "" && clientID == policy.extendedClientID {
+	if lifetime > HumanDefaultRefreshLifetimeSeconds {
 		// Rotation and exact delivery replay have a fresh decision time.
 		anchor = authenticatedAt
 	}
-	return anchor > 0 && anchor <= createdAt && expiresAt-anchor <= policy.LifetimeSeconds(clientID)
+	return anchor > 0 && anchor <= createdAt && expiresAt-anchor <= lifetime
 }
 
 func validHumanClientID(value string) bool {

@@ -179,15 +179,26 @@ func TestHumanExtendedRefreshPolicyRequiresAuthenticatedClientOptIn(t *testing.T
 	t.Parallel()
 
 	const month = 30 * 24 * 60 * 60
-	for _, configured := range []bool{true, false} {
+	for _, test := range []struct {
+		name              string
+		providerClientIDs []string
+		wantExtended      bool
+	}{
+		{"registered locally", []string{"dashboard-prod", testHumanClientID, "another-prod"}, true},
+		{"registered at another issuer", []string{"dashboard-dev", "another-dev"}, false},
+		{"no registrations selected", nil, false},
+	} {
 		fixture := newHumanTokenFixture(t)
 		fixture.enableOfflineAccess()
-		selected, err := goidc.NewHumanExtendedRefreshPolicy(fixture.client.ID)
+		selected, err := goidc.NewHumanExtendedRefreshPolicy(fixture.client.ID, "another-prod")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if configured {
-			fixture.ctx.HumanRefreshPolicy = selected
+		if len(test.providerClientIDs) > 0 {
+			fixture.ctx.HumanRefreshPolicy, err = goidc.NewHumanExtendedRefreshPolicy(test.providerClientIDs...)
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
 		fixture.authority.redeem = func(context.Context, goidc.HumanCodeRedemptionInput) (goidc.HumanCodeRedemptionDecision, error) {
 			return fixture.redeemedDecision(t, func(config *goidc.HumanCodeRedemptionDecisionConfig) {
@@ -198,13 +209,13 @@ func TestHumanExtendedRefreshPolicyRequiresAuthenticatedClientOptIn(t *testing.T
 			}), nil
 		}
 		resp, err := generateAuthCodeToken(fixture.ctx, newRequest(fixture.ctx.Request))
-		if !configured {
+		if !test.wantExtended {
 			assertHumanTokenError(t, err, goidc.ErrorCodeServerError)
 			continue
 		}
 		if err != nil || resp.RefreshTokenExpiresIn < month-10 || resp.RefreshTokenExpiresIn > month ||
 			resp.ExpiresIn != 300 || resp.RefreshToken != testHumanRefreshToken {
-			t.Fatalf("unexpected token lifetimes refresh=%d access=%d err=%v", resp.RefreshTokenExpiresIn, resp.ExpiresIn, err)
+			t.Fatalf("%s: unexpected token lifetimes refresh=%d access=%d err=%v", test.name, resp.RefreshTokenExpiresIn, resp.ExpiresIn, err)
 		}
 	}
 }
