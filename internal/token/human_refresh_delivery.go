@@ -196,7 +196,8 @@ func activateHumanRefreshDelivery(ctx oidc.Context) (tokenResponse response, err
 		true,
 		decision.RefreshTokenExpiresAt(),
 		int64(now),
-		policy.authorityClockSkewSeconds,
+		policy.refreshExpirySkew(),
+		policy.refreshLifetimeSeconds,
 	)
 	if err != nil {
 		return response{}, humanRefreshDeliveryServerError()
@@ -408,14 +409,14 @@ func validActivatedHumanRefreshDelivery(
 	policy humanTokenIssuancePolicy,
 	now int64,
 ) bool {
-	if !decision.Valid() || decision.Outcome() != goidc.HumanRefreshDeliveryActivateOutcomeActivated {
+	if !decision.ValidForRefreshPolicy(policy.refreshPolicy) || decision.Outcome() != goidc.HumanRefreshDeliveryActivateOutcomeActivated {
 		return false
 	}
 	scopes := decision.Scopes()
 	resources := decision.Resources()
 	return client != nil && decision.ClientID() == client.ID &&
 		slices.Contains(scopes, goidc.ScopeOfflineAccess.ID) &&
-		humanAuthorityTimestampNotExpired(decision.RefreshTokenExpiresAt(), now, policy.authorityClockSkewSeconds) &&
+		humanAuthorityTimestampNotExpired(decision.RefreshTokenExpiresAt(), now, policy.refreshExpirySkew()) &&
 		humanTokenSortedSubset(scopes, strings.Split(client.ScopeIDs, " ")) &&
 		humanTokenSortedSubset(scopes, policy.scopeIDs) && len(resources) != 0 &&
 		policy.resourceIndicatorsEnabled && humanTokenSortedSubset(resources, policy.resourceIndicators) &&

@@ -25,7 +25,7 @@ func TestHumanAuthorizationCodeIssuesRefreshOnlyForOfflineAccess(t *testing.T) {
 	fixture.enableOfflineAccess()
 	decision := fixture.redeemedDecision(t, func(config *goidc.HumanCodeRedemptionDecisionConfig) {
 		config.Scopes = []string{"offline_access", "openid", "profile"}
-		config.RefreshToken = mustHumanRefreshToken(t, testHumanRefreshToken)
+		config.RefreshToken = mustHumanRefreshToken(t)
 		config.RefreshTokenExpiresAt = config.CreatedAt + 86_400
 	})
 	fixture.authority.redeem = func(context.Context, goidc.HumanCodeRedemptionInput) (goidc.HumanCodeRedemptionDecision, error) {
@@ -60,7 +60,7 @@ func TestHumanRefreshTokenResponseClampsAuthorityClockSkew(t *testing.T) {
 	t.Parallel()
 
 	const now int64 = 1_800_000_000
-	capability := mustHumanRefreshToken(t, testHumanRefreshToken)
+	capability := mustHumanRefreshToken(t)
 	for _, test := range []struct {
 		name      string
 		expiresAt int64
@@ -68,14 +68,14 @@ func TestHumanRefreshTokenResponseClampsAuthorityClockSkew(t *testing.T) {
 		want      int
 		wantError bool
 	}{
-		{name: "database clock ahead", expiresAt: now + humanTokenMaximumRefreshLife + 30, skew: 30, want: humanTokenMaximumRefreshLife},
+		{name: "database clock ahead", expiresAt: now + goidc.HumanDefaultRefreshLifetimeSeconds + 30, skew: 30, want: goidc.HumanDefaultRefreshLifetimeSeconds},
 		{name: "application clock ahead at skew boundary", expiresAt: now - 30, skew: 30, want: 1},
 		{name: "application clock ahead past skew", expiresAt: now - 31, skew: 30, wantError: true},
-		{name: "negative skew", expiresAt: now + humanTokenMaximumRefreshLife, skew: -1, wantError: true},
-		{name: "unbounded skew", expiresAt: now + humanTokenMaximumRefreshLife, skew: 61, wantError: true},
+		{name: "negative skew", expiresAt: now + goidc.HumanDefaultRefreshLifetimeSeconds, skew: -1, wantError: true},
+		{name: "unbounded skew", expiresAt: now + goidc.HumanDefaultRefreshLifetimeSeconds, skew: 61, wantError: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			value, expiresIn, err := humanRefreshTokenResponse(capability, true, test.expiresAt, now, test.skew)
+			value, expiresIn, err := humanRefreshTokenResponse(capability, true, test.expiresAt, now, test.skew, goidc.HumanDefaultRefreshLifetimeSeconds)
 			if (err != nil) != test.wantError {
 				t.Fatalf("humanRefreshTokenResponse() error = %v, wantError %t", err, test.wantError)
 			}
@@ -102,11 +102,11 @@ func TestHumanAuthorizationCodeAcceptsDatabaseClockAheadAfterAtomicRedemption(t 
 		databaseNow := int64(timeutil.TimestampNow() + 30)
 		return fixture.redeemedDecision(t, func(config *goidc.HumanCodeRedemptionDecisionConfig) {
 			config.Scopes = []string{"offline_access", "openid", "profile"}
-			config.RefreshToken = mustHumanRefreshToken(t, testHumanRefreshToken)
+			config.RefreshToken = mustHumanRefreshToken(t)
 			config.AuthenticationTime = databaseNow - 5
 			config.CreatedAt = databaseNow
 			config.ExpiresAt = databaseNow + 60
-			config.RefreshTokenExpiresAt = databaseNow + humanTokenMaximumRefreshLife
+			config.RefreshTokenExpiresAt = databaseNow + goidc.HumanDefaultRefreshLifetimeSeconds
 		}), nil
 	}
 
@@ -114,7 +114,7 @@ func TestHumanAuthorizationCodeAcceptsDatabaseClockAheadAfterAtomicRedemption(t 
 	if err != nil {
 		t.Fatalf("generateAuthCodeToken() error = %v", err)
 	}
-	if resp.RefreshToken != testHumanRefreshToken || resp.RefreshTokenExpiresIn != humanTokenMaximumRefreshLife {
+	if resp.RefreshToken != testHumanRefreshToken || resp.RefreshTokenExpiresIn != goidc.HumanDefaultRefreshLifetimeSeconds {
 		t.Fatal("database-ahead token response is incoherent")
 	}
 	fixture.assertNoLegacyIssuance(t)
@@ -160,9 +160,9 @@ func (fixture *humanTokenFixture) enableOfflineAccess() {
 	fixture.client.ScopeIDs = "offline_access openid profile"
 }
 
-func mustHumanRefreshToken(t *testing.T, value string) goidc.HumanRefreshToken {
+func mustHumanRefreshToken(t *testing.T) goidc.HumanRefreshToken {
 	t.Helper()
-	token, err := goidc.NewHumanRefreshToken(value)
+	token, err := goidc.NewHumanRefreshToken(testHumanRefreshToken)
 	if err != nil {
 		t.Fatalf("NewHumanRefreshToken() error = %v", err)
 	}
@@ -173,4 +173,38 @@ type humanRefreshTokenPanicManager struct{}
 
 func (humanRefreshTokenPanicManager) GrantByRefreshToken(context.Context, string) (*goidc.Grant, error) {
 	panic("legacy RefreshTokenManager called")
+}
+
+func TestHumanExtendedRefreshPolicyRequiresAuthenticatedClientOptIn(t *testing.T) {
+	t.Parallel()
+
+	const month = 30 * 24 * 60 * 60
+	for _, configured := range []bool{true, false} {
+		fixture := newHumanTokenFixture(t)
+		fixture.enableOfflineAccess()
+		selected, err := goidc.NewHumanExtendedRefreshPolicy(fixture.client.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if configured {
+			fixture.ctx.HumanRefreshPolicy = selected
+		}
+		fixture.authority.redeem = func(context.Context, goidc.HumanCodeRedemptionInput) (goidc.HumanCodeRedemptionDecision, error) {
+			return fixture.redeemedDecision(t, func(config *goidc.HumanCodeRedemptionDecisionConfig) {
+				config.RefreshPolicy = selected
+				config.Scopes = []string{"offline_access", "openid", "profile"}
+				config.RefreshToken = mustHumanRefreshToken(t)
+				config.RefreshTokenExpiresAt = config.AuthenticationTime + month
+			}), nil
+		}
+		resp, err := generateAuthCodeToken(fixture.ctx, newRequest(fixture.ctx.Request))
+		if !configured {
+			assertHumanTokenError(t, err, goidc.ErrorCodeServerError)
+			continue
+		}
+		if err != nil || resp.RefreshTokenExpiresIn < month-10 || resp.RefreshTokenExpiresIn > month ||
+			resp.ExpiresIn != 300 || resp.RefreshToken != testHumanRefreshToken {
+			t.Fatalf("unexpected token lifetimes refresh=%d access=%d err=%v", resp.RefreshTokenExpiresIn, resp.ExpiresIn, err)
+		}
+	}
 }

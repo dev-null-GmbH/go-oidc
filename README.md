@@ -390,6 +390,13 @@ through client metadata. The profile admits only simple PAR, an outer
 delivery, and refresh-token revocation. The ordinary `refresh_token` grant at
 the token endpoint never consumes a strict Human refresh capability.
 
+The refresh family limit defaults to 24 hours. To give one confidential client
+up to 30 days from the original verified authentication, create a policy with
+`goidc.NewHumanExtendedRefreshPolicy` using its registered client ID. Pass the
+policy to `provider.WithHumanConfidentialBFFRefreshPolicy` and the authority's
+code redemption and refresh activation decision configs. The authority stores
+and revalidates the original absolute deadline on every rotation and recovery.
+
 Recurring refresh uses three fixed routes below the provider's
 `EndpointPrefix`. Every request is an exact
 `application/x-www-form-urlencoded` POST with a fresh `private_key_jwt`

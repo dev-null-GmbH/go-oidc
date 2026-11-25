@@ -44,6 +44,7 @@ type Configuration struct {
 	HumanCompletionOrigins                   []string
 	HumanBrowserBindingCookieName            string
 	HumanAccessTokenLifetimeSecs             int
+	HumanRefreshPolicy                       goidc.HumanRefreshPolicy
 
 	OpaqueTokenEnabled bool
 	OpaqueTokenManager goidc.OpaqueTokenManager

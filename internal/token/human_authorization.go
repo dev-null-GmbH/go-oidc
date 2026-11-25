@@ -35,7 +35,6 @@ const (
 	humanTokenMaximumKeys        = 16
 	humanTokenMaximumRSABits     = 4096
 	humanTokenMaximumIDLifetime  = 600
-	humanTokenMaximumRefreshLife = 24 * 60 * 60
 )
 
 var (
@@ -50,6 +49,8 @@ var (
 )
 
 type humanTokenIssuancePolicy struct {
+	refreshPolicy              goidc.HumanRefreshPolicy
+	refreshLifetimeSeconds     int64
 	issuer                     string
 	accessTokenLifetimeSeconds int
 	idTokenLifetimeSeconds     int
@@ -135,7 +136,8 @@ func generateHumanAuthorizationCodeToken(
 		hasRefreshCapability,
 		decision.RefreshTokenExpiresAt(),
 		int64(now),
-		policy.authorityClockSkewSeconds,
+		policy.refreshExpirySkew(),
+		policy.refreshLifetimeSeconds,
 	)
 	if err != nil {
 		return response{}, humanAuthorizationServerError()
@@ -228,7 +230,7 @@ func humanRefreshTokenResponse(
 	present bool,
 	expiresAt int64,
 	now int64,
-	skew int64,
+	skew, lifetime int64,
 ) (string, int, error) {
 	if !validHumanAuthorityClockSkew(skew) {
 		return "", 0, errors.New("invalid strict human authority clock skew")
@@ -239,7 +241,7 @@ func humanRefreshTokenResponse(
 		}
 		return "", 0, nil
 	}
-	remaining, validLifetime := humanRefreshTokenRemainingLifetime(expiresAt, now, skew)
+	remaining, validLifetime := humanRefreshTokenRemainingLifetime(expiresAt, now, skew, lifetime)
 	if !capability.Valid() || !validLifetime {
 		return "", 0, errors.New("invalid strict human refresh expiry")
 	}
@@ -250,7 +252,7 @@ func humanRefreshTokenResponse(
 	return rendered, remaining, nil
 }
 
-func humanRefreshTokenRemainingLifetime(expiresAt, now, skew int64) (int, bool) {
+func humanRefreshTokenRemainingLifetime(expiresAt, now, skew, lifetime int64) (int, bool) {
 	if !validHumanAuthorityClockSkew(skew) || expiresAt < 1 || now < 1 {
 		return 0, false
 	}
@@ -264,10 +266,7 @@ func humanRefreshTokenRemainingLifetime(expiresAt, now, skew int64) (int, bool) 
 	// Successful decisions already bind the absolute family lifetime to their
 	// authority-owned creation time. Clamp only the wire-relative view so a
 	// database clock ahead of this process cannot inflate expires_in.
-	if remaining > humanTokenMaximumRefreshLife {
-		remaining = humanTokenMaximumRefreshLife
-	}
-	return int(remaining), true
+	return int(min(remaining, lifetime)), true
 }
 
 func isHumanAuthorizationCode(value string) bool {
@@ -509,6 +508,8 @@ func humanTokenPolicy(ctx oidc.Context, client *goidc.Client) (humanTokenIssuanc
 		authenticationContexts[index] = string(authenticationContext)
 	}
 	return humanTokenIssuancePolicy{
+		refreshPolicy:              ctx.HumanRefreshPolicy,
+		refreshLifetimeSeconds:     ctx.HumanRefreshPolicy.LifetimeSeconds(client.ID),
 		issuer:                     ctx.Issuer(),
 		accessTokenLifetimeSeconds: ctx.HumanAccessTokenLifetimeSecs,
 		idTokenLifetimeSeconds:     ctx.IDTokenLifetimeSecs,
@@ -672,7 +673,7 @@ func validRedeemedHumanAuthorization(
 	policy humanTokenIssuancePolicy,
 	now int64,
 ) bool {
-	if !decision.Valid() || decision.Outcome() != goidc.HumanCodeRedemptionOutcomeRedeemed {
+	if !decision.ValidForRefreshPolicy(policy.refreshPolicy) || decision.Outcome() != goidc.HumanCodeRedemptionOutcomeRedeemed {
 		return false
 	}
 	scopes := decision.Scopes()
@@ -683,7 +684,7 @@ func validRedeemedHumanAuthorization(
 		humanAuthorityTimestampNotExpired(
 			decision.RefreshTokenExpiresAt(),
 			now,
-			policy.authorityClockSkewSeconds,
+			policy.refreshExpirySkew(),
 		) ||
 		!hasOfflineAccess && !hasRefreshToken && !refreshToken.Valid() && decision.RefreshTokenExpiresAt() == 0
 	return client != nil && decision.ClientID() == client.ID && validRefreshFacts &&
@@ -698,6 +699,14 @@ func validRedeemedHumanAuthorization(
 			now,
 			policy.authorityClockSkewSeconds,
 		)
+}
+
+// Extended login has an absolute cutoff even within the ordinary authority clock tolerance.
+func (policy humanTokenIssuancePolicy) refreshExpirySkew() int64 {
+	if policy.refreshLifetimeSeconds > goidc.HumanDefaultRefreshLifetimeSeconds {
+		return 0
+	}
+	return policy.authorityClockSkewSeconds
 }
 
 func validHumanAuthorityDecisionWindow(createdAt, expiresAt, now, skew int64) bool {
