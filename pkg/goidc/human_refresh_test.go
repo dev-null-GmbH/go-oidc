@@ -199,3 +199,33 @@ func mustHumanRefreshToken(t *testing.T, value string) goidc.HumanRefreshToken {
 	}
 	return token
 }
+
+func TestHumanExtendedRefreshPolicyUsesAnImmutableExactClientSet(t *testing.T) {
+	t.Parallel()
+
+	clientIDs := []string{"shop-prod", "dashboard-prod", "books-prod"}
+	policy, err := goidc.NewHumanExtendedRefreshPolicy(clientIDs...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientIDs[0] = "unregistered"
+	for _, id := range []string{"shop-prod", "dashboard-prod", "books-prod"} {
+		if got := policy.LifetimeSeconds(id); got != 30*86_400 {
+			t.Errorf("lifetime for %q = %d", id, got)
+		}
+	}
+	for _, id := range []string{"unregistered", "shop-dev", "SHOP-prod", "shop-prod-another", ""} {
+		if got := policy.LifetimeSeconds(id); got != 86_400 {
+			t.Errorf("lifetime for %q = %d", id, got)
+		}
+	}
+	reordered, err := goidc.NewHumanExtendedRefreshPolicy("books-prod", "shop-prod", "dashboard-prod")
+	if err != nil || !reordered.Equal(policy) {
+		t.Fatal("client registration ordering changed policy equality")
+	}
+	for _, ids := range [][]string{nil, {""}, {"valid", ""}, {"valid", "valid"}, {"valid", "*"}, {"valid", " valid"}} {
+		if candidate, err := goidc.NewHumanExtendedRefreshPolicy(ids...); err == nil || candidate.LifetimeSeconds("valid") != 86_400 {
+			t.Errorf("invalid client set %q returned error %v", ids, err)
+		}
+	}
+}

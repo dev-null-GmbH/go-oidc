@@ -58,6 +58,26 @@ func TestNewHumanConfidentialBFFAuthorizationDoesNotInstallLegacyManagers(t *tes
 	}
 }
 
+func TestNewHumanConfidentialBFFRefreshPolicy(t *testing.T) {
+	selected, err := goidc.NewHumanExtendedRefreshPolicy("selected-bff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := New(humanAuthorizationProviderConfig(goidc.SigAlgPS256),
+		withHumanAuthorizationJTIUseConsumer(),
+		withHumanAuthorizationResourceIndicators(),
+		withHumanAuthorizationACRs(),
+		WithHumanConfidentialBFFAuthorizationAuthority(humanAuthorizationAuthorityProviderStub{},
+			append(validHumanAuthorizationProviderOptions(), WithHumanConfidentialBFFRefreshPolicy(selected))...),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !provider.config.HumanRefreshPolicy.Equal(selected) {
+		t.Fatal("provider omitted the configured refresh policy")
+	}
+}
+
 func TestNewHumanConfidentialBFFAuthorizationResponseIssuer(t *testing.T) {
 	provider, err := New(humanAuthorizationProviderConfig(goidc.SigAlgPS256),
 		withHumanAuthorizationJTIUseConsumer(),

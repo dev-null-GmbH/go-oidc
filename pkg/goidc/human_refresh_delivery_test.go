@@ -283,24 +283,7 @@ func TestHumanRefreshDeliveryDecisionsRejectOpenOrIncoherentShapes(t *testing.T)
 		}
 	}
 
-	base := goidc.HumanRefreshDeliveryActivateDecisionConfig{
-		Outcome:                  goidc.HumanRefreshDeliveryActivateOutcomeActivated,
-		RefreshTokenExpiresAt:    1_787_666_400,
-		GrantID:                  "grant-handle-00000001",
-		Subject:                  "pairwise-subject-0123456789abcdef",
-		OrganizationID:           "organization-handle-0001",
-		MembershipID:             "membership-handle-00001",
-		MembershipRevision:       4,
-		ClientID:                 "dashboard.d0.eu",
-		ClientAssertionAuthority: authority,
-		Scopes:                   []string{"offline_access", "openid", "profile"},
-		Resources:                []string{"https://api.d0.eu/accounting/v1"},
-		AuthenticationTime:       1_787_580_000,
-		AuthenticationContext:    "urn:d0:acr:passkey",
-		AuthenticationMethods:    []string{"passkey"},
-		CreatedAt:                1_787_580_100,
-		ExpiresAt:                1_787_580_160,
-	}
+	base := humanRefreshDeliveryActivateConfig()
 	for _, mutate := range []func(*goidc.HumanRefreshDeliveryActivateDecisionConfig){
 		func(config *goidc.HumanRefreshDeliveryActivateDecisionConfig) {
 			config.Scopes = []string{"openid", "profile"}
@@ -374,4 +357,63 @@ func mustAbortRejected(t *testing.T) goidc.HumanRefreshDeliveryAbortDecision {
 		t.Fatal(err)
 	}
 	return decision
+}
+
+func TestHumanRefreshPolicyBoundsRotationFromOriginalAuthentication(t *testing.T) {
+	t.Parallel()
+
+	const day = 86_400
+	config := humanRefreshDeliveryActivateConfig()
+	policy, err := goidc.NewHumanExtendedRefreshPolicy(config.ClientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := goidc.NewHumanExtendedRefreshPolicy("*"); err == nil {
+		t.Fatal("wildcard client admitted")
+	}
+	config.RefreshPolicy = policy
+	config.RefreshTokenExpiresAt = config.AuthenticationTime + 30*day
+	for _, test := range []struct {
+		client string
+		age    int64
+		extend int64
+		want   bool
+	}{
+		{config.ClientID, 1, 0, true},
+		{"another-client", 1, 0, false},
+		{config.ClientID, 29 * day, 0, true},
+		{config.ClientID, 29 * day, 1, false},
+		{config.ClientID, 30 * day, 0, false},
+	} {
+		candidate := config
+		candidate.ClientID = test.client
+		candidate.CreatedAt = config.AuthenticationTime + test.age
+		candidate.ExpiresAt = candidate.CreatedAt + 60
+		candidate.RefreshTokenExpiresAt += test.extend
+		decision, err := goidc.NewHumanRefreshDeliveryActivateDecision(candidate)
+		if decision.Valid() != test.want || (err == nil) != test.want {
+			t.Errorf("client=%s age=%d extension=%d: valid=%v error=%v", test.client, test.age, test.extend, decision.Valid(), err)
+		}
+	}
+}
+
+func humanRefreshDeliveryActivateConfig() goidc.HumanRefreshDeliveryActivateDecisionConfig {
+	return goidc.HumanRefreshDeliveryActivateDecisionConfig{
+		Outcome:                  goidc.HumanRefreshDeliveryActivateOutcomeActivated,
+		RefreshTokenExpiresAt:    1_787_666_400,
+		GrantID:                  "grant-handle-00000001",
+		Subject:                  "pairwise-subject-0123456789abcdef",
+		OrganizationID:           "organization-handle-0001",
+		MembershipID:             "membership-handle-00001",
+		MembershipRevision:       4,
+		ClientID:                 "dashboard.d0.eu",
+		ClientAssertionAuthority: goidc.VerifiedClientAssertionAuthority{SnapshotRevision: 7, KeyAuthorityID: "authority-key-0001"},
+		Scopes:                   []string{"offline_access", "openid", "profile"},
+		Resources:                []string{"https://api.d0.eu/accounting/v1"},
+		AuthenticationTime:       1_787_580_000,
+		AuthenticationContext:    "urn:d0:acr:passkey",
+		AuthenticationMethods:    []string{"passkey"},
+		CreatedAt:                1_787_580_100,
+		ExpiresAt:                1_787_580_160,
+	}
 }

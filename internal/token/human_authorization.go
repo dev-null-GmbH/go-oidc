@@ -35,7 +35,6 @@ const (
 	humanTokenMaximumKeys        = 16
 	humanTokenMaximumRSABits     = 4096
 	humanTokenMaximumIDLifetime  = 600
-	humanTokenMaximumRefreshLife = 24 * 60 * 60
 )
 
 var (
@@ -50,6 +49,8 @@ var (
 )
 
 type humanTokenIssuancePolicy struct {
+	refreshPolicy              goidc.HumanRefreshPolicy
+	refreshLifetimeSeconds     int64
 	issuer                     string
 	accessTokenLifetimeSeconds int
 	idTokenLifetimeSeconds     int
@@ -117,6 +118,10 @@ func generateHumanAuthorizationCodeToken(
 		return response{}, humanAuthorizationServerError()
 	}
 
+	accessLifetime := policy.accessLifetime(decision.AuthenticationTime(), decision.RefreshTokenExpiresAt(), int64(now))
+	if accessLifetime < 1 {
+		return response{}, humanAuthorizationServerError()
+	}
 	scopes := decision.Scopes()
 	resources := decision.Resources()
 	scope := strings.Join(scopes, " ")
@@ -124,8 +129,8 @@ func generateHumanAuthorizationCodeToken(
 		grantID: decision.GrantID(), subject: decision.Subject(),
 		organizationID: decision.OrganizationID(), membershipID: decision.MembershipID(),
 		membershipRevision: decision.MembershipRevision(), clientID: decision.ClientID(),
-		scopes: scopes, resources: resources,
-	}, now)
+		scopes: scopes, resources: resources, authenticationTime: decision.AuthenticationTime(),
+	}, now, accessLifetime)
 	if err != nil {
 		return response{}, humanAuthorizationServerError()
 	}
@@ -135,7 +140,8 @@ func generateHumanAuthorizationCodeToken(
 		hasRefreshCapability,
 		decision.RefreshTokenExpiresAt(),
 		int64(now),
-		policy.authorityClockSkewSeconds,
+		policy.refreshExpirySkew(),
+		policy.refreshLifetimeSeconds,
 	)
 	if err != nil {
 		return response{}, humanAuthorizationServerError()
@@ -169,7 +175,7 @@ func generateHumanAuthorizationCodeToken(
 		IDToken:               idToken,
 		RefreshToken:          refreshToken,
 		RefreshTokenExpiresIn: refreshTokenExpiresIn,
-		ExpiresIn:             policy.accessTokenLifetimeSeconds,
+		ExpiresIn:             accessLifetime,
 		TokenType:             goidc.TokenTypeBearer,
 		Scopes:                scope,
 		Resources:             goidc.Resources(resources),
@@ -178,6 +184,7 @@ func generateHumanAuthorizationCodeToken(
 }
 
 type humanAccessTokenFacts struct {
+	authenticationTime int64
 	grantID            string
 	subject            string
 	organizationID     string
@@ -192,7 +199,7 @@ func issueHumanAccessToken(
 	ctx oidc.Context,
 	policy humanTokenIssuancePolicy,
 	facts humanAccessTokenFacts,
-	now int,
+	now, lifetime int,
 ) (string, error) {
 	accessTokenID, err := newHumanJWTID()
 	if err != nil {
@@ -207,10 +214,13 @@ func issueHumanAccessToken(
 		goidc.ClaimScope:             strings.Join(facts.scopes, " "),
 		goidc.ClaimGrantID:           facts.grantID,
 		goidc.ClaimIssuedAt:          now,
-		goidc.ClaimExpiry:            now + policy.accessTokenLifetimeSeconds,
+		goidc.ClaimExpiry:            now + lifetime,
 		humanOrganizationIDClaim:     facts.organizationID,
 		humanMembershipIDClaim:       facts.membershipID,
 		humanMembershipRevisionClaim: facts.membershipRevision,
+	}
+	if policy.refreshLifetimeSeconds > goidc.HumanDefaultRefreshLifetimeSeconds {
+		accessClaims[goidc.ClaimAuthTime] = facts.authenticationTime
 	}
 	accessToken, err := ctx.Sign(
 		accessClaims,
@@ -228,7 +238,7 @@ func humanRefreshTokenResponse(
 	present bool,
 	expiresAt int64,
 	now int64,
-	skew int64,
+	skew, lifetime int64,
 ) (string, int, error) {
 	if !validHumanAuthorityClockSkew(skew) {
 		return "", 0, errors.New("invalid strict human authority clock skew")
@@ -239,7 +249,7 @@ func humanRefreshTokenResponse(
 		}
 		return "", 0, nil
 	}
-	remaining, validLifetime := humanRefreshTokenRemainingLifetime(expiresAt, now, skew)
+	remaining, validLifetime := humanRefreshTokenRemainingLifetime(expiresAt, now, skew, lifetime)
 	if !capability.Valid() || !validLifetime {
 		return "", 0, errors.New("invalid strict human refresh expiry")
 	}
@@ -250,7 +260,7 @@ func humanRefreshTokenResponse(
 	return rendered, remaining, nil
 }
 
-func humanRefreshTokenRemainingLifetime(expiresAt, now, skew int64) (int, bool) {
+func humanRefreshTokenRemainingLifetime(expiresAt, now, skew, lifetime int64) (int, bool) {
 	if !validHumanAuthorityClockSkew(skew) || expiresAt < 1 || now < 1 {
 		return 0, false
 	}
@@ -264,10 +274,7 @@ func humanRefreshTokenRemainingLifetime(expiresAt, now, skew int64) (int, bool) 
 	// Successful decisions already bind the absolute family lifetime to their
 	// authority-owned creation time. Clamp only the wire-relative view so a
 	// database clock ahead of this process cannot inflate expires_in.
-	if remaining > humanTokenMaximumRefreshLife {
-		remaining = humanTokenMaximumRefreshLife
-	}
-	return int(remaining), true
+	return int(min(remaining, lifetime)), true
 }
 
 func isHumanAuthorizationCode(value string) bool {
@@ -509,6 +516,8 @@ func humanTokenPolicy(ctx oidc.Context, client *goidc.Client) (humanTokenIssuanc
 		authenticationContexts[index] = string(authenticationContext)
 	}
 	return humanTokenIssuancePolicy{
+		refreshPolicy:              ctx.HumanRefreshPolicy,
+		refreshLifetimeSeconds:     ctx.HumanRefreshPolicy.LifetimeSeconds(client.ID),
 		issuer:                     ctx.Issuer(),
 		accessTokenLifetimeSeconds: ctx.HumanAccessTokenLifetimeSecs,
 		idTokenLifetimeSeconds:     ctx.IDTokenLifetimeSecs,
@@ -672,7 +681,7 @@ func validRedeemedHumanAuthorization(
 	policy humanTokenIssuancePolicy,
 	now int64,
 ) bool {
-	if !decision.Valid() || decision.Outcome() != goidc.HumanCodeRedemptionOutcomeRedeemed {
+	if !decision.ValidForRefreshPolicy(policy.refreshPolicy) || decision.Outcome() != goidc.HumanCodeRedemptionOutcomeRedeemed {
 		return false
 	}
 	scopes := decision.Scopes()
@@ -683,7 +692,7 @@ func validRedeemedHumanAuthorization(
 		humanAuthorityTimestampNotExpired(
 			decision.RefreshTokenExpiresAt(),
 			now,
-			policy.authorityClockSkewSeconds,
+			policy.refreshExpirySkew(),
 		) ||
 		!hasOfflineAccess && !hasRefreshToken && !refreshToken.Valid() && decision.RefreshTokenExpiresAt() == 0
 	return client != nil && decision.ClientID() == client.ID && validRefreshFacts &&
@@ -698,6 +707,29 @@ func validRedeemedHumanAuthorization(
 			now,
 			policy.authorityClockSkewSeconds,
 		)
+}
+
+// Only the final access token of a full workspace grant may be shorter.
+func (policy humanTokenIssuancePolicy) accessLifetime(authenticatedAt, refreshExpiresAt, now int64) int {
+	if policy.refreshLifetimeSeconds <= goidc.HumanDefaultRefreshLifetimeSeconds || refreshExpiresAt == 0 {
+		return policy.accessTokenLifetimeSeconds
+	}
+	remaining := refreshExpiresAt - now
+	if remaining >= int64(policy.accessTokenLifetimeSeconds) {
+		return policy.accessTokenLifetimeSeconds
+	}
+	if remaining < 1 || refreshExpiresAt-authenticatedAt != policy.refreshLifetimeSeconds {
+		return 0
+	}
+	return int(remaining)
+}
+
+// Extended login has an absolute cutoff even within the ordinary authority clock tolerance.
+func (policy humanTokenIssuancePolicy) refreshExpirySkew() int64 {
+	if policy.refreshLifetimeSeconds > goidc.HumanDefaultRefreshLifetimeSeconds {
+		return 0
+	}
+	return policy.authorityClockSkewSeconds
 }
 
 func validHumanAuthorityDecisionWindow(createdAt, expiresAt, now, skew int64) bool {

@@ -117,7 +117,56 @@ func TestHumanRefreshDeliveryActivatedReplayRecoversAfterSigningFailure(t *testi
 
 	fixture := newHumanTokenFixture(t)
 	fixture.enableOfflineAccess()
-	decision := fixture.activatedDeliveryDecision(t)
+	assertHumanRefreshDeliveryReplay(t, fixture, fixture.activatedDeliveryDecision(t))
+}
+
+func TestHumanExtendedRefreshDeliveryRecoversAtDay29AndExpiresAtDay30(t *testing.T) {
+	t.Parallel()
+	fixture := newHumanTokenFixture(t)
+	fixture.enableOfflineAccess()
+	selected, err := goidc.NewHumanExtendedRefreshPolicy(fixture.client.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.ctx.HumanRefreshPolicy = selected
+	const day = 86_400
+	config := fixture.activationConfig()
+	config.RefreshPolicy = selected
+	config.AuthenticationTime = config.CreatedAt - 29*day
+	config.RefreshTokenExpiresAt = config.AuthenticationTime + 30*day
+	decision, err := goidc.NewHumanRefreshDeliveryActivateDecision(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := humanTokenPolicy(fixture.ctx, fixture.client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The authority clock can lag behind the signing process at the cutoff.
+	config.CreatedAt, config.ExpiresAt = config.RefreshTokenExpiresAt-1, config.RefreshTokenExpiresAt+59
+	lastDecision, err := goidc.NewHumanRefreshDeliveryActivateDecision(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy.authorityClockSkewSeconds = 30
+	if !validActivatedHumanRefreshDelivery(lastDecision, fixture.client, policy, config.RefreshTokenExpiresAt-1) ||
+		validActivatedHumanRefreshDelivery(lastDecision, fixture.client, policy, config.RefreshTokenExpiresAt) {
+		t.Fatal("activation ignored the absolute family cutoff")
+	}
+	fixture.ctx.HumanRefreshPolicy = goidc.HumanRefreshPolicy{}
+	otherPolicy, err := humanTokenPolicy(fixture.ctx, fixture.client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.ctx.HumanRefreshPolicy = selected
+	if validActivatedHumanRefreshDelivery(decision, fixture.client, otherPolicy, decision.CreatedAt()) {
+		t.Fatal("extended family accepted by the provider without its client opt-in")
+	}
+	assertHumanRefreshDeliveryReplay(t, fixture, decision)
+}
+
+func assertHumanRefreshDeliveryReplay(t *testing.T, fixture *humanTokenFixture, decision goidc.HumanRefreshDeliveryActivateDecision) {
+	t.Helper()
 	fixture.authority.activate = func(context.Context, goidc.HumanRefreshDeliveryActivateInput) (goidc.HumanRefreshDeliveryActivateDecision, error) {
 		if decision.RefreshTokenExpiresAt() == 0 {
 			t.Fatal("activated replay lost the absolute family deadline")
@@ -154,7 +203,10 @@ func TestHumanRefreshDeliveryActivatedReplayRecoversAfterSigningFailure(t *testi
 	if !ok || secondAccessToken == "" {
 		t.Fatal("activated replay did not issue an access token")
 	}
-	secondRefreshLifetime := payload["refresh_token_expires_in"]
+	secondRefreshLifetime := payload["refresh_token_expires_in"].(float64)
+	if secondRefreshLifetime > 86_400 || secondRefreshLifetime < 86_395 {
+		t.Fatalf("replay returned %v seconds for the remaining day", secondRefreshLifetime)
+	}
 
 	fixture.installDeliveryRequest(t, goidc.HumanRefreshDeliveryActivateRoute, "activate-second-exact-replay", false)
 	third := httptest.NewRecorder()
@@ -169,8 +221,44 @@ func TestHumanRefreshDeliveryActivatedReplayRecoversAfterSigningFailure(t *testi
 	}
 	if replayPayload["access_token"] == secondAccessToken ||
 		replayPayload["refresh_token"] != testHumanSuccessorRefreshToken ||
-		replayPayload["refresh_token_expires_in"].(float64) > secondRefreshLifetime.(float64) {
+		replayPayload["refresh_token_expires_in"].(float64) > secondRefreshLifetime {
 		t.Fatal("exact activation replay rotated or extended the refresh family")
+	}
+}
+
+func TestFinalWorkspaceAccessTokenEndsAtTheOriginalDeadline(t *testing.T) {
+	t.Parallel()
+	fixture := newHumanTokenFixture(t)
+	fixture.enableOfflineAccess()
+	policy, err := goidc.NewHumanExtendedRefreshPolicy(fixture.client.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.ctx.HumanRefreshPolicy = policy
+	config := fixture.activationConfig()
+	config.RefreshPolicy = policy
+	config.RefreshTokenExpiresAt = config.CreatedAt + 45
+	config.AuthenticationTime = config.RefreshTokenExpiresAt - policy.LifetimeSeconds(fixture.client.ID)
+	config.ExpiresAt = config.RefreshTokenExpiresAt
+	decision, err := goidc.NewHumanRefreshDeliveryActivateDecision(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.authority.activate = func(context.Context, goidc.HumanRefreshDeliveryActivateInput) (goidc.HumanRefreshDeliveryActivateDecision, error) {
+		return decision, nil
+	}
+	for _, assertion := range []string{"activate-terminal-grant", "recover-terminal-grant"} {
+		fixture.installDeliveryRequest(t, goidc.HumanRefreshDeliveryActivateRoute, assertion, false)
+		resp, activateErr := activateHumanRefreshDelivery(fixture.ctx)
+		if activateErr != nil || resp.ExpiresIn <= 0 || resp.ExpiresIn > 45 || resp.ExpiresIn != resp.RefreshTokenExpiresIn {
+			t.Fatalf("terminal response: access=%d refresh=%d err=%v", resp.ExpiresIn, resp.RefreshTokenExpiresIn, activateErr)
+		}
+		claims := parseHumanPS256Token(t, fixture.ctx, resp.AccessToken, "at+jwt")
+		expiresAt := integerClaim(t, claims, goidc.ClaimExpiry)
+		if expiresAt != config.RefreshTokenExpiresAt || int64(resp.ExpiresIn) != expiresAt-integerClaim(t, claims, goidc.ClaimIssuedAt) ||
+			integerClaim(t, claims, goidc.ClaimAuthTime) != config.AuthenticationTime {
+			t.Fatal("terminal access token lost its signed authentication time or deadline")
+		}
 	}
 }
 
@@ -435,8 +523,16 @@ func (fixture *humanTokenFixture) pendingDeliveryDecision(t *testing.T) goidc.Hu
 
 func (fixture *humanTokenFixture) activatedDeliveryDecision(t *testing.T) goidc.HumanRefreshDeliveryActivateDecision {
 	t.Helper()
+	decision, err := goidc.NewHumanRefreshDeliveryActivateDecision(fixture.activationConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return decision
+}
+
+func (fixture *humanTokenFixture) activationConfig() goidc.HumanRefreshDeliveryActivateDecisionConfig {
 	now := int64(timeutil.TimestampNow())
-	decision, err := goidc.NewHumanRefreshDeliveryActivateDecision(goidc.HumanRefreshDeliveryActivateDecisionConfig{
+	return goidc.HumanRefreshDeliveryActivateDecisionConfig{
 		Outcome:               goidc.HumanRefreshDeliveryActivateOutcomeActivated,
 		RefreshTokenExpiresAt: now + 86_400, GrantID: "human-grant-0001",
 		Subject: testHumanSubject, OrganizationID: testHumanOrganizationID,
@@ -446,11 +542,7 @@ func (fixture *humanTokenFixture) activatedDeliveryDecision(t *testing.T) goidc.
 		Resources:          []string{"https://api.example.invalid/accounting"},
 		AuthenticationTime: now - 5, AuthenticationContext: "urn:d0:acr:passkey",
 		AuthenticationMethods: []string{"passkey"}, CreatedAt: now, ExpiresAt: now + 60,
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
-	return decision
 }
 
 func (fixture *humanTokenFixture) abortedDeliveryDecision(t *testing.T) goidc.HumanRefreshDeliveryAbortDecision {

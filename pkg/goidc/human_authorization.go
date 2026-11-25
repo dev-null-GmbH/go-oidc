@@ -32,7 +32,6 @@ const (
 	maxHumanAuthorizationScopes      = 32
 	maxHumanAuthorizationResources   = 8
 	maxHumanAuthorizationMaxAge      = 24 * 60 * 60
-	maxHumanRefreshTokenLifetime     = 24 * 60 * 60
 )
 
 var (
@@ -993,6 +992,7 @@ func (input HumanCodeRedemptionInput) ClientAssertionAuthority() VerifiedClientA
 }
 
 type HumanCodeRedemptionDecisionConfig struct {
+	RefreshPolicy            HumanRefreshPolicy
 	Outcome                  HumanCodeRedemptionOutcome
 	RefreshToken             HumanRefreshToken
 	RefreshTokenExpiresAt    int64
@@ -1014,6 +1014,7 @@ type HumanCodeRedemptionDecisionConfig struct {
 }
 
 type humanCodeRedemptionDecisionState struct {
+	refreshPolicy            HumanRefreshPolicy
 	outcome                  HumanCodeRedemptionOutcome
 	refreshToken             HumanRefreshToken
 	refreshTokenExpiresAt    int64
@@ -1052,7 +1053,8 @@ const (
 
 func NewHumanCodeRedemptionDecision(config HumanCodeRedemptionDecisionConfig) (HumanCodeRedemptionDecision, error) {
 	decision := HumanCodeRedemptionDecision{state: &humanCodeRedemptionDecisionState{
-		outcome: config.Outcome, refreshToken: config.RefreshToken,
+		refreshPolicy: config.RefreshPolicy,
+		outcome:       config.Outcome, refreshToken: config.RefreshToken,
 		refreshTokenExpiresAt: config.RefreshTokenExpiresAt,
 		grantID:               config.GrantID, subject: config.Subject,
 		organizationID: config.OrganizationID, membershipID: config.MembershipID,
@@ -1085,7 +1087,7 @@ func (decision HumanCodeRedemptionDecision) Valid() bool {
 	}
 	hasOfflineAccess := slices.Contains(state.scopes, ScopeOfflineAccess.ID)
 	validRefreshToken := state.refreshToken.Valid() &&
-		validHumanRefreshTokenExpiry(state.createdAt, state.refreshTokenExpiresAt)
+		state.refreshPolicy.validExpiry(state.clientID, state.authenticationTime, state.createdAt, state.refreshTokenExpiresAt)
 	return state.outcome == HumanCodeRedemptionOutcomeRedeemed &&
 		humanAuthorizationHandlePattern.MatchString(state.grantID) &&
 		validHumanOpaqueParameter(state.subject) && validHumanClientID(state.clientID) &&
@@ -1103,6 +1105,14 @@ func (decision HumanCodeRedemptionDecision) Valid() bool {
 		(hasOfflineAccess && validRefreshToken ||
 			!hasOfflineAccess && !state.refreshToken.Valid() && state.refreshTokenExpiresAt == 0)
 }
+
+// ValidForRefreshPolicy verifies that the authority and the provider agree on the
+// authenticated client's refresh limit before issuance.
+func (decision HumanCodeRedemptionDecision) ValidForRefreshPolicy(policy HumanRefreshPolicy) bool {
+	return decision.Valid() && (!decision.state.refreshToken.Valid() ||
+		decision.state.refreshPolicy.LifetimeSeconds(decision.state.clientID) == policy.LifetimeSeconds(decision.state.clientID))
+}
+
 func (decision HumanCodeRedemptionDecision) Outcome() HumanCodeRedemptionOutcome {
 	if decision.state == nil {
 		return ""
@@ -1273,9 +1283,56 @@ func (input HumanRefreshRevocationInput) ClientAssertionAuthority() VerifiedClie
 	return input.state.clientAssertionAuthority
 }
 
-func validHumanRefreshTokenExpiry(createdAt, refreshTokenExpiresAt int64) bool {
-	return createdAt > 0 && refreshTokenExpiresAt > createdAt &&
-		refreshTokenExpiresAt-createdAt <= maxHumanRefreshTokenLifetime
+// HumanDefaultRefreshLifetimeSeconds bounds the ordinary strict confidential client refresh family.
+const HumanDefaultRefreshLifetimeSeconds = 24 * 60 * 60
+
+// HumanRefreshPolicy selects the strict confidential clients of one provider
+// whose families can last up to 30 days from verified authentication. Its zero
+// value preserves the 24-hour limit for all clients.
+type HumanRefreshPolicy struct {
+	extendedClientIDs []string
+}
+
+// NewHumanExtendedRefreshPolicy selects exact client IDs from the issuer's
+// trusted registration configuration. Duplicate IDs are rejected.
+func NewHumanExtendedRefreshPolicy(clientIDs ...string) (HumanRefreshPolicy, error) {
+	if len(clientIDs) == 0 {
+		return HumanRefreshPolicy{}, ErrInvalidHumanAuthorizationValue
+	}
+	ids := slices.Clone(clientIDs)
+	slices.Sort(ids)
+	for index, id := range ids {
+		if !validHumanClientID(id) || index > 0 && id == ids[index-1] {
+			return HumanRefreshPolicy{}, ErrInvalidHumanAuthorizationValue
+		}
+	}
+	return HumanRefreshPolicy{extendedClientIDs: ids}, nil
+}
+
+// Equal reports whether both policies select the same confidential clients.
+func (policy HumanRefreshPolicy) Equal(other HumanRefreshPolicy) bool {
+	return slices.Equal(policy.extendedClientIDs, other.extendedClientIDs)
+}
+
+// LifetimeSeconds bounds the refresh family for an authenticated client.
+func (policy HumanRefreshPolicy) LifetimeSeconds(clientID string) int64 {
+	if _, found := slices.BinarySearch(policy.extendedClientIDs, clientID); found {
+		return 30 * HumanDefaultRefreshLifetimeSeconds
+	}
+	return HumanDefaultRefreshLifetimeSeconds
+}
+
+func (policy HumanRefreshPolicy) validExpiry(clientID string, authenticatedAt, createdAt, expiresAt int64) bool {
+	if createdAt < 1 || expiresAt <= createdAt {
+		return false
+	}
+	lifetime := policy.LifetimeSeconds(clientID)
+	anchor := createdAt
+	if lifetime > HumanDefaultRefreshLifetimeSeconds {
+		// Rotation and exact delivery replay have a fresh decision time.
+		anchor = authenticatedAt
+	}
+	return anchor > 0 && anchor <= createdAt && expiresAt-anchor <= lifetime
 }
 
 func validHumanClientID(value string) bool {

@@ -170,6 +170,15 @@ func WithHumanConfidentialBFFBrowserBindingCookieName(name string) HumanConfiden
 	}
 }
 
+// WithHumanConfidentialBFFRefreshPolicy sets the provider-side limit independently
+// of the policy used by its human authorization authority.
+func WithHumanConfidentialBFFRefreshPolicy(policy goidc.HumanRefreshPolicy) HumanConfidentialBFFAuthorizationOption {
+	return func(p *Provider) error {
+		p.config.HumanRefreshPolicy = policy
+		return nil
+	}
+}
+
 // WithHumanConfidentialBFFAccessTokenLifetime fixes direct strict access-token
 // issuance to a bounded lifetime without calling mutable TokenOptions.
 func WithHumanConfidentialBFFAccessTokenLifetime(seconds int) HumanConfidentialBFFAuthorizationOption {

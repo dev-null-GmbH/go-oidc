@@ -407,6 +407,7 @@ const (
 // revalidated access-token decision. The config deliberately has no field that
 // can carry the raw successor or delivery receipt.
 type HumanRefreshDeliveryActivateDecisionConfig struct {
+	RefreshPolicy            HumanRefreshPolicy
 	Outcome                  HumanRefreshDeliveryActivateOutcome
 	RefreshTokenExpiresAt    int64
 	GrantID                  string
@@ -426,6 +427,7 @@ type HumanRefreshDeliveryActivateDecisionConfig struct {
 }
 
 type humanRefreshDeliveryActivateDecisionState struct {
+	refreshPolicy            HumanRefreshPolicy
 	outcome                  HumanRefreshDeliveryActivateOutcome
 	refreshTokenExpiresAt    int64
 	grantID                  string
@@ -457,6 +459,7 @@ func NewHumanRefreshDeliveryActivateDecision(
 	config HumanRefreshDeliveryActivateDecisionConfig,
 ) (HumanRefreshDeliveryActivateDecision, error) {
 	decision := HumanRefreshDeliveryActivateDecision{state: &humanRefreshDeliveryActivateDecisionState{
+		refreshPolicy:            config.RefreshPolicy,
 		outcome:                  config.Outcome,
 		refreshTokenExpiresAt:    config.RefreshTokenExpiresAt,
 		grantID:                  config.GrantID,
@@ -494,7 +497,7 @@ func (decision HumanRefreshDeliveryActivateDecision) Valid() bool {
 			state.createdAt == 0 && state.expiresAt == 0
 	}
 	return state.outcome == HumanRefreshDeliveryActivateOutcomeActivated &&
-		validHumanRefreshTokenExpiry(state.createdAt, state.refreshTokenExpiresAt) &&
+		state.refreshPolicy.validExpiry(state.clientID, state.authenticationTime, state.createdAt, state.refreshTokenExpiresAt) &&
 		humanAuthorizationHandlePattern.MatchString(state.grantID) && validHumanOpaqueParameter(state.subject) &&
 		humanAuthorizationHandlePattern.MatchString(state.organizationID) &&
 		humanAuthorizationHandlePattern.MatchString(state.membershipID) && state.membershipRevision > 0 &&
@@ -506,6 +509,13 @@ func (decision HumanRefreshDeliveryActivateDecision) Valid() bool {
 		humanAuthorizationAssurancePattern.MatchString(state.authenticationContext) &&
 		validHumanStringSet(state.authenticationMethods, 8, humanAuthorizationMethodPattern.MatchString) &&
 		state.createdAt > 0 && state.expiresAt > state.createdAt && state.expiresAt-state.createdAt <= 600
+}
+
+// ValidForRefreshPolicy verifies that the authority and the provider agree on the
+// authenticated client's refresh limit before issuance.
+func (decision HumanRefreshDeliveryActivateDecision) ValidForRefreshPolicy(policy HumanRefreshPolicy) bool {
+	return decision.Valid() && decision.state.refreshPolicy.LifetimeSeconds(decision.state.clientID) ==
+		policy.LifetimeSeconds(decision.state.clientID)
 }
 
 func (decision HumanRefreshDeliveryActivateDecision) Outcome() HumanRefreshDeliveryActivateOutcome {
