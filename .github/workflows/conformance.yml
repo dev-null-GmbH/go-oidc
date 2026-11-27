@@ -150,7 +150,8 @@ jobs:
           name: conformance-suite-${{ github.run_id }}-${{ github.run_attempt }}
           path: conformance-suite/target/fapi-test-suite.jar
           if-no-files-found: error
-          retention-days: 1
+          # Keep the exact JAR through the initial 24h runner queue and one retry.
+          retention-days: 3
 
   run-tests:
     name: ${{ matrix.profile }}

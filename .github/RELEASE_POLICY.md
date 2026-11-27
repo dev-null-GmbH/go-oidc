@@ -35,6 +35,14 @@ Every release records:
 - retained machine-readable CI, signed-change, vulnerability, CodeQL, dependency,
   and OpenID conformance evidence bound to the release commit.
 
+The weekly security workflow and its manual trigger recheck the supported
+`v0.25.1-d0.17` distribution. The workflow verifies all ten release assets by
+the pinned checksum manifest, the Go proxy module checksums and revision, and
+then scans the extracted source, nested VCI module and conformance Python lock.
+It retains native vulnerability reports and resolution evidence separately from
+the unchanged governed release gates. A finding or missing verified input goes
+to the fork maintainer to reconcile with importers using that exact version.
+
 ## Release requirements
 
 GitHub release immutability must be enabled **before the first release is

@@ -29,7 +29,7 @@ jobs:
           persist-credentials: false
 
       - name: Review dependency changes
-        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
         with:
           fail-on-severity: high
           retry-on-snapshot-warnings: true
@@ -51,7 +51,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: true
@@ -63,7 +63,7 @@ jobs:
           tool_dir="$RUNNER_TEMP/govulncheck-bin"
           mkdir -p "$tool_dir"
           GOBIN="$tool_dir" go install \
-            golang.org/x/vuln/cmd/govulncheck@v1.9.0
+            golang.org/x/vuln/cmd/govulncheck@v1.10.0
           "$tool_dir/govulncheck" ./...
 
   vci-govulncheck:
@@ -85,7 +85,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: examples/vci/go.mod
           cache-dependency-path: examples/vci/go.sum
@@ -98,5 +98,42 @@ jobs:
           tool_dir="$RUNNER_TEMP/govulncheck-bin"
           mkdir -p "$tool_dir"
           GOBIN="$tool_dir" go install \
-            golang.org/x/vuln/cmd/govulncheck@v1.9.0
+            golang.org/x/vuln/cmd/govulncheck@v1.10.0
           "$tool_dir/govulncheck" ./...
+
+  supported-distribution:
+    name: Rescan supported fork distribution
+    if: >-
+      github.repository == 'dev-null-GmbH/go-oidc' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: d0-trusted
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: 1.27.4
+          cache: false
+      - name: Install pinned advisory tools
+        run: |
+          tools="$RUNNER_TEMP/release-scanners"
+          mkdir -p "$tools"
+          GOBIN="$tools" go install golang.org/x/vuln/cmd/govulncheck@v1.10.0
+          curl -fsSL https://github.com/google/osv-scanner/releases/download/v2.7.1/osv-scanner_linux_amd64 -o "$tools/osv-scanner"
+          printf 'fb7dab19a8bd9bbe5c3189f09d4b7ee1820c9553a23bac202648a56efd2f6ee8  %s\n' "$tools/osv-scanner" | sha256sum --check --strict
+          chmod 0755 "$tools/osv-scanner"
+          printf '%s\n' "$tools" >> "$GITHUB_PATH"
+      - name: Verify and rescan exact public release bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/rescan-release.sh "$RUNNER_TEMP/release-evidence"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: fork-release-security-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-evidence/
+          retention-days: 30
+          if-no-files-found: error
