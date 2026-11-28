@@ -7,13 +7,13 @@ source_root="${RELEASE_SOURCE_ROOT:-$tool_root}"
 source_root="$(cd "$source_root" && pwd)"
 cd "$source_root"
 
-readonly expected_version="release-v5.3.4"
-readonly expected_commit="23353b36957d6466010de767c812d2c91ed37638"
+readonly expected_version="release-v5.3.5"
+readonly expected_commit="246b2c14b8562012b02d0ac462d667fe49e1a937"
 readonly expected_python="3.14.10"
 readonly expected_maven_image="maven:3.9.16-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320"
 readonly expected_mongo_image="mongo:8.3.13@sha256:e16e606f792ea89d2b4907b54e5e31eb86a7a23e27231dce3a982cc8f2d73cd2"
-readonly expected_nginx_image="nginx:1.31.8@sha256:165ddde8751e75a1c907d24ef10d9f6deb08b57e0fe56caf67512486aff76d82"
-readonly expected_temurin_image="eclipse-temurin:21@sha256:ebfbb18d11ff163ee83b21258acf12248af48d22a0fdfdc68fa1a1516c05976a"
+readonly expected_nginx_image="nginx:1.31.9@sha256:84f7876d21d154885f99554d7ae325d8c2213f9169726ea7ab60642f2573a787"
+readonly expected_temurin_image="eclipse-temurin:21@sha256:8ad118b146aa92da815b576441acd6b42b38236797ad0b6edc8c200b85bb0734"
 readonly expected_cache_schema="v3-dependencies-only"
 
 make_value() {

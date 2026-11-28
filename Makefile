@@ -1,8 +1,8 @@
-CS_VERSION = release-v5.3.4
-CS_COMMIT = 23353b36957d6466010de767c812d2c91ed37638
+CS_VERSION = release-v5.3.5
+CS_COMMIT = 246b2c14b8562012b02d0ac462d667fe49e1a937
 CS_MAVEN_IMAGE = maven:3.9.16-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320
 GOLANGCI_LINT_VERSION = v2.15.0
-PKGSITE_VERSION = v0.6.0
+PKGSITE_VERSION = v0.7.0
 
 setup-dev:
 	@make setup-cs
@@ -145,6 +145,7 @@ cs-fapi2-sp-op-private-key-mtls-tests:
 cs-fapi2-sp-op-private-key-dpop-tests:
 	@conformance-suite/venv/bin/python3 conformance-suite/scripts/run-test-plan.py \
 		fapi2-security-profile-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][openid=openid_connect][fapi_profile=plain_fapi] ./examples/fapi2_sp_op_private_key_dpop/config.json \
+		--expected-skips-file ./examples/fapi2_sp_op_private_key_dpop/skips.json \
 		--export-dir ./examples/fapi2_sp_op_private_key_dpop \
 		--verbose
 

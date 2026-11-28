@@ -15,8 +15,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CS_VERSION: release-v5.3.4
-  CS_COMMIT: 23353b36957d6466010de767c812d2c91ed37638
+  CS_VERSION: release-v5.3.5
+  CS_COMMIT: 246b2c14b8562012b02d0ac462d667fe49e1a937
   CS_CACHE_SCHEMA: v3-dependencies-only
   CS_MAVEN_IMAGE: maven:3.9.16-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320
   PYTHON_VERSION: "3.14.10"
@@ -40,7 +40,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: true
@@ -150,7 +150,7 @@ jobs:
           name: conformance-suite-${{ github.run_id }}-${{ github.run_attempt }}
           path: conformance-suite/target/fapi-test-suite.jar
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
   run-tests:
     name: ${{ matrix.profile }}
@@ -164,6 +164,7 @@ jobs:
 
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         profile:
           - oidc
@@ -191,7 +192,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: true

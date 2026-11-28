@@ -10,18 +10,18 @@ if [[ "${1:-}" == "--self-test" ]]; then
 fi
 suite_dir="${1:-$repo_root/conformance-suite}"
 
-readonly expected_commit="23353b36957d6466010de767c812d2c91ed37638"
-readonly expected_runner_sha256="6043f8fb9d64dcd30235540cae1f32eb4e94618d1fc5408f1e8ae626d6553ad2"
-readonly pinned_runner_sha256="d77ece5ec94b7c24792cb23e6a9e340aa613fa0f7d3abe3a8bff8711195654f0"
+readonly expected_commit="246b2c14b8562012b02d0ac462d667fe49e1a937"
+readonly expected_runner_sha256="30bffed4f9796701eeb0d78a853010a9fdc16aad7e10a054a14f12bf19b4ef25"
+readonly pinned_runner_sha256="8c4b995913a0f4f4e4ca911913a854ef76dc0c459b66bd001b0f7a5bdc0b7d9c"
 readonly expected_requirements_sha256="05176cbcaf1a221a8943f8534d14d70c45237b3f28d055f3a55d0633d63a3085"
-readonly expected_nginx_dockerfile_sha256="25c8f9a1cff410eaccfe98c460e96adb5e772d0cf1f20f9d1bb02815e7ed9f20"
+readonly expected_nginx_dockerfile_sha256="900b7df9c7b3903c2641f7905d623bb5a321c6a1f4e538a175f7294affd8d7c7"
 readonly expected_server_dockerfile_sha256="bf8149a12accc809d2d55f6faf67859dbb59340076bb5819efd21343d5d53035"
-readonly pinned_nginx_dockerfile_sha256="740378c6c5e541468a5a522da621ed900f10d2c223245b0a4bf73239d7764528"
-readonly pinned_server_dockerfile_sha256="0c17eb4bd480bf785b2228785c36cd6cf900e8b2d602dbd127c0f0c30b98ff06"
+readonly pinned_nginx_dockerfile_sha256="80d5105bf705c4eed54f82e15ce0ea0b1450b537222c52acef2cb8db4c34c3c2"
+readonly pinned_server_dockerfile_sha256="b9b61c1329cb4a4ad9b3eef6f2631ccadd3e51f9547d3357e55932c406068f3e"
 readonly expected_nginx_config_sha256="a0d5fd58f15fb1cd7bae4103ee9b637e7c64a66fee18f374e6062a75e0b2acdd"
 readonly pinned_nginx_config_sha256="6a135eccd81000b2d1fb21d1e6d57688a163624c00e1f71b713835fe7a79e9d6"
-readonly nginx_image="nginx:1.31.8@sha256:165ddde8751e75a1c907d24ef10d9f6deb08b57e0fe56caf67512486aff76d82"
-readonly temurin_image="eclipse-temurin:21@sha256:ebfbb18d11ff163ee83b21258acf12248af48d22a0fdfdc68fa1a1516c05976a"
+readonly nginx_image="nginx:1.31.9@sha256:84f7876d21d154885f99554d7ae325d8c2213f9169726ea7ab60642f2573a787"
+readonly temurin_image="eclipse-temurin:21@sha256:8ad118b146aa92da815b576441acd6b42b38236797ad0b6edc8c200b85bb0734"
 
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -131,7 +131,9 @@ if "$self_test"; then
   git -C "$suite_dir" show HEAD:scripts/run-test-plan.py > "$test_runner"
   prepare_terminal_log_read "$temporary_root"
   prepare_terminal_log_read "$temporary_root"
-  python3 -B "$repo_root/scripts/test-conformance-terminal-log.py" "$test_runner" "$repo_root/examples/oidc/failures.json"
+  python3 -B "$repo_root/scripts/test-conformance-terminal-log.py" "$test_runner" \
+    "$repo_root/examples/oidc/failures.json" \
+    "$repo_root/examples/fapi2_sp_op_private_key_dpop/skips.json"
   printf '\n# drift\n' >> "$test_runner"
   drift_sha256="$(sha256_file "$test_runner")"
   if (prepare_terminal_log_read "$temporary_root") >/dev/null 2>&1; then
@@ -155,7 +157,7 @@ nginx_dockerfile_sha256="$(sha256_file "$nginx_dockerfile")"
 server_dockerfile_sha256="$(sha256_file "$server_dockerfile")"
 if [[ "$nginx_dockerfile_sha256" == "$expected_nginx_dockerfile_sha256" && \
       "$server_dockerfile_sha256" == "$expected_server_dockerfile_sha256" ]]; then
-  replace_from "$nginx_dockerfile" "nginx:1.27.3" "$nginx_image"
+  replace_from "$nginx_dockerfile" "nginx:1.31.9" "$nginx_image"
   replace_from "$server_dockerfile" "eclipse-temurin:21" "$temurin_image"
 elif [[ "$nginx_dockerfile_sha256" != "$pinned_nginx_dockerfile_sha256" || \
         "$server_dockerfile_sha256" != "$pinned_server_dockerfile_sha256" ]]; then
