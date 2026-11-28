@@ -1,0 +1,17 @@
+[
+  {
+    "test-name": "fapi2-security-profile-final-ensure-holder-of-key-required-at-non-alias-token-endpoint",
+    "configuration-filename": "./examples/fapi2_sp_op_private_key_dpop/config.json",
+    "variant": {
+      "client_auth_type": "private_key_jwt",
+      "sender_constrain": "dpop",
+      "authorization_request_type": "simple",
+      "openid": "openid_connect",
+      "fapi_request_method": "unsigned",
+      "grant_management": "disabled",
+      "fapi_profile": "plain_fapi",
+      "fapi_response_mode": "plain_response"
+    },
+    "skip-message": "The test was skipped: The server does not publish a token endpoint in mtls_endpoint_aliases that differs from token_endpoint, so there is no separate token endpoint to test."
+  }
+]

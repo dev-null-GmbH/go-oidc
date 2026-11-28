@@ -1,6 +1,7 @@
 --- a/scripts/run-test-plan.py
 +++ b/scripts/run-test-plan.py
-@@ -249,0 +250,15 @@
+@@ -248,0 +249,51 @@
++
 +
 +class IncompleteTestLog(ValueError):
 +    pass
@@ -16,7 +17,7 @@
 +            if block_id in starts:
 +                raise ValueError('Duplicate conformance log block start')
 +            starts[block_id] = entry
-@@ -250,0 +266,36 @@
++
 +    ordered = []
 +    emitted = set()
 +    for entry in logs:
@@ -51,8 +52,13 @@
 +                except IncompleteTestLog:
 +                    pass
 +        raise
-+
-+
 @@ -427 +478 @@
 -            module_info['logs'] = await conformance.get_test_log(module_id)
 +            module_info['logs'] = await get_terminal_test_log(conformance, module_id)
+@@ -832 +883,5 @@
+-        if test_result == 'SKIPPED' or test_result == 'FAILED':
++        skip_events = [event for event in logs if event.get('result') == 'SKIPPED']
++        if (test_result == 'SKIPPED' and len(skip_events) == 1
++                and skip_events[0].get('src') == test_name
++                and expected_skip_obj.get('skip-message')
++                and skip_events[0].get('msg') == expected_skip_obj['skip-message']):

@@ -10,7 +10,41 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 
-async def main(runner, failures):
+def check_expected_skip(analyze, expected_skips):
+    entry, = json.loads(expected_skips.read_bytes())
+    module = entry["test-name"]
+    variant = entry["variant"]
+    config = entry["configuration-filename"]
+    skip = {"result": "SKIPPED", "src": module, "msg": entry["skip-message"]}
+
+    def counters(status, logs, tested_variant=variant, tested_config=config):
+        counts = dict.fromkeys(("UNEXPECTED_FAILURES", "UNEXPECTED_SKIPS", "EXPECTED_SKIPS_NOT_HAPPEN"), 0)
+        result = analyze("exact-module", module, tested_variant, status, {"config_file": tested_config},
+                         logs, [], [entry.copy()], counts)
+        return result["expected_skip"], counts
+
+    assert counters("SKIPPED", [skip]) == (True, {
+        "UNEXPECTED_FAILURES": 0, "UNEXPECTED_SKIPS": 0, "EXPECTED_SKIPS_NOT_HAPPEN": 0,
+    })
+    for logs in ([], [{**skip, "msg": "wrong reason"}], [{**skip, "src": "other-module"}], [skip, skip]):
+        expected, counts = counters("SKIPPED", logs)
+        assert not expected and counts["UNEXPECTED_SKIPS"] == counts["EXPECTED_SKIPS_NOT_HAPPEN"] == 1
+    for status in ("FAILED", "PASSED"):
+        expected, counts = counters(status, [skip])
+        assert not expected and counts["EXPECTED_SKIPS_NOT_HAPPEN"] == 1
+    assert counters("SKIPPED", [skip, {"result": "FAILURE", "src": "RequiredCondition"}])[1][
+        "UNEXPECTED_FAILURES"
+    ] == 1
+    assert counters("SKIPPED", [skip], tested_variant={**variant, "client_auth_type": "mtls"})[1][
+        "UNEXPECTED_SKIPS"
+    ] == 1
+    assert counters("SKIPPED", [skip], tested_variant={**variant, "sender_constrain": "mtls"})[1][
+        "UNEXPECTED_SKIPS"
+    ] == 1
+    assert counters("SKIPPED", [skip], tested_config="./examples/other/config.json")[1]["UNEXPECTED_SKIPS"] == 1
+
+
+async def main(runner, failures, expected_skips):
     tree = ast.parse(runner.read_bytes())
     names = {"IncompleteTestLog", "order_test_log", "get_terminal_test_log", "analyze_result_logs"}
     definitions = [node for node in tree.body if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
@@ -21,6 +55,7 @@ async def main(runner, failures):
     exec(compile(ast.Module(body=definitions, type_ignores=[]), str(runner), "exec"), fixture)
     read = fixture["get_terminal_test_log"]
     analyze = fixture["analyze_result_logs"]
+    check_expected_skip(analyze, expected_skips)
     module, module_id = "oidcc-server-rotate-keys", "synthetic-exact-module"
 
     # The native log endpoint can return a result before its block start at
@@ -88,7 +123,8 @@ async def main(runner, failures):
     else:
         raise AssertionError("incomplete terminal log passed its timeout")
     print("Conformance log order preserves every condition and rejects incomplete or invalid block order")
+    print("The pinned FAPI DPoP skip requires its exact profile, terminal status and suite reason")
 
 
 if __name__ == "__main__":
-    asyncio.run(main(Path(sys.argv[1]), Path(sys.argv[2])))
+    asyncio.run(main(Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])))

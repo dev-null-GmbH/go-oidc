@@ -12,7 +12,7 @@ suite_dir="${1:-$repo_root/conformance-suite}"
 
 readonly expected_commit="246b2c14b8562012b02d0ac462d667fe49e1a937"
 readonly expected_runner_sha256="30bffed4f9796701eeb0d78a853010a9fdc16aad7e10a054a14f12bf19b4ef25"
-readonly pinned_runner_sha256="bca44cd654292eaa45dadbe42e3e6733da874f5f117165924d45ce566f7235b3"
+readonly pinned_runner_sha256="8c4b995913a0f4f4e4ca911913a854ef76dc0c459b66bd001b0f7a5bdc0b7d9c"
 readonly expected_requirements_sha256="05176cbcaf1a221a8943f8534d14d70c45237b3f28d055f3a55d0633d63a3085"
 readonly expected_nginx_dockerfile_sha256="900b7df9c7b3903c2641f7905d623bb5a321c6a1f4e538a175f7294affd8d7c7"
 readonly expected_server_dockerfile_sha256="bf8149a12accc809d2d55f6faf67859dbb59340076bb5819efd21343d5d53035"
@@ -131,7 +131,9 @@ if "$self_test"; then
   git -C "$suite_dir" show HEAD:scripts/run-test-plan.py > "$test_runner"
   prepare_terminal_log_read "$temporary_root"
   prepare_terminal_log_read "$temporary_root"
-  python3 -B "$repo_root/scripts/test-conformance-terminal-log.py" "$test_runner" "$repo_root/examples/oidc/failures.json"
+  python3 -B "$repo_root/scripts/test-conformance-terminal-log.py" "$test_runner" \
+    "$repo_root/examples/oidc/failures.json" \
+    "$repo_root/examples/fapi2_sp_op_private_key_dpop/skips.json"
   printf '\n# drift\n' >> "$test_runner"
   drift_sha256="$(sha256_file "$test_runner")"
   if (prepare_terminal_log_read "$temporary_root") >/dev/null 2>&1; then
